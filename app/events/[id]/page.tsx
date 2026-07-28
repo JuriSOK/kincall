@@ -3,18 +3,77 @@ import { notFound } from "next/navigation";
 import { isFamilyStructuredResult } from "@/lib/calle/schemas";
 import type { FamilyStructuredResult } from "@/lib/calle/schemas";
 import { getRepository } from "@/lib/database/store";
-import type { CallEventRecord, EventRecord } from "@/lib/database/types";
+import type { CallEventRecord, EventRecord, TrustedContact } from "@/lib/database/types";
 import { EventPollIndicator } from "./event-poll-indicator";
 
-function findConfirmation(callEvents: CallEventRecord[]): FamilyStructuredResult | null {
-  for (const callEvent of callEvents) {
-    if (callEvent.agentType !== "family") continue;
-    if (!isFamilyStructuredResult(callEvent.structuredResult)) continue;
-    if (callEvent.structuredResult.can_intervene) {
-      return callEvent.structuredResult;
-    }
+export interface Confirmation {
+  contact: TrustedContact | undefined;
+  result: FamilyStructuredResult;
+}
+
+// Finds the family call that actually confirmed an intervention, if any.
+//
+// Bug fixed here: `can_intervene` moved from boolean to a "yes"/"no"/"unknown"
+// enum in DEC-005, but this check was left as `if (callEvent.structuredResult
+// .can_intervene)` — a truthiness check on a string. "no" and "unknown" are
+// both non-empty strings, so that check was true for EVERY family result,
+// and `.find`/iteration order made it return whichever contact was called
+// FIRST (Julie, who didn't answer) rather than whoever actually confirmed
+// (Marc). Fixed by comparing to the literal "yes".
+//
+// The contact is resolved exclusively via `callEvent.contactId` — the id
+// KinCall itself selected when it placed that call — never via
+// `structuredResult.contact_id`, which is model-returned and untrusted
+// (same rule engine.ts's own cascade already enforces per DEC-005).
+export function findConfirmation(
+  callEvents: CallEventRecord[],
+  contacts: TrustedContact[]
+): Confirmation | null {
+  const confirmedCall = callEvents.find(
+    (callEvent) =>
+      callEvent.agentType === "family" &&
+      isFamilyStructuredResult(callEvent.structuredResult) &&
+      callEvent.structuredResult.can_intervene === "yes"
+  );
+  if (!confirmedCall || !isFamilyStructuredResult(confirmedCall.structuredResult)) {
+    return null;
   }
-  return null;
+
+  return {
+    contact: contacts.find((candidate) => candidate.id === confirmedCall.contactId),
+    result: confirmedCall.structuredResult,
+  };
+}
+
+// Narrates the cascade that led to a confirmed intervention: who (if anyone)
+// was tried and didn't help before the contact who did. Built from the family
+// CallEventRecords in call order, not from the confirmed result's own text.
+export function describeFamilyCascade(
+  callEvents: CallEventRecord[],
+  contacts: TrustedContact[],
+  confirmation: Confirmation
+): string {
+  const confirmedName = confirmation.contact?.firstName ?? "a trusted contact";
+
+  const priorAttempts = callEvents.filter(
+    (callEvent) =>
+      callEvent.agentType === "family" &&
+      isFamilyStructuredResult(callEvent.structuredResult) &&
+      callEvent.structuredResult.can_intervene !== "yes"
+  );
+
+  if (priorAttempts.length === 0) {
+    return `KinCall contacted ${confirmedName}, who confirmed they would help.`;
+  }
+
+  const clauses = priorAttempts.map((callEvent) => {
+    const contact = contacts.find((candidate) => candidate.id === callEvent.contactId);
+    const name = contact?.firstName ?? "a trusted contact";
+    const result = callEvent.structuredResult as FamilyStructuredResult;
+    return result.answered === "yes" ? `${name} declined` : `${name} did not answer`;
+  });
+
+  return `${clauses.join(", ")}, so KinCall contacted ${confirmedName}.`;
 }
 
 // Keyed on status first, not decision: before a decision exists (status is
@@ -48,6 +107,9 @@ export function describeAction(event: EventRecord): string {
         : "Human review is required.";
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
+      // The specific "Julie did not answer, so KinCall contacted Marc"
+      // narrative is filled in by the caller when a confirmation exists
+      // (describeAction doesn't have the call-event history to build it).
       return event.decision === "CONTACT_TRUSTED_PERSON"
         ? "KinCall contacted the trusted circle."
         : "KinCall reviewed the check-in and found nothing unusual.";
@@ -83,8 +145,8 @@ export function describeOwnership(event: EventRecord): string {
     case "CASE_CLOSED":
       // In practice CASE_CLOSED with CONTACT_TRUSTED_PERSON always has a
       // confirmation record by the time this state is reached, so the page
-      // renders confirmation.summary instead of calling this function at
-      // all — this branch only guards against calling it out of that context.
+      // renders confirmation.result.summary instead of calling this function
+      // at all — this branch only guards against calling it out of that context.
       return event.decision === "CONTACT_TRUSTED_PERSON"
         ? "A trusted contact confirmed they are taking care of it."
         : "No intervention required.";
@@ -107,8 +169,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const person = repository.getPerson(event.personId);
   const timeline = repository.listTimeline(event.id);
   const callEvents = repository.listCallEvents(event.id);
-  const confirmation = findConfirmation(callEvents);
+  const contacts = repository.getTrustedContacts(event.personId);
+  const confirmation = findConfirmation(callEvents, contacts);
   const companionCallEvent = callEvents.find((call) => call.agentType === "companion");
+
+  const actionDescription = confirmation
+    ? describeFamilyCascade(callEvents, contacts, confirmation)
+    : describeAction(event);
 
   return (
     <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">
@@ -149,12 +216,12 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </div>
           <div>
             <p className="font-medium">What did KinCall do?</p>
-            <p className="opacity-80">{describeAction(event)}</p>
+            <p className="opacity-80">{actionDescription}</p>
           </div>
           <div>
             <p className="font-medium">Who is taking care of it?</p>
             <p className="opacity-80">
-              {confirmation ? confirmation.summary : describeOwnership(event)}
+              {confirmation ? confirmation.result.summary : describeOwnership(event)}
             </p>
           </div>
         </div>

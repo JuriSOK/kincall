@@ -78,7 +78,7 @@ describe("POST /api/events/[id]/poll", () => {
       "No answer",
       "Calling Marc",
       "Marc answered",
-      "Visit confirmed at 17:30",
+      "Visit confirmed — 17:30",
       "Case closed",
     ]);
   });

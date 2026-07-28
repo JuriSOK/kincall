@@ -137,7 +137,7 @@ describe("startDemoEvent — Marie / Julie / Marc end-to-end", () => {
       "No answer",
       "Calling Marc",
       "Marc answered",
-      "Visit confirmed at 17:30",
+      "Visit confirmed — 17:30",
       "Case closed",
     ]);
 
@@ -150,6 +150,30 @@ describe("startDemoEvent — Marie / Julie / Marc end-to-end", () => {
         `${event.runId}_contact_marc_attempt_1`,
       ])
     );
+  });
+});
+
+describe("confirmed-visit timeline wording", () => {
+  it("uses neutral punctuation instead of 'at', which can collide with a preposition already in the free text", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.familyResultsByContact = {
+      contact_julie: familyResult("contact_julie", {
+        answered: "yes",
+        can_intervene: "yes",
+        intervention_type: "visit",
+        // Free text is never parsed or translated — "at vers 18h00" would
+        // read wrong if the code still hardcoded the word "at".
+        estimated_time: "vers 18h00",
+      }),
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    expect(messages).toContain("Visit confirmed — vers 18h00");
+    expect(messages.some((message) => message.includes("at vers"))).toBe(false);
   });
 });
 
@@ -355,7 +379,7 @@ describe("family cascade — live-shaped async behaviour", () => {
       "No answer",
       "Calling Marc",
       "Marc answered",
-      "Visit confirmed at 17:30",
+      "Visit confirmed — 17:30",
       "Case closed",
     ]);
   });

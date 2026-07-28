@@ -424,8 +424,13 @@ export async function processFamilyResult(
 
   if (outcome.kind === "confirmed") {
     current = applyTransition(deps, current, "FAMILY_CONFIRMED", `${contact.firstName} answered`);
+    // Neutral punctuation, not "at": estimated_time is CALL-E's free-text
+    // wording verbatim (e.g. "vers 18h00") and is never parsed or translated,
+    // so a fixed preposition like "at" can collide with one already inside it
+    // ("at vers 18h00"). An em dash reads correctly regardless of language
+    // or phrasing.
     const detail = structuredResult.estimated_time
-      ? `Visit confirmed at ${structuredResult.estimated_time}`
+      ? `Visit confirmed — ${structuredResult.estimated_time}`
       : "Intervention confirmed";
     deps.repository.appendTimelineEntry(current.id, current.status, detail);
     current = applyTransition(deps, current, "CASE_CLOSED_EVENT", "Case closed");
