@@ -20,12 +20,32 @@ export const RESERVED_FICTION_PHONES = {
   nicole: "+33639980004",
 } as const;
 
-const RESERVED_FICTION_PHONE_SET: ReadonlySet<string> = new Set(
-  Object.values(RESERVED_FICTION_PHONES)
-);
+// The whole ARCEP block, not just the four seeded constants: a profile created
+// through the UI is minted a number from this range, and it has to be
+// recognised as undialable too (DEC-006). +33 6 39 98 00 00 – +33 6 39 98 99 99.
+const RESERVED_FICTION_PATTERN = /^\+3363998\d{4}$/;
 
 export function isReservedFictionPhone(phone: string): boolean {
-  return RESERVED_FICTION_PHONE_SET.has(phone.trim());
+  return RESERVED_FICTION_PATTERN.test(phone.trim());
+}
+
+// The stored phone for a person or contact created through the interface.
+//
+// DEC-006: a real number is never written to the database — it lives only in
+// KINCALL_*_PHONE and is overlaid on read. Every stored number is therefore
+// reserved-for-fiction, which LiveCalleAdapter refuses to dial, so an
+// unconfigured profile is visible and editable but can never place a live call.
+//
+// Deterministic in the entity id, so the same profile always shows the same
+// number. Two entities may collide, which is harmless: the fake adapter ignores
+// phone entirely and the live adapter refuses every number in this range.
+// Starts at 0100 to stay clear of the four seeded demo numbers.
+export function mintFictionPhone(entityId: string): string {
+  let hash = 0;
+  for (let index = 0; index < entityId.length; index += 1) {
+    hash = (hash * 31 + entityId.charCodeAt(index)) >>> 0;
+  }
+  return `+3363998${String(100 + (hash % 9900)).padStart(4, "0")}`;
 }
 
 // Safety rule (CLAUDE.md): mask telephone numbers in anything that can be

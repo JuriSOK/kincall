@@ -1,6 +1,6 @@
 import { buildCompanionTask, companionResultSchema } from "@/prompts/companion-agent";
 import { buildFamilyResultSchema, buildFamilyTask } from "@/prompts/family-agent";
-import { CONTACT_PHONE_ENV_VARS } from "../database/seed";
+import { phoneEnvVarFor } from "../database/seed";
 import { describeUnusablePhone } from "../phone";
 import type {
   AgentType,
@@ -181,7 +181,7 @@ export class LiveCalleAdapter implements CalleAdapter {
     firstName: string,
     agent: "Companion" | "Family"
   ): void {
-    const problem = describeUnusablePhone(phone, CONTACT_PHONE_ENV_VARS[subjectId]);
+    const problem = describeUnusablePhone(phone, phoneEnvVarFor(subjectId));
     if (problem) {
       throw new Error(`Cannot place a live ${agent} call to ${firstName}: ${problem}`);
     }

@@ -1,12 +1,21 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { EventStatus } from "../orchestration/states";
-import { CallIntentIntegrityError, DuplicateIdempotencyKeyError, UnknownRecordError } from "./errors";
+import {
+  CallIntentIntegrityError,
+  DuplicateIdempotencyKeyError,
+  InvalidContactOrderError,
+  UnknownRecordError,
+} from "./errors";
+import { mintFictionPhone } from "../phone";
+import { slugify } from "../validation/profile";
 import type {
   CallEventLease,
   CallIntentInput,
   CommitTransitionInput,
   CommitTransitionResult,
   CommitTransitionWithCallIntentResult,
+  CreatePersonInput,
+  CreateTrustedContactInput,
   Repository,
 } from "./repository";
 import {
@@ -74,6 +83,109 @@ export class SupabaseRepository implements Repository {
       .order("priority", { ascending: true });
     if (error) fail("getTrustedContacts", error);
     return (data as ContactRow[]).map(toContact);
+  }
+
+  // Slug-based ids matching the seeded convention, retrying with a numeric
+  // suffix when the primary key is taken — two people called Marie must both
+  // be creatable, and the collision is only detectable at insert time.
+  private async insertWithSlugId<Row>(
+    table: string,
+    prefix: string,
+    firstName: string,
+    build: (id: string) => Record<string, unknown>
+  ): Promise<Row> {
+    const base = `${prefix}_${slugify(firstName)}`;
+    for (let attempt = 1; attempt <= 25; attempt += 1) {
+      const id = attempt === 1 ? base : `${base}_${attempt}`;
+      const { data, error } = await this.client
+        .from(table)
+        .insert(build(id))
+        .select()
+        .maybeSingle();
+
+      if (!error) return data as Row;
+      if (error.code !== UNIQUE_VIOLATION) fail(`insert into ${table}`, error);
+      // Primary key taken — try the next suffix.
+    }
+    throw new Error(`SupabaseRepository: could not allocate an id for "${base}".`);
+  }
+
+  async createPerson(input: CreatePersonInput): Promise<VulnerablePerson> {
+    const row = await this.insertWithSlugId<PersonRow>(
+      "vulnerable_people",
+      "person",
+      input.firstName,
+      (id) => ({
+        id,
+        first_name: input.firstName,
+        // Never a supplied value: DEC-006 keeps real numbers out of storage.
+        phone: mintFictionPhone(id),
+        preferred_language: input.preferredLanguage,
+        conversation_profile: input.conversationProfile,
+        preferred_call_time: input.preferredCallTime,
+        interests: input.interests,
+        consent_status: input.consentStatus,
+      })
+    );
+    return toPerson(row);
+  }
+
+  async createTrustedContact(
+    personId: string,
+    input: CreateTrustedContactInput
+  ): Promise<TrustedContact> {
+    const circle = await this.getTrustedContacts(personId);
+    // Appended, so adding a contact never reorders the existing cascade.
+    const priority = circle.reduce((max, contact) => Math.max(max, contact.priority), 0) + 1;
+
+    const row = await this.insertWithSlugId<ContactRow>(
+      "trusted_contacts",
+      "contact",
+      input.firstName,
+      (id) => ({
+        id,
+        person_id: personId,
+        first_name: input.firstName,
+        phone: mintFictionPhone(id),
+        relationship: input.relationship,
+        priority,
+        consent_status: input.consentStatus,
+      })
+    );
+    return toContact(row);
+  }
+
+  async reorderTrustedContacts(
+    personId: string,
+    orderedIds: string[]
+  ): Promise<TrustedContact[]> {
+    // One transaction: `unique (person_id, priority)` rejects any interim
+    // state where two contacts share a priority, so a naive swap fails halfway.
+    const { data, error } = await this.client.rpc("reorder_trusted_contacts", {
+      p_person_id: personId,
+      p_ordered_ids: orderedIds,
+    });
+    if (error) {
+      if (error.code === INTEGRITY_VIOLATION) {
+        throw new InvalidContactOrderError(personId, error.message);
+      }
+      fail("reorderTrustedContacts", error);
+    }
+    return ((data ?? []) as ContactRow[]).map(toContact);
+  }
+
+  async listEvents(personId: string, limit?: number): Promise<EventRecord[]> {
+    let query = this.client
+      .from("events")
+      .select("*")
+      .eq("person_id", personId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
+    if (limit !== undefined) query = query.limit(limit);
+
+    const { data, error } = await query;
+    if (error) fail("listEvents", error);
+    return (data as EventRow[]).map(toEvent);
   }
 
   async createEvent(personId: string): Promise<EventRecord> {

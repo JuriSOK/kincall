@@ -98,10 +98,17 @@ npm run build
 ## Status
 
 Phases 2–5 of `docs/TECHNICAL_ARCHITECTURE.md` section 11 are implemented: the
-deterministic orchestration state machine, both repository drivers, the
-Marie/Julie/Marc demo flow with dashboard timeline, and `LiveCalleAdapter` for
-real Companion **and** Family Agent calls, with the trusted-contact cascade
-resumed by webhook or polling. No recurring scheduling.
+deterministic orchestration state machine, the Marie/Julie/Marc demo flow with
+dashboard timeline, `LiveCalleAdapter` for real Companion **and** Family Agent
+calls with the trusted-contact cascade resumed by webhook or polling, and the
+MVP interface — profile creation, trusted-circle configuration and ordering,
+per-person status and call history.
+
+Supabase persistence is not one of section 11's phases: it belongs to the
+section 1 baseline and was delivered ahead of the interface. Both repository
+drivers are implemented and interchangeable.
+
+No recurring scheduling, and nothing deployed yet.
 
 ## Persistence
 

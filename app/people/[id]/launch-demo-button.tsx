@@ -3,7 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function LaunchDemoButton({ personId }: { personId: string }) {
+export function LaunchDemoButton({
+  personId,
+  blockedReason,
+}: {
+  personId: string;
+  // Set when consent is not confirmed (§17.1 / DEC-007). The engine refuses
+  // regardless; disabling here explains why instead of failing after a click.
+  blockedReason?: string;
+}) {
   const router = useRouter();
   const [isLaunching, setIsLaunching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,11 +44,15 @@ export function LaunchDemoButton({ personId }: { personId: string }) {
       <button
         type="button"
         onClick={handleClick}
-        disabled={isLaunching}
+        disabled={isLaunching || Boolean(blockedReason)}
+        title={blockedReason}
         className="w-fit rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
       >
         {isLaunching ? "Launching demo…" : "Launch demo"}
       </button>
+      {blockedReason ? (
+        <p className="text-sm text-amber-700 dark:text-amber-400">{blockedReason}</p>
+      ) : null}
       {error ? <p className="text-sm text-red-500">{error}</p> : null}
     </div>
   );

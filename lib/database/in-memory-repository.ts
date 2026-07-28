@@ -1,12 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type { EventStatus } from "../orchestration/states";
-import { assertIntentMatches, CallIntentIntegrityError, UnknownRecordError } from "./errors";
+import { mintFictionPhone } from "../phone";
+import { slugify } from "../validation/profile";
+import {
+  assertIntentMatches,
+  CallIntentIntegrityError,
+  InvalidContactOrderError,
+  UnknownRecordError,
+} from "./errors";
 import type {
   CallEventLease,
   CommitTransitionInput,
   CommitTransitionResult,
   CommitTransitionWithCallIntentResult,
   CallIntentInput,
+  CreatePersonInput,
+  CreateTrustedContactInput,
   Repository,
 } from "./repository";
 import type {
@@ -91,6 +100,97 @@ export class InMemoryRepository implements Repository {
     return [...this.store.contacts.values()]
       .filter((contact) => contact.personId === personId)
       .sort((a, b) => a.priority - b.priority);
+  }
+
+  // Slug-based ids matching the seeded convention (person_marie), retrying
+  // with a numeric suffix when the slug is taken. Two people called Marie must
+  // both be creatable.
+  private allocateId(prefix: string, firstName: string, taken: (id: string) => boolean): string {
+    const base = `${prefix}_${slugify(firstName)}`;
+    for (let attempt = 1; attempt <= 1000; attempt += 1) {
+      const id = attempt === 1 ? base : `${base}_${attempt}`;
+      if (!taken(id)) return id;
+    }
+    throw new Error(`InMemoryRepository: could not allocate an id for "${base}".`);
+  }
+
+  async createPerson(input: CreatePersonInput): Promise<VulnerablePerson> {
+    const id = this.allocateId("person", input.firstName, (candidate) =>
+      this.store.people.has(candidate)
+    );
+    const person: VulnerablePerson = {
+      ...input,
+      id,
+      // Never a supplied value: DEC-006 keeps real numbers out of storage.
+      phone: mintFictionPhone(id),
+    };
+    this.store.people.set(id, person);
+    return person;
+  }
+
+  async createTrustedContact(
+    personId: string,
+    input: CreateTrustedContactInput
+  ): Promise<TrustedContact> {
+    if (!this.store.people.has(personId)) throw new UnknownRecordError("person", personId);
+
+    const siblings = [...this.store.contacts.values()].filter(
+      (contact) => contact.personId === personId
+    );
+    const id = this.allocateId("contact", input.firstName, (candidate) =>
+      this.store.contacts.has(candidate)
+    );
+    const contact: TrustedContact = {
+      ...input,
+      id,
+      personId,
+      phone: mintFictionPhone(id),
+      // Appended, so adding a contact never reorders the existing cascade.
+      priority: siblings.reduce((max, sibling) => Math.max(max, sibling.priority), 0) + 1,
+    };
+    this.store.contacts.set(id, contact);
+    return contact;
+  }
+
+  async reorderTrustedContacts(
+    personId: string,
+    orderedIds: string[]
+  ): Promise<TrustedContact[]> {
+    const circle = [...this.store.contacts.values()].filter(
+      (contact) => contact.personId === personId
+    );
+
+    // Validate the whole request before writing anything: a partial apply
+    // could drop a contact out of the cascade entirely.
+    if (new Set(orderedIds).size !== orderedIds.length) {
+      throw new InvalidContactOrderError(personId, "the same contact appears more than once");
+    }
+    if (orderedIds.length !== circle.length) {
+      throw new InvalidContactOrderError(
+        personId,
+        `expected all ${circle.length} contacts, received ${orderedIds.length}`
+      );
+    }
+    const known = new Set(circle.map((contact) => contact.id));
+    for (const id of orderedIds) {
+      if (!known.has(id)) {
+        throw new InvalidContactOrderError(personId, `"${id}" is not in this trusted circle`);
+      }
+    }
+
+    orderedIds.forEach((id, index) => {
+      this.store.contacts.set(id, { ...this.store.contacts.get(id)!, priority: index + 1 });
+    });
+    return this.getTrustedContacts(personId);
+  }
+
+  async listEvents(personId: string, limit?: number): Promise<EventRecord[]> {
+    const events = [...this.store.events.values()]
+      .filter((event) => event.personId === personId)
+      // Newest first. Ties within one millisecond fall back to the sequential
+      // id, which is monotonic.
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    return limit === undefined ? events : events.slice(0, limit);
   }
 
   async createEvent(personId: string): Promise<EventRecord> {

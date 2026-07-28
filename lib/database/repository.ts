@@ -59,12 +59,36 @@ export interface CommitTransitionWithCallIntentResult extends CommitTransitionRe
 
 // The seam a Supabase-backed implementation satisfies — engine code and the
 // pure orchestration functions never touch storage directly.
+// `phone` is deliberately absent from both create inputs: it is minted by the
+// repository as a reserved-for-fiction number, so a real number cannot reach
+// the database even by mistake. Live numbers come only from KINCALL_*_PHONE
+// and are overlaid on read (DEC-006).
+export type CreatePersonInput = Omit<VulnerablePerson, "id" | "phone">;
+// `personId` is a separate argument, and `priority` is assigned by appending.
+export type CreateTrustedContactInput = Omit<
+  TrustedContact,
+  "id" | "phone" | "priority" | "personId"
+>;
+
 export interface Repository {
   getPerson(personId: string): Promise<VulnerablePerson | undefined>;
   listPeople(): Promise<VulnerablePerson[]>;
   getTrustedContacts(personId: string): Promise<TrustedContact[]>; // priority ascending
 
+  createPerson(input: CreatePersonInput): Promise<VulnerablePerson>;
+  // Appended at the end of the circle, so adding a contact never silently
+  // reorders the cascade.
+  createTrustedContact(
+    personId: string,
+    input: CreateTrustedContactInput
+  ): Promise<TrustedContact>;
+  // Rewrites priorities to 1..n in the given order, atomically. `orderedIds`
+  // must be exactly this person's circle — no duplicates, nothing missing,
+  // nothing foreign — or the whole call is rejected and nothing changes.
+  reorderTrustedContacts(personId: string, orderedIds: string[]): Promise<TrustedContact[]>;
+
   createEvent(personId: string): Promise<EventRecord>;
+  listEvents(personId: string, limit?: number): Promise<EventRecord[]>; // newest first
   getEvent(eventId: string): Promise<EventRecord | undefined>;
   updateEvent(eventId: string, patch: Partial<EventRecord>): Promise<EventRecord>;
 

@@ -440,6 +440,194 @@ export function repositoryContract(name: string, harness: ContractHarness): void
       });
     });
 
+    describe("profile and trusted-circle creation", () => {
+      const profile = {
+        firstName: "Sophie",
+        preferredLanguage: "fr-FR",
+        conversationProfile: "standard",
+        preferredCallTime: "09:00",
+        interests: ["reading"],
+        consentStatus: "confirmed" as const,
+      };
+
+      it("round-trips a created person", async () => {
+        const created = await repository.createPerson(profile);
+        expect(created.id).toMatch(/^person_sophie/);
+        expect(await repository.getPerson(created.id)).toEqual(created);
+        expect((await repository.listPeople()).map((p) => p.id)).toContain(created.id);
+      });
+
+      // DEC-006: `phone` is not an input, so a real number cannot reach the
+      // database. Whatever is stored must be undialable.
+      it("mints a reserved-for-fiction phone rather than accepting one", async () => {
+        const created = await repository.createPerson({
+          ...profile,
+          // A caller trying to smuggle a number in gets it ignored entirely.
+          ...({ phone: "+33612345678" } as object),
+        });
+        expect(created.phone).not.toBe("+33612345678");
+        expect(created.phone).toMatch(/^\+3363998\d{4}$/);
+      });
+
+      it("allocates a distinct id when the slug is already taken", async () => {
+        const first = await repository.createPerson(profile);
+        const second = await repository.createPerson(profile);
+        expect(second.id).not.toBe(first.id);
+        expect(await repository.getPerson(first.id)).toBeDefined();
+        expect(await repository.getPerson(second.id)).toBeDefined();
+      });
+
+      it("appends contacts to the end of the circle", async () => {
+        const person = await repository.createPerson(profile);
+        const a = await repository.createTrustedContact(person.id, {
+          firstName: "Ana",
+          relationship: "daughter",
+          consentStatus: "confirmed",
+        });
+        const b = await repository.createTrustedContact(person.id, {
+          firstName: "Ben",
+          relationship: "son",
+          consentStatus: "confirmed",
+        });
+
+        expect([a.priority, b.priority]).toEqual([1, 2]);
+        expect(b.phone).toMatch(/^\+3363998\d{4}$/);
+        expect((await repository.getTrustedContacts(person.id)).map((c) => c.id)).toEqual([
+          a.id,
+          b.id,
+        ]);
+      });
+    });
+
+    describe("reorderTrustedContacts", () => {
+      async function circleOf(size: number) {
+        const person = await repository.createPerson({
+          firstName: "Sophie",
+          preferredLanguage: "fr-FR",
+          conversationProfile: "standard",
+          preferredCallTime: "09:00",
+          interests: [],
+          consentStatus: "confirmed",
+        });
+        const contacts = [];
+        for (const name of ["Ana", "Ben", "Cleo"].slice(0, size)) {
+          contacts.push(
+            await repository.createTrustedContact(person.id, {
+              firstName: name,
+              relationship: "friend",
+              consentStatus: "confirmed",
+            })
+          );
+        }
+        return { person, contacts };
+      }
+
+      it("rewrites priorities to 1..n in the given order", async () => {
+        const { person, contacts } = await circleOf(3);
+        const reversed = [contacts[2].id, contacts[0].id, contacts[1].id];
+
+        const result = await repository.reorderTrustedContacts(person.id, reversed);
+
+        expect(result.map((c) => c.id)).toEqual(reversed);
+        expect(result.map((c) => c.priority)).toEqual([1, 2, 3]);
+        expect((await repository.getTrustedContacts(person.id)).map((c) => c.id)).toEqual(reversed);
+      });
+
+      it("handles an empty circle without error", async () => {
+        const { person } = await circleOf(0);
+        expect(await repository.reorderTrustedContacts(person.id, [])).toEqual([]);
+      });
+
+      // Each rejection below must leave the previous order completely intact:
+      // applying a partial order could drop somebody out of the cascade, which
+      // for a vulnerable person means nobody is called.
+      it("rejects duplicate ids and preserves the previous order", async () => {
+        const { person, contacts } = await circleOf(3);
+        const before = await repository.getTrustedContacts(person.id);
+
+        await expect(
+          repository.reorderTrustedContacts(person.id, [
+            contacts[0].id,
+            contacts[0].id,
+            contacts[1].id,
+          ])
+        ).rejects.toThrow();
+
+        expect(await repository.getTrustedContacts(person.id)).toEqual(before);
+      });
+
+      it("rejects a missing id and preserves the previous order", async () => {
+        const { person, contacts } = await circleOf(3);
+        const before = await repository.getTrustedContacts(person.id);
+
+        await expect(
+          repository.reorderTrustedContacts(person.id, [contacts[0].id, contacts[1].id])
+        ).rejects.toThrow();
+
+        expect(await repository.getTrustedContacts(person.id)).toEqual(before);
+      });
+
+      it("rejects a foreign id and preserves the previous order", async () => {
+        const { person, contacts } = await circleOf(3);
+        const before = await repository.getTrustedContacts(person.id);
+
+        await expect(
+          repository.reorderTrustedContacts(person.id, [
+            contacts[0].id,
+            contacts[1].id,
+            "contact_julie", // belongs to the seeded demo person
+          ])
+        ).rejects.toThrow();
+
+        expect(await repository.getTrustedContacts(person.id)).toEqual(before);
+      });
+
+      it("rejects an over-long list and preserves the previous order", async () => {
+        const { person, contacts } = await circleOf(2);
+        const before = await repository.getTrustedContacts(person.id);
+
+        await expect(
+          repository.reorderTrustedContacts(person.id, [
+            contacts[0].id,
+            contacts[1].id,
+            "contact_marc",
+          ])
+        ).rejects.toThrow();
+
+        expect(await repository.getTrustedContacts(person.id)).toEqual(before);
+      });
+    });
+
+    describe("listEvents", () => {
+      it("returns a person's events newest first, and nobody else's", async () => {
+        const first = await repository.createEvent("person_marie");
+        const second = await repository.createEvent("person_marie");
+
+        const other = await repository.createPerson({
+          firstName: "Sophie",
+          preferredLanguage: "fr-FR",
+          conversationProfile: "standard",
+          preferredCallTime: "09:00",
+          interests: [],
+          consentStatus: "confirmed",
+        });
+        await repository.createEvent(other.id);
+
+        const events = await repository.listEvents("person_marie");
+        expect(events.map((event) => event.id)).toEqual([second.id, first.id]);
+      });
+
+      it("honours the limit", async () => {
+        await repository.createEvent("person_marie");
+        await repository.createEvent("person_marie");
+        expect(await repository.listEvents("person_marie", 1)).toHaveLength(1);
+      });
+
+      it("is empty for a person with no events", async () => {
+        expect(await repository.listEvents("person_marie")).toEqual([]);
+      });
+    });
+
     describe("restart recovery", () => {
       it("reads an event, an unprocessed call event and a starting intent back through a second instance", async () => {
         const { event, callEvent } = await seedIntent();

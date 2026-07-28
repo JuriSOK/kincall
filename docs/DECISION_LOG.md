@@ -258,6 +258,90 @@ Project owner approval: approved, after five rounds of mandated corrections — 
 
 ---
 
+## DEC-007 — Consent is enforced before any call, and phone numbers stay out of the database
+
+**Date:** 29 July 2026
+**Status:** Approved
+
+### Context
+
+Phase 5 completes the frozen MVP interface: profile creation, trusted-circle creation and
+ordering, per-person status, and call history (`PRODUCT_SPECIFICATION.md` §13.1, §14). Building
+it surfaced two problems that did not exist while every row came from `lib/database/seed.ts`.
+
+**1. `consentStatus` was stored but read nowhere** — zero references in `lib/orchestration` and
+`lib/calle`. That was inert only because all four seeded rows are `"confirmed"`. A form with a
+consent checkbox makes it reachable: leave it unticked and the demo button would place a call to
+someone who has not agreed, which §17.1 explicitly forbids ("Les personnes appelées doivent avoir
+accepté de recevoir des appels automatisés").
+
+**2. A profile form necessarily wants to collect a phone number**, which DEC-006 exists to keep
+out of the database entirely. `CONTACT_PHONE_ENV_VARS` was also a static four-key map, so a
+user-created contact could never have been configured for a live call at all.
+
+### Decision
+
+**Consent (§17.1).** Enforced in **every mode**, because consent is a property of the person, not
+of whether the dialling is real:
+
+- `startDemoEvent` raises `ConsentNotConfirmedError` when the person's consent is not
+  `"confirmed"`, **before** the event is created, so an unconsented profile leaves no orphaned
+  event behind.
+- A trusted contact whose consent is not confirmed is treated exactly like an unusable phone: the
+  existing `FAMILY_CALL_NOT_POSSIBLE` → `HUMAN_REVIEW_REQUIRED` edge, with the reason in the
+  timeline. **No new state or transition** — that edge exists precisely for "this contact cannot
+  be called" (DEC-005). The cascade escalates rather than silently skipping to the next contact,
+  because a circle nobody consented to is a situation a human should see.
+
+**Phone numbers.** DEC-006 is preserved and strengthened:
+
+- `phone` is **absent from every create input type**, so a real number cannot reach the database
+  even by mistake. The repository mints a reserved-for-fiction number instead. The guarantee is
+  enforced by the type signature rather than by reviewer discipline.
+- `isReservedFictionPhone` becomes **range-based** over the ARCEP block (`/^\+3363998\d{4}$/`)
+  rather than a four-entry set, so a minted number is also recognised as undialable.
+- `CONTACT_PHONE_ENV_VARS` becomes `phoneEnvVarFor(entityId)`, deriving `KINCALL_PHONE_<ID>` for
+  ids nobody hardcoded while keeping the four published names so existing configuration works.
+- Every free-text field rejects phone-like digit runs. `interests` and `relationship` are spoken
+  aloud by the agents and are the one place a real number could be smuggled in, so the guarantee
+  is enforced rather than merely structural.
+- A profile without server-side phone configuration stays fully usable in the interface and shows
+  a "phone configuration missing" state; it simply cannot place a live call. Fake mode is
+  unaffected, since nothing is dialled and the fiction numbers are expected there.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted. Consent enforcement implements §17.1,
+which the specification already requires; it was simply unreachable. `ConsentStatus` is a frozen
+§16 field and `FAMILY_CALL_NOT_POSSIBLE` reaches the frozen §15 state `HUMAN_REVIEW_REQUIRED`.
+The screens implement §13.1 and §14 exactly, following §16's data model rather than §11.1's
+prose superset — §11.1 mentions escalation rules, call frequency and consent records that
+`VulnerablePerson` does not carry, and adding them would extend a frozen schema.
+
+### Consequences
+
+- `startDemoEvent` can now fail for a reason the caller must surface; the demo button disables
+  itself with an explanation rather than failing after the click.
+- A seeded demo person is unaffected: all four rows are `"confirmed"`, so the Marie → Julie → Marc
+  timeline is byte-identical.
+- `reorder_trusted_contacts` (migration `0006`) is a new SQL function: `unique (person_id,
+  priority)` rejects any interim state where two contacts share a priority, so the whole reorder
+  must be one transaction. It validates that the supplied ids are exactly that person's circle —
+  no duplicates, nothing missing, nothing foreign — before writing anything, because a partial
+  order could drop somebody out of the cascade.
+- Slug-based ids retry with a numeric suffix on collision, so two people called Marie are both
+  creatable.
+- The conversation-profile allowlist is exactly what `prompts/companion-agent.ts` understands
+  (`standard`, `cognitive_friendly`, `speech_difficulty`); an unknown value is rejected rather
+  than silently falling back to the standard script.
+
+### Approval
+
+Project owner approval: approved — consent enforcement and the phone rules were both specified
+before implementation, with the reorder-validation corrections mandated at plan approval.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

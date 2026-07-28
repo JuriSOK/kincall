@@ -40,6 +40,32 @@ export class CallStartFailedError extends Error {
   }
 }
 
+// PRODUCT_SPECIFICATION.md §17.1: people who are called must have agreed to
+// receive automated calls and to have the conversation analysed. Raised before
+// any event is created, so an unconsented profile leaves nothing behind
+// (DEC-007).
+export class ConsentNotConfirmedError extends Error {
+  constructor(
+    public readonly personId: string,
+    firstName: string
+  ) {
+    super(
+      `${firstName} has not confirmed consent to receive automated calls, so KinCall will not call them.`
+    );
+    this.name = "ConsentNotConfirmedError";
+  }
+}
+
+// `orderedIds` was not exactly the person's trusted circle. Rejected whole:
+// applying a partial order could silently drop somebody out of the cascade,
+// which for a vulnerable person means nobody calls them.
+export class InvalidContactOrderError extends Error {
+  constructor(personId: string, detail: string) {
+    super(`Repository: invalid contact order for "${personId}" — ${detail}.`);
+    this.name = "InvalidContactOrderError";
+  }
+}
+
 // A call-start operation was replayed, but the intent the ledger permanently
 // recorded for it is not the one the caller expected — a different contact, or
 // a different idempotency key. Never a reason to create a second intent: the

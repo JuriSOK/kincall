@@ -12,15 +12,26 @@ function configuredPhone(envVar: string, fictionFallback: string): string {
   return configured && configured.length > 0 ? configured : fictionFallback;
 }
 
+// Which environment variable configures a given entity's live phone number.
+//
+// A function rather than a lookup table, because a profile created through the
+// interface has an id nobody hardcoded: it must still be configurable, or it
+// could never place a live call at all. The four seeded ids keep their
+// published names so existing .env.local and Vercel configuration keeps working.
+export function phoneEnvVarFor(entityId: string): string {
+  return (
+    LEGACY_PHONE_ENV_VARS[entityId] ??
+    `KINCALL_PHONE_${entityId.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`
+  );
+}
+
 // Applied when READING a persisted person or contact, so a consenting
 // participant's real number lives only in environment variables — never in a
-// table, a migration file, or a database dump. The stored value is always the
-// reserved-for-fiction default, which is safe to commit and which
+// table, a migration file, or a database dump. The stored value is always a
+// reserved-for-fiction number, which is safe to commit and which
 // LiveCalleAdapter refuses to dial.
 export function resolveConfiguredPhone(entityId: string, storedPhone: string): string {
-  const envVar = CONTACT_PHONE_ENV_VARS[entityId];
-  if (!envVar) return storedPhone;
-  return configuredPhone(envVar, storedPhone);
+  return configuredPhone(phoneEnvVarFor(entityId), storedPhone);
 }
 
 // Matches TECHNICAL_ARCHITECTURE.md §10 / PRODUCT_SPECIFICATION.md §12 ids.
@@ -67,9 +78,9 @@ export function seedRepository(repository: InMemoryRepository): void {
   });
 }
 
-// Which environment variable configures a given contact's live phone number.
-// Used to make the "you forgot to configure this contact" error actionable.
-export const CONTACT_PHONE_ENV_VARS: Record<string, string> = {
+// The four demo entities predate phoneEnvVarFor's derivation rule and keep
+// their published variable names, so no existing configuration breaks.
+const LEGACY_PHONE_ENV_VARS: Record<string, string> = {
   person_marie: "KINCALL_DEMO_PHONE",
   contact_julie: "KINCALL_JULIE_PHONE",
   contact_marc: "KINCALL_MARC_PHONE",

@@ -13,14 +13,12 @@ export default async function Home() {
         </p>
       </div>
 
-      <button
-        type="button"
-        disabled
-        title="Full profile creation is not part of the fake-mode vertical slice yet"
-        className="w-fit cursor-not-allowed rounded-md border border-black/20 px-4 py-2 text-sm opacity-50 dark:border-white/20"
+      <Link
+        href="/people/new"
+        className="w-fit rounded-md border border-black/20 px-4 py-2 text-sm hover:border-black/40 dark:border-white/20 dark:hover:border-white/40"
       >
         Add a loved one
-      </button>
+      </Link>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Profiles</h2>

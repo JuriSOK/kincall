@@ -5,14 +5,19 @@ import {
   isFamilyStructuredResult,
   normalizeCompanionResult,
 } from "../calle/schemas";
-import { assertIntentMatches, CallStartFailedError, UnknownRecordError } from "../database/errors";
+import {
+  assertIntentMatches,
+  CallStartFailedError,
+  ConsentNotConfirmedError,
+  UnknownRecordError,
+} from "../database/errors";
 import type {
   CallEventLease,
   CallIntentInput,
   CommitTransitionInput,
   Repository,
 } from "../database/repository";
-import { CONTACT_PHONE_ENV_VARS } from "../database/seed";
+import { phoneEnvVarFor } from "../database/seed";
 import { getRepository } from "../database/store";
 import { describeUnusablePhone } from "../phone";
 import type { CallEventRecord, EventRecord, TrustedContact } from "../database/types";
@@ -262,17 +267,28 @@ async function startNextFamilyCall(
     return { event: outcome.event, nextCallEventId: null };
   }
 
-  // Pre-flight, BEFORE any transition: an unusable number must not leave the
-  // event parked at CALLING_TRUSTED_CONTACT with no call in flight, and must
-  // not write a "Calling X" entry for a call that never happens.
-  const unusablePhone = describeUnusablePhone(intended.phone, CONTACT_PHONE_ENV_VARS[intended.id]);
-  if (getCalleMode() === "live" && unusablePhone) {
+  // Pre-flight, BEFORE any transition: a contact that cannot lawfully or
+  // technically be called must not leave the event parked at
+  // CALLING_TRUSTED_CONTACT with no call in flight, and must not write a
+  // "Calling X" entry for a call that never happens.
+  //
+  // DEC-007: consent is checked in EVERY mode, unlike the phone check. §17.1
+  // requires that people called have agreed to receive automated calls, and
+  // that is a property of the person, not of whether the dialling is real.
+  const cannotCall =
+    intended.consentStatus !== "confirmed"
+      ? `${intended.firstName} has not confirmed consent to be called (§17.1)`
+      : getCalleMode() === "live"
+        ? describeUnusablePhone(intended.phone, phoneEnvVarFor(intended.id))
+        : null;
+
+  if (cannotCall) {
     const outcome = await applyTransition(
       deps,
       current,
       "FAMILY_CALL_NOT_POSSIBLE",
       key("FAMILY_CALL_NOT_POSSIBLE"),
-      { messages: [`Human review required — cannot call ${intended.firstName}: ${unusablePhone}`] }
+      { messages: [`Human review required — cannot call ${intended.firstName}: ${cannotCall}`] }
     );
     return { event: outcome.event, nextCallEventId: null };
   }
@@ -697,6 +713,14 @@ export async function startDemoEvent(
   const person = await deps.repository.getPerson(personId);
   if (!person) {
     throw new Error(`Engine: unknown person "${personId}".`);
+  }
+
+  // DEC-007 / §17.1: the person must have agreed to receive automated calls
+  // and to have the conversation analysed. Checked before the event is created,
+  // so an unconsented profile leaves no orphaned event behind — and in every
+  // mode, because consent is a property of the person, not of the dialling.
+  if (person.consentStatus !== "confirmed") {
+    throw new ConsentNotConfirmedError(person.id, person.firstName);
   }
 
   const created = await deps.repository.createEvent(personId);
