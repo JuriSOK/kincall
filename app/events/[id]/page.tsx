@@ -16,29 +16,82 @@ function findConfirmation(callEvents: CallEventRecord[]): FamilyStructuredResult
   return null;
 }
 
-// Never claims the check-in found nothing unusual unless the person was
-// actually reached — that false reassurance is exactly what DEC-003 fixes.
-function describeAction(event: EventRecord): string {
-  if (event.decision === "CONTACT_TRUSTED_PERSON") {
-    return "KinCall contacted the trusted circle.";
+// Keyed on status first, not decision: before a decision exists (status is
+// still SCHEDULED/CALLING_PERSON/CONVERSATION_IN_PROGRESS/ANALYSING_CONVERSATION,
+// or HUMAN_REVIEW_REQUIRED reached via a malformed/failed companion call)
+// `event.decision` is null, and a decision-only dispatch previously fell
+// through to "found nothing unusual" in exactly those cases — a false
+// reassurance about a check-in that hasn't happened yet. The switch below is
+// exhaustive over EventStatus so a newly added status fails typecheck here
+// rather than silently reusing this fallback again.
+export function describeAction(event: EventRecord): string {
+  switch (event.status) {
+    case "SCHEDULED":
+    case "CALLING_PERSON":
+    case "CONVERSATION_IN_PROGRESS":
+      return "Check-in in progress.";
+    case "ANALYSING_CONVERSATION":
+      return "KinCall is analysing the conversation.";
+    case "PERSON_DID_NOT_ANSWER":
+      return "KinCall called but did not reach the person — a retry is owed.";
+    case "ATTENTION_REQUIRED":
+      return "KinCall detected a concerning signal — a trusted contact needs to be contacted.";
+    case "CALLING_TRUSTED_CONTACT":
+    case "CONTACT_DID_NOT_ANSWER":
+    case "CONTACT_DECLINED":
+    case "CONTACT_CONFIRMED":
+      return "KinCall contacted the trusted circle.";
+    case "HUMAN_REVIEW_REQUIRED":
+      return event.decision === "REQUEST_HUMAN_REVIEW"
+        ? "KinCall could not confirm that the check-in reached the person."
+        : "Human review is required.";
+    case "NO_ACTION_REQUIRED":
+    case "CASE_CLOSED":
+      return event.decision === "CONTACT_TRUSTED_PERSON"
+        ? "KinCall contacted the trusted circle."
+        : "KinCall reviewed the check-in and found nothing unusual.";
+    default: {
+      const exhaustive: never = event.status;
+      return exhaustive;
+    }
   }
-  if (event.decision === "RETRY_CHECK_IN") {
-    return "KinCall called but did not reach the person, so no check-in took place.";
-  }
-  if (event.decision === "REQUEST_HUMAN_REVIEW") {
-    return "KinCall could not confirm that the check-in reached the person.";
-  }
-  return "KinCall reviewed the check-in and found nothing unusual.";
 }
 
-function describeOwnership(event: EventRecord): string {
-  if (event.status === "PERSON_DID_NOT_ANSWER") {
-    return "Nobody yet — the check-in still needs to be repeated.";
+// Same exhaustive-over-status shape as describeAction, for the same reason:
+// "No intervention required." must only ever describe a closed, no-signal
+// case, never an event where nothing has been decided yet.
+export function describeOwnership(event: EventRecord): string {
+  switch (event.status) {
+    case "SCHEDULED":
+    case "CALLING_PERSON":
+    case "CONVERSATION_IN_PROGRESS":
+    case "ANALYSING_CONVERSATION":
+      return "Not yet known — the check-in hasn't finished.";
+    case "PERSON_DID_NOT_ANSWER":
+      return "Nobody yet — the person was not reached, so a retry is owed.";
+    case "ATTENTION_REQUIRED":
+      return "Not yet — a trusted contact still needs to be contacted.";
+    case "CALLING_TRUSTED_CONTACT":
+    case "CONTACT_DID_NOT_ANSWER":
+    case "CONTACT_DECLINED":
+    case "CONTACT_CONFIRMED":
+      return "Not confirmed yet — KinCall is still contacting the trusted circle.";
+    case "HUMAN_REVIEW_REQUIRED":
+      return "No contact confirmed yet — flagged for human review.";
+    case "NO_ACTION_REQUIRED":
+    case "CASE_CLOSED":
+      // In practice CASE_CLOSED with CONTACT_TRUSTED_PERSON always has a
+      // confirmation record by the time this state is reached, so the page
+      // renders confirmation.summary instead of calling this function at
+      // all — this branch only guards against calling it out of that context.
+      return event.decision === "CONTACT_TRUSTED_PERSON"
+        ? "A trusted contact confirmed they are taking care of it."
+        : "No intervention required.";
+    default: {
+      const exhaustive: never = event.status;
+      return exhaustive;
+    }
   }
-  if (event.status === "HUMAN_REVIEW_REQUIRED") {
-    return "No contact confirmed yet — flagged for human review.";
-  }
-  return "No intervention required.";
 }
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
