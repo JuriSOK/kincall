@@ -15,7 +15,7 @@ import type { CompanionStructuredResult, FamilyStructuredResult } from "./schema
 const COMPANION_SCENARIOS: Record<string, CompanionStructuredResult> = {
   person_marie: {
     conversation_summary:
-      "Marie indique être tombée hier et avoir des difficultés à marcher.",
+      "Marie mentioned that she fell yesterday and currently has difficulty walking.",
     fall_mentioned: "yes",
     mobility_difficulty: "yes",
     person_requests_help: "no",
@@ -35,7 +35,7 @@ const FAMILY_SCENARIOS: Record<string, FamilyStructuredResult> = {
     intervention_type: null,
     estimated_time: null,
     contact_next_person: true,
-    summary: "Julie n'a pas répondu.",
+    summary: "Julie did not answer.",
   },
   contact_marc: {
     contact_id: "contact_marc",
@@ -45,7 +45,7 @@ const FAMILY_SCENARIOS: Record<string, FamilyStructuredResult> = {
     intervention_type: "visit",
     estimated_time: "17:30",
     contact_next_person: false,
-    summary: "Marc confirme qu'il passera voir Marie à 17h30.",
+    summary: "Marc confirmed that he will visit Marie at 17:30.",
   },
 };
 

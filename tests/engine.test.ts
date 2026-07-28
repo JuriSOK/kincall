@@ -279,6 +279,20 @@ describe("processCompanionResult — call lifecycle (live-mode async statuses)",
     expect(resumed.status).toBe("ATTENTION_REQUIRED");
   });
 
+  it("routes a canceled call to human review", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionStatus = "canceled";
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    const callEvent = deps.repository.listCallEvents(event.id)[0];
+    expect(callEvent.resultProcessedAt).not.toBeNull();
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    expect(messages.some((message) => message.includes("call canceled"))).toBe(true);
+  });
+
   it("routes a failed call to human review with the failure reason surfaced", async () => {
     const adapter = new ScriptedCalleAdapter();
     adapter.nextCompanionStatus = "failed";

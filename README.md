@@ -23,8 +23,10 @@ The product and architecture are frozen. Read these before contributing:
 Next.js App Router, TypeScript, Tailwind CSS, Vitest. Supabase PostgreSQL is
 part of the frozen baseline but not wired up yet — persistence runs entirely
 against an in-memory repository. The CALL-E REST API is wired up for the
-Companion Agent only (`LiveCalleAdapter`); the Family Agent still uses
-`FakeCalleAdapter`'s canned responses regardless of `CALLE_MODE`.
+Companion Agent only (`LiveCalleAdapter`). There is one adapter per run, so in
+live mode the Family Agent would be `LiveCalleAdapter` too — its
+`startFamilyCall` throws until Phase 4, and the live flow stops before ever
+reaching it (see below).
 
 ## Getting started
 
@@ -42,9 +44,14 @@ event page shows the timeline and summary as they're produced.
 
 ## Live Companion Agent mode
 
-Set `CALLE_MODE=live` and `CALLE_API_KEY` (from
-`dashboard.heycall-e.com/account/api-keys`) to place a real Companion call.
-This is a **separate credential** from `calle auth login`'s browser OAuth
+Set `CALLE_MODE=live`, `CALLE_API_KEY` (from
+`dashboard.heycall-e.com/account/api-keys`) and `KINCALL_DEMO_PHONE` to place a
+real Companion call. `KINCALL_DEMO_PHONE` must be the E.164 number of a
+**consenting test participant** — the seeded profile otherwise carries a
+reserved-for-fiction number that CALL-E rejects, and `LiveCalleAdapter` refuses
+to send a non-E.164 number rather than waste a call credit.
+
+The API key is a **separate credential** from `calle auth login`'s browser OAuth
 session — that login is for the CALL-E MCP skill, a Claude-Code-only
 development tool (`plan_call`/`run_call`/`get_call_run`), explicitly not the
 production path (CLAUDE.md). Nothing from the MCP/CLI install ships with the
@@ -63,8 +70,11 @@ In a deployed environment, set `CALLE_WEBHOOK_URL` to
 account's webhook signing secret (exact provisioning to be confirmed — see
 `docs/DECISION_LOG.md` / the Phase 3 plan's open uncertainties).
 
-Only the Companion Agent is live-capable so far; `LiveCalleAdapter.startFamilyCall`
-throws until Phase 4.
+Only the Companion Agent is live-capable so far. A live run therefore ends at
+`ATTENTION_REQUIRED` once the Companion result arrives: the trusted-contact
+cascade is Phase 4, so no Family call is attempted and
+`LiveCalleAdapter.startFamilyCall` throws if one ever is. Fake mode is the only
+path that runs the complete Marie → Julie → Marc → case-closed scenario.
 
 ## Checks
 

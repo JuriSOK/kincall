@@ -1,4 +1,5 @@
 import { buildCompanionTask, companionResultSchema } from "@/prompts/companion-agent";
+import { isE164, maskPhone } from "../phone";
 import type {
   AgentType,
   CalleAdapter,
@@ -62,6 +63,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// CALL-E's `locale` is a BCP 47 tag (fr-FR); its `region` is the country code
+// used for routing and compliance checks (FR). Derive rather than hardcode so
+// a person configured in another locale routes correctly.
+function regionFromLocale(locale: string): string | undefined {
+  const region = locale.split("-")[1];
+  return region && /^[A-Za-z]{2}$/.test(region) ? region.toUpperCase() : undefined;
+}
+
 // Implements CalleAdapter against CALL-E's real REST API
 // (calle.openapi.yaml v0.2.0) via the platform fetch — no SDK dependency,
 // staying literal to CLAUDE.md's "CALL-E REST API" baseline.
@@ -83,14 +92,28 @@ export class LiveCalleAdapter implements CalleAdapter {
   }
 
   async startCompanionCall(input: CompanionCallInput): Promise<CallReference> {
+    // Fail here rather than spending a call credit on a request CALL-E will
+    // reject with `invalid_phone`. The number stays masked in the message.
+    if (!isE164(input.person.phone)) {
+      throw new Error(
+        `Cannot place a live Companion call to ${input.person.firstName}: ` +
+          `${maskPhone(input.person.phone)} is not a valid E.164 number. ` +
+          "Set KINCALL_DEMO_PHONE to a consenting test participant's number."
+      );
+    }
+
+    const region = regionFromLocale(input.person.preferredLanguage);
+    const recipient: Record<string, unknown> = {
+      phones: [input.person.phone],
+      locale: input.person.preferredLanguage,
+    };
+    if (region) {
+      recipient.region = region;
+    }
+
     const body: Record<string, unknown> = {
       task: buildCompanionTask(input.person),
-      recipients: [
-        {
-          phones: [input.person.phone],
-          locale: input.person.preferredLanguage,
-        },
-      ],
+      recipients: [recipient],
       result_schema: companionResultSchema,
       metadata: {
         kincall_event_id: input.eventId,

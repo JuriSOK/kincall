@@ -80,7 +80,9 @@ describe("LiveCalleAdapter", () => {
     expect(headers["Idempotency-Key"]).toBe("event_001_companion_attempt_1");
 
     const body = JSON.parse(init.body as string);
-    expect(body.recipients).toEqual([{ phones: ["+33612345678"], locale: "fr-FR" }]);
+    expect(body.recipients).toEqual([
+      { phones: ["+33612345678"], locale: "fr-FR", region: "FR" },
+    ]);
     expect(body.webhook_url).toBe("https://kincall.example.com/api/webhooks/calle");
     expect(body.metadata).toEqual({
       kincall_event_id: "event_001",
@@ -117,6 +119,55 @@ describe("LiveCalleAdapter", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
     expect(body.webhook_url).toBeUndefined();
+  });
+
+  it("refuses a non-E.164 number without calling CALL-E, and masks it in the error", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new LiveCalleAdapter({
+      apiKey: "test_key",
+      baseUrl: "https://api.heycall-e.com",
+      webhookUrl: undefined,
+    });
+
+    const call = adapter.startCompanionCall({
+      eventId: "event_001",
+      person: person({ phone: "+33 6 12 34 56 78" }),
+      idempotencyKey: "key",
+    });
+
+    const error = (await call.catch((thrown: unknown) => thrown)) as Error;
+    expect(error.message).toMatch(/KINCALL_DEMO_PHONE/);
+    expect(error.message).toContain("+33");
+    expect(error.message).not.toContain("612345678");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("omits region when the locale carries no region subtag", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { id: "call_123", status: "queued", structured_result: null, failure_code: null, failure_message: null },
+        201
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new LiveCalleAdapter({
+      apiKey: "test_key",
+      baseUrl: "https://api.heycall-e.com",
+      webhookUrl: undefined,
+    });
+
+    await adapter.startCompanionCall({
+      eventId: "event_001",
+      person: person({ preferredLanguage: "fr" }),
+      idempotencyKey: "key",
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.recipients[0].region).toBeUndefined();
   });
 
   it("maps a non-terminal call status through getCallResult", async () => {

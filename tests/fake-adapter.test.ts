@@ -6,7 +6,7 @@ function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
   return {
     id: "person_marie",
     firstName: "Marie",
-    phone: "+33 X XX XX XX 01",
+    phone: "+33639980001",
     preferredLanguage: "fr-FR",
     conversationProfile: "cognitive_friendly",
     preferredCallTime: "09:00",
