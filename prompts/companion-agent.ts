@@ -30,6 +30,7 @@ export function buildCompanionTask(person: VulnerablePerson): string {
     `Start the conversation naturally rather than as a checklist of questions.${interestsLine}`,
     guidanceForProfile(person.conversationProfile),
     "Listen for whether they mention a recent fall, an injury, or difficulty moving around, and whether they would rather not disturb their family with what they've told you.",
+    `If you reach voicemail, an answering machine, or anyone other than ${person.firstName}, leave a short message saying KinCall called for a check-in and will try again — do not ask any wellbeing questions and do not leave any detail about their situation.`,
     "Do not diagnose any condition and do not give medical advice.",
     "End the call calmly once you have a clear sense of how they are doing.",
   ].join(" ");
@@ -43,6 +44,7 @@ export const companionResultSchema = {
   additionalProperties: false,
   required: [
     "conversation_summary",
+    "person_reached",
     "fall_mentioned",
     "mobility_difficulty",
     "person_requests_help",
@@ -55,6 +57,12 @@ export const companionResultSchema = {
     conversation_summary: {
       type: "string",
       description: "One or two sentence neutral summary of what was discussed.",
+    },
+    person_reached: {
+      type: "string",
+      enum: ["yes", "no", "unknown"],
+      description:
+        "Use yes only if you had a two-way conversation with the person themselves. Use no if you reached voicemail, an answering machine, or somebody other than the person. Use unknown if you cannot tell whether the person themselves was on the line.",
     },
     fall_mentioned: {
       type: "string",

@@ -8,6 +8,10 @@ export type AttentionLevel = "low" | "medium" | "high";
 
 export interface CompanionStructuredResult {
   conversation_summary: string;
+  // Whether a two-way conversation with the person actually happened. A
+  // voicemail is a `completed` CALL-E call with no concerning signals, which
+  // without this field reads identically to "the person is fine" (DEC-003).
+  person_reached: YesNoUnknown;
   fall_mentioned: YesNoUnknown;
   mobility_difficulty: YesNoUnknown;
   person_requests_help: YesNoUnknown;
@@ -39,6 +43,7 @@ function isYesNoUnknown(value: unknown): value is YesNoUnknown {
 export function isCompanionStructuredResult(value: unknown): value is CompanionStructuredResult {
   if (!isRecord(value)) return false;
   if (typeof value.conversation_summary !== "string") return false;
+  if (!isYesNoUnknown(value.person_reached)) return false;
   if (!isYesNoUnknown(value.fall_mentioned)) return false;
   if (!isYesNoUnknown(value.mobility_difficulty)) return false;
   if (!isYesNoUnknown(value.person_requests_help)) return false;
@@ -76,6 +81,7 @@ export function isFamilyStructuredResult(value: unknown): value is FamilyStructu
 }
 
 export interface NormalizedCompanionResult {
+  personReached: YesNoUnknown;
   fallMentioned: YesNoUnknown;
   mobilityDifficulty: YesNoUnknown;
   personRequestsHelp: YesNoUnknown;
@@ -93,6 +99,7 @@ export function normalizeCompanionResult(
   result: CompanionStructuredResult
 ): NormalizedCompanionResult {
   return {
+    personReached: result.person_reached,
     fallMentioned: result.fall_mentioned,
     mobilityDifficulty: result.mobility_difficulty,
     personRequestsHelp: result.person_requests_help,

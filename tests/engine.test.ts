@@ -69,6 +69,7 @@ class ScriptedCalleAdapter implements CalleAdapter {
 
 const attentionCompanionResult = {
   conversation_summary: "Marie mentioned a fall.",
+  person_reached: "yes",
   fall_mentioned: "yes",
   mobility_difficulty: "yes",
   person_requests_help: "no",
@@ -122,6 +123,7 @@ describe("startDemoEvent — orchestration rules", () => {
     const adapter = new ScriptedCalleAdapter();
     adapter.nextCompanionResult = {
       conversation_summary: "Marie is doing well.",
+      person_reached: "yes",
       fall_mentioned: "no",
       mobility_difficulty: "no",
       person_requests_help: "no",
@@ -136,6 +138,89 @@ describe("startDemoEvent — orchestration rules", () => {
 
     expect(event.status).toBe("CASE_CLOSED");
     expect(event.decision).toBe("LOG_AND_CLOSE");
+  });
+
+  it("does not close the case when the call reached voicemail instead of the person", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = {
+      conversation_summary: "The call reached voicemail rather than a live conversation.",
+      person_reached: "no",
+      fall_mentioned: "no",
+      mobility_difficulty: "no",
+      person_requests_help: "no",
+      person_does_not_want_to_disturb_family: "no",
+      conversation_shorter_than_usual: "no",
+      unusual_confusion: "no",
+      recommended_attention_level: "low",
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("PERSON_DID_NOT_ANSWER");
+    expect(event.decision).toBe("RETRY_CHECK_IN");
+    expect(event.closedAt).toBeNull();
+    expect(adapter.startFamilyCallSpy).not.toHaveBeenCalled();
+
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    expect(messages).toEqual([
+      "Check-in call started",
+      "Check-in call completed",
+      "Marie was not reached — no check-in conversation took place",
+    ]);
+    expect(messages).not.toContain("No concerning signal detected");
+    expect(messages).not.toContain("Case closed");
+  });
+
+  it("requests human review when reachability is unknown and no signal was detected", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = {
+      conversation_summary: "It was unclear who was on the line.",
+      person_reached: "unknown",
+      fall_mentioned: "no",
+      mobility_difficulty: "no",
+      person_requests_help: "no",
+      person_does_not_want_to_disturb_family: "no",
+      conversation_shorter_than_usual: "no",
+      unusual_confusion: "no",
+      recommended_attention_level: "low",
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(event.decision).toBe("REQUEST_HUMAN_REVIEW");
+    expect(event.closedAt).toBeNull();
+  });
+
+  it("still escalates when reachability is unknown but concerning signals were reported", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = { ...attentionCompanionResult, person_reached: "unknown" };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.decision).toBe("CONTACT_TRUSTED_PERSON");
+    expect(event.priority).toBe("high");
+    // The cascade was entered rather than the event being downgraded to a
+    // reachability review — that is what unknown reachability must not do.
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalled();
+    expect(deps.repository.listTimeline(event.id).map((entry) => entry.message)).toContain(
+      "Fall and mobility difficulty detected"
+    );
+  });
+
+  it("routes a result missing person_reached to human review", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    const { person_reached, ...withoutPersonReached } = attentionCompanionResult;
+    void person_reached;
+    adapter.nextCompanionResult = withoutPersonReached;
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
   });
 
   it("requests human review when no contacts remain in the cascade", async () => {

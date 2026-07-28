@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { isFamilyStructuredResult } from "@/lib/calle/schemas";
 import type { FamilyStructuredResult } from "@/lib/calle/schemas";
 import { getRepository } from "@/lib/database/store";
-import type { CallEventRecord } from "@/lib/database/types";
+import type { CallEventRecord, EventRecord } from "@/lib/database/types";
 
 function findConfirmation(callEvents: CallEventRecord[]): FamilyStructuredResult | null {
   for (const callEvent of callEvents) {
@@ -14,6 +14,31 @@ function findConfirmation(callEvents: CallEventRecord[]): FamilyStructuredResult
     }
   }
   return null;
+}
+
+// Never claims the check-in found nothing unusual unless the person was
+// actually reached — that false reassurance is exactly what DEC-003 fixes.
+function describeAction(event: EventRecord): string {
+  if (event.decision === "CONTACT_TRUSTED_PERSON") {
+    return "KinCall contacted the trusted circle.";
+  }
+  if (event.decision === "RETRY_CHECK_IN") {
+    return "KinCall called but did not reach the person, so no check-in took place.";
+  }
+  if (event.decision === "REQUEST_HUMAN_REVIEW") {
+    return "KinCall could not confirm that the check-in reached the person.";
+  }
+  return "KinCall reviewed the check-in and found nothing unusual.";
+}
+
+function describeOwnership(event: EventRecord): string {
+  if (event.status === "PERSON_DID_NOT_ANSWER") {
+    return "Nobody yet — the check-in still needs to be repeated.";
+  }
+  if (event.status === "HUMAN_REVIEW_REQUIRED") {
+    return "No contact confirmed yet — flagged for human review.";
+  }
+  return "No intervention required.";
 }
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
@@ -67,20 +92,12 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </div>
           <div>
             <p className="font-medium">What did KinCall do?</p>
-            <p className="opacity-80">
-              {event.decision === "CONTACT_TRUSTED_PERSON"
-                ? "KinCall contacted the trusted circle."
-                : "KinCall reviewed the check-in and found nothing unusual."}
-            </p>
+            <p className="opacity-80">{describeAction(event)}</p>
           </div>
           <div>
             <p className="font-medium">Who is taking care of it?</p>
             <p className="opacity-80">
-              {confirmation
-                ? confirmation.summary
-                : event.status === "HUMAN_REVIEW_REQUIRED"
-                  ? "No contact confirmed yet — flagged for human review."
-                  : "No intervention required."}
+              {confirmation ? confirmation.summary : describeOwnership(event)}
             </p>
           </div>
         </div>

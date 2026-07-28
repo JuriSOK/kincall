@@ -29,6 +29,7 @@ describe("FakeCalleAdapter", () => {
     expect(result.agentType).toBe("companion");
     expect(result.status).toBe("completed");
     expect(result.structuredResult).toMatchObject({
+      person_reached: "yes",
       fall_mentioned: "yes",
       mobility_difficulty: "yes",
       recommended_attention_level: "high",

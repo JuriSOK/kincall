@@ -172,6 +172,28 @@ export async function processCompanionResult(
   });
   deps.repository.updateEvent(current.id, { decision, priority, decisionReason: reason });
 
+  const personName = deps.repository.getPerson(current.personId)?.firstName ?? "the person";
+
+  // DEC-003: the case stays open — closedAt is never set on these two paths.
+  // KinCall must not assert that someone it never spoke to is safe (§7.5).
+  if (decision === "RETRY_CHECK_IN") {
+    return applyTransition(
+      deps,
+      current,
+      "COMPANION_PERSON_NO_ANSWER",
+      `${personName} was not reached — no check-in conversation took place`
+    );
+  }
+
+  if (decision === "REQUEST_HUMAN_REVIEW") {
+    return applyTransition(
+      deps,
+      current,
+      "COMPANION_RESULT_UNCERTAIN",
+      `Human review required — unable to confirm the check-in reached ${personName}`
+    );
+  }
+
   if (decision === "CONTACT_TRUSTED_PERSON") {
     return applyTransition(
       deps,

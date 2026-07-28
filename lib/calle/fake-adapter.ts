@@ -16,6 +16,7 @@ const COMPANION_SCENARIOS: Record<string, CompanionStructuredResult> = {
   person_marie: {
     conversation_summary:
       "Marie mentioned that she fell yesterday and currently has difficulty walking.",
+    person_reached: "yes",
     fall_mentioned: "yes",
     mobility_difficulty: "yes",
     person_requests_help: "no",
