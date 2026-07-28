@@ -32,6 +32,11 @@ const TRANSITIONS: TransitionTable = {
   },
   ATTENTION_REQUIRED: {
     FAMILY_CALL_STARTED: "CALLING_TRUSTED_CONTACT",
+    // DEC-005: the contact's number is unusable (missing/invalid/reserved
+    // config), so no call can even be attempted. Reaching human review from
+    // here keeps the event from stalling at ATTENTION_REQUIRED with nothing
+    // in flight, and no misleading "Calling X" entry is ever written.
+    FAMILY_CALL_NOT_POSSIBLE: "HUMAN_REVIEW_REQUIRED",
   },
   CALLING_TRUSTED_CONTACT: {
     FAMILY_NO_ANSWER: "CONTACT_DID_NOT_ANSWER",
@@ -42,10 +47,12 @@ const TRANSITIONS: TransitionTable = {
   CONTACT_DID_NOT_ANSWER: {
     FAMILY_CALL_STARTED: "CALLING_TRUSTED_CONTACT",
     NO_CONTACTS_REMAINING: "HUMAN_REVIEW_REQUIRED",
+    FAMILY_CALL_NOT_POSSIBLE: "HUMAN_REVIEW_REQUIRED",
   },
   CONTACT_DECLINED: {
     FAMILY_CALL_STARTED: "CALLING_TRUSTED_CONTACT",
     NO_CONTACTS_REMAINING: "HUMAN_REVIEW_REQUIRED",
+    FAMILY_CALL_NOT_POSSIBLE: "HUMAN_REVIEW_REQUIRED",
   },
   CONTACT_CONFIRMED: {
     CASE_CLOSED_EVENT: "CASE_CLOSED",

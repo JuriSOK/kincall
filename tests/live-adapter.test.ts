@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CalleApiError, LiveCalleAdapter } from "@/lib/calle/live-adapter";
+import { RESERVED_FICTION_PHONES } from "@/lib/phone";
 import type { VulnerablePerson } from "@/lib/database/types";
 
 function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
@@ -268,20 +269,27 @@ describe("LiveCalleAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("startFamilyCall throws not-implemented", async () => {
+  it("refuses a reserved-for-fiction number, which an unset env var leaves in place", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
     const adapter = new LiveCalleAdapter({
       apiKey: "test_key",
       baseUrl: "https://api.heycall-e.com",
       webhookUrl: undefined,
     });
 
-    await expect(
-      adapter.startFamilyCall({
-        personId: "person_marie",
-        contactId: "contact_julie",
-        idempotencyKey: "key",
-        informationToShare: [],
-      })
-    ).rejects.toThrow(/Phase 4/);
+    // Structurally valid E.164 — only the reserved-set check catches it.
+    const call = adapter.startCompanionCall({
+      eventId: "event_001",
+      person: person({ phone: RESERVED_FICTION_PHONES.marie }),
+      idempotencyKey: "key",
+    });
+
+    const error = (await call.catch((thrown: unknown) => thrown)) as Error;
+    expect(error.message).toMatch(/reserved-for-fiction/);
+    expect(error.message).toMatch(/KINCALL_DEMO_PHONE/);
+    expect(error.message).not.toContain(RESERVED_FICTION_PHONES.marie);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

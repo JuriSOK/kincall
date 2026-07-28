@@ -22,11 +22,8 @@ The product and architecture are frozen. Read these before contributing:
 
 Next.js App Router, TypeScript, Tailwind CSS, Vitest. Supabase PostgreSQL is
 part of the frozen baseline but not wired up yet — persistence runs entirely
-against an in-memory repository. The CALL-E REST API is wired up for the
-Companion Agent only (`LiveCalleAdapter`). There is one adapter per run, so in
-live mode the Family Agent would be `LiveCalleAdapter` too — its
-`startFamilyCall` throws until Phase 4, and the live flow stops before ever
-reaching it (see below).
+against an in-memory repository. The CALL-E REST API is wired up for both the
+Companion Agent and the Family Agent cascade (`LiveCalleAdapter`).
 
 ## Getting started
 
@@ -45,11 +42,21 @@ event page shows the timeline and summary as they're produced.
 ## Live Companion Agent mode
 
 Set `CALLE_MODE=live`, `CALLE_API_KEY` (from
-`dashboard.heycall-e.com/account/api-keys`) and `KINCALL_DEMO_PHONE` to place a
-real Companion call. `KINCALL_DEMO_PHONE` must be the E.164 number of a
-**consenting test participant** — the seeded profile otherwise carries a
-reserved-for-fiction number that CALL-E rejects, and `LiveCalleAdapter` refuses
-to send a non-E.164 number rather than waste a call credit.
+`dashboard.heycall-e.com/account/api-keys`) and the phone numbers to place real
+calls. Every number must be the E.164 number of a **consenting test
+participant**:
+
+| Variable | Who it calls |
+|---|---|
+| `KINCALL_DEMO_PHONE` | Marie — the Companion check-in |
+| `KINCALL_JULIE_PHONE` | Julie — trusted contact #1 |
+| `KINCALL_MARC_PHONE` | Marc — trusted contact #2 |
+| `KINCALL_NICOLE_PHONE` | Nicole — trusted contact #3 |
+
+Leaving one unset keeps a reserved-for-fiction default (`+336399800xx`), which
+KinCall refuses to dial: that contact's step goes to `HUMAN_REVIEW_REQUIRED`
+naming the missing variable, and no CALL-E request is made. The cascade only
+needs as many contacts configured as you intend it to reach.
 
 The API key is a **separate credential** from `calle auth login`'s browser OAuth
 session — that login is for the CALL-E MCP skill, a Claude-Code-only
@@ -70,11 +77,12 @@ In a deployed environment, set `CALLE_WEBHOOK_URL` to
 account's webhook signing secret (exact provisioning to be confirmed — see
 `docs/DECISION_LOG.md` / the Phase 3 plan's open uncertainties).
 
-Only the Companion Agent is live-capable so far. A live run therefore ends at
-`ATTENTION_REQUIRED` once the Companion result arrives: the trusted-contact
-cascade is Phase 4, so no Family call is attempted and
-`LiveCalleAdapter.startFamilyCall` throws if one ever is. Fake mode is the only
-path that runs the complete Marie → Julie → Marc → case-closed scenario.
+A live run is asynchronous end to end: each call returns immediately as
+`queued`, and the webhook (or a poll) delivers the result that advances the
+event. A concerning Companion result starts the cascade, and each trusted
+contact's result either closes the case or triggers the next call — so a full
+run takes several deliveries, one per call. Poll repeatedly until the status
+stops changing.
 
 ## Checks
 
@@ -86,9 +94,8 @@ npm run build
 
 ## Status
 
-Phase 2 (fake-mode vertical slice, `docs/TECHNICAL_ARCHITECTURE.md` section
-11) and Phase 3 (live Companion Agent integration) are implemented: the
+Phases 2–4 of `docs/TECHNICAL_ARCHITECTURE.md` section 11 are implemented: the
 deterministic orchestration state machine, an in-memory repository, the
-Marie/Julie/Marc demo flow with dashboard timeline, and `LiveCalleAdapter`
-for real Companion calls with webhook + polling result delivery. No
-Supabase, and no live Family Agent / cascade yet (Phase 4+).
+Marie/Julie/Marc demo flow with dashboard timeline, and `LiveCalleAdapter` for
+real Companion **and** Family Agent calls, with the trusted-contact cascade
+resumed by webhook or polling. No Supabase yet, and no recurring scheduling.

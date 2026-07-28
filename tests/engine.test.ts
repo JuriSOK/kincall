@@ -9,11 +9,13 @@ import type {
 } from "@/lib/calle/adapter";
 import { FakeCalleAdapter } from "@/lib/calle/fake-adapter";
 import { InMemoryRepository } from "@/lib/database/in-memory-repository";
+import type { FamilyStructuredResult } from "@/lib/calle/schemas";
 import { seedRepository } from "@/lib/database/seed";
 import {
   ensureCompanionCallStarted,
   ensureFamilyCallStarted,
   processCompanionResult,
+  processFamilyResult,
   startDemoEvent,
   type EngineDeps,
 } from "@/lib/orchestration/engine";
@@ -31,6 +33,12 @@ class ScriptedCalleAdapter implements CalleAdapter {
     code: null,
     message: null,
   };
+  nextFamilyFailure: { code: string | null; message: string | null } = {
+    code: null,
+    message: null,
+  };
+  // Per-contact overrides, keyed by contact id; falls back to nextFamilyResult.
+  familyResultsByContact: Record<string, unknown> = {};
   private counter = 0;
 
   async startCompanionCall(input: CompanionCallInput): Promise<CallReference> {
@@ -42,7 +50,12 @@ class ScriptedCalleAdapter implements CalleAdapter {
   async startFamilyCall(input: FamilyCallInput): Promise<CallReference> {
     this.startFamilyCallSpy(input);
     this.counter += 1;
-    return { callId: `scripted_family_${this.counter}`, idempotencyKey: input.idempotencyKey };
+    // Contact id is encoded in the callId so getCallResult can serve a
+    // per-contact scripted result, the way a real cascade differs per person.
+    return {
+      callId: `scripted_family_${input.contact.id}_${this.counter}`,
+      idempotencyKey: input.idempotencyKey,
+    };
   }
 
   async getCallResult(callId: string): Promise<CallResult> {
@@ -56,13 +69,18 @@ class ScriptedCalleAdapter implements CalleAdapter {
         failureMessage: this.nextCompanionFailure.message,
       };
     }
+    const contactId = Object.keys(this.familyResultsByContact).find((id) =>
+      callId.startsWith(`scripted_family_${id}_`)
+    );
     return {
       callId,
       agentType: "family",
       status: this.nextFamilyStatus,
-      structuredResult: this.nextFamilyResult,
-      failureCode: null,
-      failureMessage: null,
+      structuredResult: contactId
+        ? this.familyResultsByContact[contactId]
+        : this.nextFamilyResult,
+      failureCode: this.nextFamilyFailure.code,
+      failureMessage: this.nextFamilyFailure.message,
     };
   }
 }
@@ -78,6 +96,23 @@ const attentionCompanionResult = {
   unusual_confusion: "no",
   recommended_attention_level: "high",
 };
+
+function familyResult(
+  contactId: string,
+  overrides: Partial<FamilyStructuredResult> = {}
+): FamilyStructuredResult {
+  return {
+    contact_id: contactId,
+    answered: "no",
+    situation_understood: "unknown",
+    can_intervene: "no",
+    intervention_type: "other",
+    estimated_time: "",
+    contact_next_person: "yes",
+    summary: "No answer.",
+    ...overrides,
+  };
+}
 
 function createDeps(calleAdapter: CalleAdapter = new FakeCalleAdapter()): EngineDeps {
   const repository = new InMemoryRepository();
@@ -226,15 +261,10 @@ describe("startDemoEvent — orchestration rules", () => {
   it("requests human review when no contacts remain in the cascade", async () => {
     const adapter = new ScriptedCalleAdapter();
     adapter.nextCompanionResult = attentionCompanionResult;
-    adapter.nextFamilyResult = {
-      contact_id: "unused",
-      answered: false,
-      situation_understood: false,
-      can_intervene: false,
-      intervention_type: null,
-      estimated_time: null,
-      contact_next_person: true,
-      summary: "No answer.",
+    adapter.familyResultsByContact = {
+      contact_julie: familyResult("contact_julie"),
+      contact_marc: familyResult("contact_marc"),
+      contact_nicole: familyResult("contact_nicole"),
     };
 
     const deps = createDeps(adapter);
@@ -264,6 +294,252 @@ describe("startDemoEvent — orchestration rules", () => {
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+  });
+});
+
+describe("family cascade — live-shaped async behaviour", () => {
+  it("stops after starting contact #1 while the call is still queued", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.nextFamilyStatus = "queued";
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("CALLING_TRUSTED_CONTACT");
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
+    expect(deps.repository.listCallEvents(event.id)).toHaveLength(2);
+
+    const familyCall = deps.repository
+      .listCallEvents(event.id)
+      .find((call) => call.agentType === "family");
+    expect(familyCall?.resultProcessedAt).toBeNull();
+  });
+
+  it("resumes and calls contact #2 when contact #1's result arrives later", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.nextFamilyStatus = "queued";
+
+    const deps = createDeps(adapter);
+    const pending = await startDemoEvent("person_marie", deps);
+    expect(pending.status).toBe("CALLING_TRUSTED_CONTACT");
+
+    // The webhook arrives: Julie did not answer, Marc confirms.
+    adapter.nextFamilyStatus = "completed";
+    adapter.familyResultsByContact = {
+      contact_julie: familyResult("contact_julie"),
+      contact_marc: familyResult("contact_marc", {
+        answered: "yes",
+        situation_understood: "yes",
+        can_intervene: "yes",
+        intervention_type: "visit",
+        estimated_time: "17:30",
+        contact_next_person: "no",
+        summary: "Marc will visit.",
+      }),
+    };
+
+    const julieCall = deps.repository
+      .listCallEvents(pending.id)
+      .find((call) => call.agentType === "family");
+    const resumed = await processFamilyResult(deps, pending, julieCall!.id);
+
+    expect(resumed.status).toBe("CASE_CLOSED");
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(2);
+    expect(deps.repository.listTimeline(resumed.id).map((entry) => entry.message)).toEqual([
+      "Check-in call started",
+      "Check-in call completed",
+      "Fall and mobility difficulty detected",
+      "Calling Julie",
+      "No answer",
+      "Calling Marc",
+      "Marc answered",
+      "Visit confirmed at 17:30",
+      "Case closed",
+    ]);
+  });
+
+  it("stops immediately after a confirmation and never calls the third contact", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.familyResultsByContact = {
+      contact_julie: familyResult("contact_julie", {
+        answered: "yes",
+        can_intervene: "yes",
+        intervention_type: "visit",
+        estimated_time: "18:00",
+      }),
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("CASE_CLOSED");
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
+    const called = adapter.startFamilyCallSpy.mock.calls.map(
+      ([input]) => (input as FamilyCallInput).contact.id
+    );
+    expect(called).toEqual(["contact_julie"]);
+  });
+
+  it("does not treat a non-committal answer as a confirmation", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.familyResultsByContact = {
+      contact_julie: familyResult("contact_julie", {
+        answered: "yes",
+        can_intervene: "unknown",
+        summary: "Julie said she would see.",
+      }),
+      contact_marc: familyResult("contact_marc", {
+        answered: "yes",
+        can_intervene: "yes",
+        intervention_type: "visit",
+        estimated_time: "17:30",
+      }),
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    // Julie is recorded as declined, not confirmed, and Marc is still called.
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(2);
+    expect(event.status).toBe("CASE_CLOSED");
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    expect(messages).toContain("Julie declined");
+    expect(messages).toContain("Calling Marc");
+  });
+
+  it("continues the cascade when a family call fails outright", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.nextFamilyStatus = "failed";
+    adapter.nextFamilyFailure = { code: "invalid_phone", message: "Invalid recipient number." };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    // All three contacts attempted, then human review — never a silent stop.
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(3);
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    expect(messages).toContain("Could not reach Julie — Invalid recipient number.");
+    expect(messages).toContain("Human review required — no contacts remaining");
+  });
+
+  it("routes a result naming the wrong contact to human review without calling anyone else", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.familyResultsByContact = {
+      // The model claims this is Marc's result, but KinCall called Julie.
+      contact_julie: familyResult("contact_marc", {
+        answered: "yes",
+        can_intervene: "yes",
+        intervention_type: "visit",
+        estimated_time: "17:30",
+      }),
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(event.closedAt).toBeNull();
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
+    expect(deps.repository.listTimeline(event.id).map((entry) => entry.message)).toContain(
+      "Human review required — family result identified the wrong contact"
+    );
+  });
+
+  it("treats a no-answer's sentinel values as a valid result, not a malformed one", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.familyResultsByContact = {
+      // intervention_type "other" + estimated_time "" — the DEC-005 sentinels.
+      contact_julie: familyResult("contact_julie"),
+      contact_marc: familyResult("contact_marc", {
+        answered: "yes",
+        can_intervene: "yes",
+        // Confirmed but no time given: falls back to the generic wording.
+        intervention_type: "other",
+        estimated_time: "",
+      }),
+    };
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("CASE_CLOSED");
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    expect(messages).not.toContain("Human review required — malformed family result");
+    expect(messages).toContain("Intervention confirmed");
+  });
+
+  it("shares only the signals the companion result actually established", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = {
+      ...attentionCompanionResult,
+      mobility_difficulty: "no",
+      person_does_not_want_to_disturb_family: "no",
+    };
+    adapter.familyResultsByContact = {
+      contact_julie: familyResult("contact_julie", { answered: "yes", can_intervene: "yes" }),
+    };
+
+    const deps = createDeps(adapter);
+    await startDemoEvent("person_marie", deps);
+
+    const [input] = adapter.startFamilyCallSpy.mock.calls[0] as [FamilyCallInput];
+    expect(input.informationToShare).toEqual(["mentioned a fall"]);
+    expect(input.informationToShare).not.toContain("described difficulty moving around");
+  });
+});
+
+describe("family cascade — unusable contact phone numbers", () => {
+  it("routes to human review without calling CALL-E when a live number is unconfigured", async () => {
+    vi.stubEnv("CALLE_MODE", "live");
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+
+    // Seeded contacts keep their reserved-for-fiction defaults here, which is
+    // exactly the "you forgot to set KINCALL_JULIE_PHONE" situation.
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(adapter.startFamilyCallSpy).not.toHaveBeenCalled();
+
+    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    // No misleading "Calling Julie" for a call that never happened.
+    expect(messages).not.toContain("Calling Julie");
+    expect(messages.some((message) => message.includes("KINCALL_JULIE_PHONE"))).toBe(true);
+    expect(messages.some((message) => message.includes("+33639980002"))).toBe(false);
+
+    vi.unstubAllEnvs();
+  });
+
+  it("still runs the cascade in fake mode with reserved numbers", async () => {
+    const deps = createDeps();
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("CASE_CLOSED");
+  });
+
+  it("routes to human review when starting the call throws unexpectedly", async () => {
+    const adapter = new ScriptedCalleAdapter();
+    adapter.nextCompanionResult = attentionCompanionResult;
+    adapter.startFamilyCallSpy.mockImplementation(() => {
+      throw new Error("network unreachable");
+    });
+
+    const deps = createDeps(adapter);
+    const event = await startDemoEvent("person_marie", deps);
+
+    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(deps.repository.listTimeline(event.id).map((entry) => entry.message)).toContain(
+      "Human review required — could not start the call to Julie (network unreachable)"
+    );
   });
 });
 
@@ -377,11 +653,18 @@ describe("processCompanionResult — call lifecycle (live-mode async statuses)",
 
     adapter.nextCompanionStatus = "completed";
     adapter.nextCompanionResult = attentionCompanionResult;
+    // The family calls stay queued, so the cascade starts but does not finish.
+    adapter.nextFamilyStatus = "queued";
 
     const callEvent = deps.repository.listCallEvents(pending.id)[0];
     const resumed = await processCompanionResult(deps, pending, callEvent.id);
 
-    expect(resumed.status).toBe("ATTENTION_REQUIRED");
+    // A concerning companion result immediately starts the first family call.
+    expect(resumed.status).toBe("CALLING_TRUSTED_CONTACT");
+    expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
+    expect(deps.repository.listTimeline(pending.id).map((entry) => entry.message)).toContain(
+      "Fall and mobility difficulty detected"
+    );
   });
 
   it("routes a canceled call to human review", async () => {

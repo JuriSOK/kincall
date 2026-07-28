@@ -1,5 +1,7 @@
 import { buildCompanionTask, companionResultSchema } from "@/prompts/companion-agent";
-import { isE164, maskPhone } from "../phone";
+import { buildFamilyResultSchema, buildFamilyTask } from "@/prompts/family-agent";
+import { CONTACT_PHONE_ENV_VARS } from "../database/seed";
+import { describeUnusablePhone } from "../phone";
 import type {
   AgentType,
   CalleAdapter,
@@ -92,15 +94,11 @@ export class LiveCalleAdapter implements CalleAdapter {
   }
 
   async startCompanionCall(input: CompanionCallInput): Promise<CallReference> {
-    // Fail here rather than spending a call credit on a request CALL-E will
-    // reject with `invalid_phone`. The number stays masked in the message.
-    if (!isE164(input.person.phone)) {
-      throw new Error(
-        `Cannot place a live Companion call to ${input.person.firstName}: ` +
-          `${maskPhone(input.person.phone)} is not a valid E.164 number. ` +
-          "Set KINCALL_DEMO_PHONE to a consenting test participant's number."
-      );
-    }
+    // Last line of defence — the orchestrator pre-flights the same check before
+    // transitioning, so reaching this throw means something bypassed it. Fails
+    // before any fetch, so no call credit is spent and no unconsenting number
+    // is ever dialled. The number stays masked in the message.
+    this.assertDialable(input.person.phone, input.person.id, input.person.firstName, "Companion");
 
     const region = regionFromLocale(input.person.preferredLanguage);
     const recipient: Record<string, unknown> = {
@@ -134,8 +132,59 @@ export class LiveCalleAdapter implements CalleAdapter {
     return { callId: callTask.id, idempotencyKey: input.idempotencyKey };
   }
 
-  async startFamilyCall(_input: FamilyCallInput): Promise<CallReference> {
-    throw new Error("LiveCalleAdapter.startFamilyCall is not implemented until Phase 4.");
+  async startFamilyCall(input: FamilyCallInput): Promise<CallReference> {
+    this.assertDialable(
+      input.contact.phone,
+      input.contact.id,
+      input.contact.firstName,
+      "Family"
+    );
+
+    // TrustedContact has no language field in the frozen §16 schema, so the
+    // call inherits the vulnerable person's locale (see DEC-005).
+    const region = regionFromLocale(input.person.preferredLanguage);
+    const recipient: Record<string, unknown> = {
+      phones: [input.contact.phone],
+      locale: input.person.preferredLanguage,
+    };
+    if (region) {
+      recipient.region = region;
+    }
+
+    const body: Record<string, unknown> = {
+      task: buildFamilyTask(input.person, input.contact, input.informationToShare),
+      recipients: [recipient],
+      result_schema: buildFamilyResultSchema(input.contact.id),
+      metadata: {
+        kincall_event_id: input.eventId,
+        kincall_idempotency_key: input.idempotencyKey,
+        kincall_agent_type: "family",
+        kincall_contact_id: input.contact.id,
+      },
+    };
+    if (this.webhookUrl) {
+      body.webhook_url = this.webhookUrl;
+    }
+
+    const callTask = await this.request<CallTaskResponse>(
+      "POST",
+      "/v1/calls",
+      body,
+      input.idempotencyKey
+    );
+    return { callId: callTask.id, idempotencyKey: input.idempotencyKey };
+  }
+
+  private assertDialable(
+    phone: string,
+    subjectId: string,
+    firstName: string,
+    agent: "Companion" | "Family"
+  ): void {
+    const problem = describeUnusablePhone(phone, CONTACT_PHONE_ENV_VARS[subjectId]);
+    if (problem) {
+      throw new Error(`Cannot place a live ${agent} call to ${firstName}: ${problem}`);
+    }
   }
 
   async getCallResult(callId: string): Promise<CallResult> {

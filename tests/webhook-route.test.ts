@@ -150,17 +150,52 @@ describe("POST /api/webhooks/calle", () => {
     expect(repository.getEvent(event.id)?.status).toBe("CONVERSATION_IN_PROGRESS");
   });
 
-  it("acknowledges a family-agent webhook as a no-op (live cascade is Phase 4)", async () => {
-    const { event, callEvent, idempotencyKey } = seedPendingCompanionCall("family");
+  it("resumes the cascade when a family-agent webhook arrives", async () => {
+    const repository = getRepository();
+    const created = repository.createEvent("person_marie");
+    // Mid-cascade: Julie has been called and KinCall is waiting on her result.
+    for (const status of [
+      "CALLING_PERSON",
+      "CONVERSATION_IN_PROGRESS",
+      "ANALYSING_CONVERSATION",
+      "ATTENTION_REQUIRED",
+      "CALLING_TRUSTED_CONTACT",
+    ] as const) {
+      repository.updateEvent(created.id, { status });
+    }
+    const event = repository.getEvent(created.id)!;
+
+    const idempotencyKey = `${event.runId}_contact_julie_attempt_1`;
+    const callEvent = repository.createCallEvent({
+      eventId: event.id,
+      agentType: "family",
+      contactId: "contact_julie",
+      calleCallId: `fake_family_contact_julie_${randomUUID()}`,
+      idempotencyKey,
+      status: "in_progress",
+      summary: null,
+      structuredResult: null,
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+      resultProcessedAt: null,
+    });
 
     const response = await POST(
       request(webhookPayload(callEvent.calleCallId, idempotencyKey, "family"))
     );
 
     expect(response.status).toBe(200);
-    const repository = getRepository();
-    expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).toBeNull();
-    expect(repository.getEvent(event.id)?.status).toBe("CONVERSATION_IN_PROGRESS");
+    expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).not.toBeNull();
+    // Julie did not answer, so the webhook advances the cascade to Marc, who
+    // confirms — the case closes without a second inbound delivery.
+    expect(repository.getEvent(event.id)?.status).toBe("CASE_CLOSED");
+    expect(repository.listTimeline(event.id).map((entry) => entry.message)).toEqual([
+      "No answer",
+      "Calling Marc",
+      "Marc answered",
+      "Visit confirmed at 17:30",
+      "Case closed",
+    ]);
   });
 
   it("processes a valid companion webhook and advances the event", async () => {
@@ -170,7 +205,9 @@ describe("POST /api/webhooks/calle", () => {
 
     expect(response.status).toBe(200);
     const repository = getRepository();
-    expect(repository.getEvent(event.id)?.status).toBe("ATTENTION_REQUIRED");
+    // Fake-mode family results are instant, so the companion webhook carries
+    // the event through the whole cascade in one delivery.
+    expect(repository.getEvent(event.id)?.status).toBe("CASE_CLOSED");
     expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).not.toBeNull();
   });
 
@@ -186,6 +223,6 @@ describe("POST /api/webhooks/calle", () => {
 
     expect(second.status).toBe(200);
     expect(repository.listTimeline(event.id)).toEqual(timelineAfterFirst);
-    expect(repository.getEvent(event.id)?.status).toBe("ATTENTION_REQUIRED");
+    expect(repository.getEvent(event.id)?.status).toBe("CASE_CLOSED");
   });
 });

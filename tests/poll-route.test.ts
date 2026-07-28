@@ -59,19 +59,27 @@ describe("POST /api/events/[id]/poll", () => {
     await expect(response.json()).resolves.toEqual({ status: "SCHEDULED" });
   });
 
-  it("processes a terminal companion call and returns the resulting status", async () => {
+  it("processes a terminal companion call and drives the cascade to a close", async () => {
     const { event, callEvent } = seedPendingCompanionCall();
 
     const response = await pollRequest(event.id);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ATTENTION_REQUIRED" });
+    // In fake mode every family result is instant, so one poll carries the
+    // event all the way from the companion result to a confirmed intervention.
+    await expect(response.json()).resolves.toEqual({ status: "CASE_CLOSED" });
 
     const repository = getRepository();
     expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).not.toBeNull();
     expect(repository.listTimeline(event.id).map((entry) => entry.message)).toEqual([
       "Check-in call completed",
       "Fall and mobility difficulty detected",
+      "Calling Julie",
+      "No answer",
+      "Calling Marc",
+      "Marc answered",
+      "Visit confirmed at 17:30",
+      "Case closed",
     ]);
   });
 
@@ -83,7 +91,7 @@ describe("POST /api/events/[id]/poll", () => {
 
     const response = await pollRequest(event.id);
 
-    await expect(response.json()).resolves.toEqual({ status: "ATTENTION_REQUIRED" });
+    await expect(response.json()).resolves.toEqual({ status: "CASE_CLOSED" });
     expect(getRepository().listTimeline(event.id)).toEqual(timelineAfterFirst);
   });
 });

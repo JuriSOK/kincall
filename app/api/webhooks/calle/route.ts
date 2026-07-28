@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCalleAdapter } from "@/lib/calle/adapter";
 import { parseCalleWebhookEvent, verifyCalleWebhookSignature } from "@/lib/calle/webhook";
 import { getRepository } from "@/lib/database/store";
-import { processCompanionResult } from "@/lib/orchestration/engine";
+import { processCompanionResult, processFamilyResult } from "@/lib/orchestration/engine";
 
 export async function POST(request: Request) {
   const secret = process.env.CALLE_WEBHOOK_SECRET;
@@ -47,15 +47,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // Family Agent webhooks aren't dispatched until Phase 4.
-  if (callEvent.agentType === "companion") {
-    const event = repository.getEvent(callEvent.eventId);
-    if (event) {
-      await processCompanionResult(
-        { repository, calleAdapter: getCalleAdapter() },
-        event,
-        callEvent.id
-      );
+  const event = repository.getEvent(callEvent.eventId);
+  if (event) {
+    const deps = { repository, calleAdapter: getCalleAdapter() };
+    if (callEvent.agentType === "companion") {
+      await processCompanionResult(deps, event, callEvent.id);
+    } else {
+      // Resumes the cascade: this contact's result is applied and, unless it
+      // confirmed an intervention, the next contact is called.
+      await processFamilyResult(deps, event, callEvent.id);
     }
   }
 

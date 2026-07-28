@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FakeCalleAdapter } from "@/lib/calle/fake-adapter";
-import type { VulnerablePerson } from "@/lib/database/types";
+import type { TrustedContact, VulnerablePerson } from "@/lib/database/types";
 
 function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
   return {
@@ -11,6 +11,19 @@ function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
     conversationProfile: "cognitive_friendly",
     preferredCallTime: "09:00",
     interests: ["gardening", "family"],
+    consentStatus: "confirmed",
+    ...overrides,
+  };
+}
+
+function contact(overrides: Partial<TrustedContact> = {}): TrustedContact {
+  return {
+    id: "contact_julie",
+    personId: "person_marie",
+    firstName: "Julie",
+    phone: "+33639980002",
+    relationship: "daughter",
+    priority: 1,
     consentStatus: "confirmed",
     ...overrides,
   };
@@ -39,29 +52,31 @@ describe("FakeCalleAdapter", () => {
   it("returns Julie's no-answer result", async () => {
     const adapter = new FakeCalleAdapter();
     const reference = await adapter.startFamilyCall({
-      personId: "person_marie",
-      contactId: "contact_julie",
+      eventId: "event_001",
+      person: person(),
+      contact: contact(),
       idempotencyKey: "event_001_contact_julie_attempt_1",
       informationToShare: [],
     });
     const result = await adapter.getCallResult(reference.callId);
 
-    expect(result.structuredResult).toMatchObject({ answered: false });
+    expect(result.structuredResult).toMatchObject({ answered: "no", intervention_type: "other", estimated_time: "" });
   });
 
   it("returns Marc's confirmation result", async () => {
     const adapter = new FakeCalleAdapter();
     const reference = await adapter.startFamilyCall({
-      personId: "person_marie",
-      contactId: "contact_marc",
+      eventId: "event_001",
+      person: person(),
+      contact: contact({ id: "contact_marc", firstName: "Marc", relationship: "son", priority: 2 }),
       idempotencyKey: "event_001_contact_marc_attempt_1",
       informationToShare: [],
     });
     const result = await adapter.getCallResult(reference.callId);
 
     expect(result.structuredResult).toMatchObject({
-      answered: true,
-      can_intervene: true,
+      answered: "yes",
+      can_intervene: "yes",
       estimated_time: "17:30",
     });
   });

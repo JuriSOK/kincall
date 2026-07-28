@@ -14,13 +14,17 @@ export function handleFamilyResult(
   result: FamilyStructuredResult,
   remainingContacts: TrustedContact[]
 ): FamilyOutcome {
-  if (result.can_intervene) {
+  // Only an explicit "yes" stops the cascade (DEC-005). "unknown" means the
+  // contact was vague or non-committal, and KinCall must never record a
+  // hesitant answer as a confirmed intervention (§7.5) — it keeps looking for
+  // someone who will actually commit.
+  if (result.can_intervene === "yes") {
     return { kind: "confirmed" };
   }
 
   const nextContact = remainingContacts[0];
 
-  if (result.answered) {
+  if (result.answered === "yes") {
     if (!nextContact) return { kind: "declined_no_contacts_remaining" };
     return { kind: "declined", nextContactId: nextContact.id };
   }

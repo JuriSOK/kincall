@@ -21,14 +21,20 @@ export interface CompanionStructuredResult {
   recommended_attention_level: AttentionLevel;
 }
 
+// Categorical like the Companion shape (DEC-005): CALL-E's own result_schema
+// guidance prefers string enums with an explicit `unknown` over booleans for
+// decisions that may be unclear, and only `can_intervene: "yes"` may ever stop
+// the cascade. `intervention_type`/`estimated_time` are total rather than
+// nullable — CALL-E's result_schema has no null support, so a no-answer uses
+// the "other"/"" sentinels instead of producing an invalid result.
 export interface FamilyStructuredResult {
   contact_id: string;
-  answered: boolean;
-  situation_understood: boolean;
-  can_intervene: boolean;
-  intervention_type: "visit" | "call" | "other" | null;
-  estimated_time: string | null;
-  contact_next_person: boolean;
+  answered: YesNoUnknown;
+  situation_understood: YesNoUnknown;
+  can_intervene: YesNoUnknown;
+  intervention_type: "visit" | "call" | "other";
+  estimated_time: string;
+  contact_next_person: YesNoUnknown;
   summary: string;
 }
 
@@ -63,19 +69,18 @@ export function isCompanionStructuredResult(value: unknown): value is CompanionS
 export function isFamilyStructuredResult(value: unknown): value is FamilyStructuredResult {
   if (!isRecord(value)) return false;
   if (typeof value.contact_id !== "string") return false;
-  if (typeof value.answered !== "boolean") return false;
-  if (typeof value.situation_understood !== "boolean") return false;
-  if (typeof value.can_intervene !== "boolean") return false;
+  if (!isYesNoUnknown(value.answered)) return false;
+  if (!isYesNoUnknown(value.situation_understood)) return false;
+  if (!isYesNoUnknown(value.can_intervene)) return false;
+  if (!isYesNoUnknown(value.contact_next_person)) return false;
   if (
-    value.intervention_type !== null &&
     value.intervention_type !== "visit" &&
     value.intervention_type !== "call" &&
     value.intervention_type !== "other"
   ) {
     return false;
   }
-  if (value.estimated_time !== null && typeof value.estimated_time !== "string") return false;
-  if (typeof value.contact_next_person !== "boolean") return false;
+  if (typeof value.estimated_time !== "string") return false;
   if (typeof value.summary !== "string") return false;
   return true;
 }

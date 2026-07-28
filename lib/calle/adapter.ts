@@ -1,6 +1,6 @@
 import { FakeCalleAdapter } from "./fake-adapter";
 import { LiveCalleAdapter } from "./live-adapter";
-import type { VulnerablePerson } from "../database/types";
+import type { TrustedContact, VulnerablePerson } from "../database/types";
 
 export type AgentType = "companion" | "family";
 
@@ -17,9 +17,14 @@ export interface CompanionCallInput {
 }
 
 export interface FamilyCallInput {
-  personId: string;
-  contactId: string;
+  eventId: string;
+  // Full records for the same reason CompanionCallInput carries `person`:
+  // LiveCalleAdapter needs the contact's phone and the person's name to build
+  // the request, and has no repository access of its own.
+  person: VulnerablePerson;
+  contact: TrustedContact;
   idempotencyKey: string;
+  // The complete set of facts this call is allowed to mention (§17.3).
   informationToShare: string[];
 }
 

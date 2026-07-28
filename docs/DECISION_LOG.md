@@ -157,6 +157,52 @@ Project owner approval: approved (fix requested directly after the `idempotency_
 
 ---
 
+## DEC-005 — Live Family Agent: categorical result, resumable cascade, and untrusted `contact_id`
+
+**Date:** 28 July 2026
+**Status:** Approved
+
+### Context
+
+Phase 4 connects the live Family Agent and the trusted-contact cascade. Three things in the existing implementation could not survive contact with the real API, and a fourth was a latent safety gap:
+
+1. **The cascade was synchronous.** `runFamilyCascade` was a `while` loop that started a call and read its result in the same request. That works only because `FakeCalleAdapter` returns `completed` instantly. A real CALL-E call returns `queued`, and `processFamilyResult` had no status branching, so the first live family call would have read `structured_result: null`, judged it malformed, and dumped the event into `HUMAN_REVIEW_REQUIRED` — the same "pending is not malformed" defect DEC-003 fixed for the Companion path.
+2. **`FamilyStructuredResult` used booleans.** CALL-E's own `result_schema` guidance prefers string enums with an explicit `unknown` for decisions that may be unclear, which is why DEC-002 flattened the Companion schema. A boolean `can_intervene` forces the extraction model to guess `true` or `false` when a contact is vague, and a wrong `true` stops the cascade while asserting that somebody is intervening.
+3. **`intervention_type` and `estimated_time` were nullable**, but CALL-E's `result_schema` has no null support. A perfectly ordinary no-answer has neither value, so the result would have failed validation and diverted a normal cascade step to human review.
+4. **`contact_id` came from the model.** Nothing checked it against the contact KinCall actually called.
+
+Additionally, trusted-contact phone numbers were seeded as reserved-for-fiction defaults with no way to configure real ones — and those defaults are structurally valid E.164, so an `isE164` check alone would have let them be dialled.
+
+### Decision
+
+1. **Resumable cascade.** `runFamilyCascade` becomes `advanceFamilyCascade`, handling one contact per inbound event. `processFamilyResult` gains status branching (`queued`/`in_progress` → no-op and wait; terminal → apply and advance) and recurses into `advanceFamilyCascade`. Which contact is next is **derived** from the `CallEventRecord`s already created, never stored, so a webhook redelivery or a poll cannot lose the cascade's place. `processCompanionResult` starts the cascade when it reaches `ATTENTION_REQUIRED`, giving `startDemoEvent`, the webhook route and the poll route one shared trigger. Fake mode is unaffected: results are instant, so the whole cascade still completes in one request.
+2. **Categorical Family result.** `answered`, `situation_understood`, `can_intervene` and `contact_next_person` become `yes`/`no`/`unknown`. **Only `can_intervene === "yes"` stops the cascade**; `"unknown"` is treated as not-confirmed and the cascade continues, so a hesitant answer can never be recorded as a confirmed intervention (§7.5).
+3. **Total sentinels instead of nulls.** `intervention_type` is `"other"` and `estimated_time` is `""` when they do not apply, so a no-answer or decline produces a schema-valid result rather than a malformed one.
+4. **A failed or canceled Family call continues the cascade.** CALL-E documents no `failure_code` values, so the reason is unknowable; the contact simply was not reached, and the next one is called with the failure recorded verbatim in the timeline. Halting instead would let one bad phone number strand the vulnerable person with nobody called.
+5. **`contact_id` is untrusted input.** The contact is always resolved from `callEvent.contactId`. `structured_result.contact_id` is verified to equal it, and a mismatch routes to `HUMAN_REVIEW_REQUIRED` — never to whichever contact the model named.
+6. **Per-contact live phone configuration.** `KINCALL_JULIE_PHONE` / `KINCALL_MARC_PHONE` / `KINCALL_NICOLE_PHONE`, defaulting to the reserved-for-fiction numbers. Both the orchestrator (pre-flight) and `LiveCalleAdapter` (defence in depth) reject a number that is non-E.164 **or** reserved-for-fiction, always masked and always naming the variable to set.
+7. **A configuration error must never strand an event.** The pre-flight runs *before* any transition, so no misleading "Calling Julie" entry is written for a call that never happens; it applies the new `FAMILY_CALL_NOT_POSSIBLE` transition to `HUMAN_REVIEW_REQUIRED` and makes no CALL-E request. Any other failure while starting a call is caught, recorded in the timeline, and routed to `HUMAN_REVIEW_REQUIRED` — so the webhook and poll routes always respond and no event is left at `CALLING_TRUSTED_CONTACT` with nothing in flight.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted. §9.3's fields are preserved exactly — only their wire representation changes, as in DEC-002. `FAMILY_CALL_NOT_POSSIBLE` reaches the existing frozen §15 state `HUMAN_REVIEW_REQUIRED`; no new state exists. The cascade's observable behaviour — call the trusted circle in priority order, stop when someone confirms, escalate to human review when nobody does — is exactly what §9.3 and §11.4 specify. Deriving `information_to_share` from the validated Companion result is §9.2's own field, and fixes a defect in which a hardcoded list stated facts to a family member that the check-in had never established (§17.3, §17.5).
+
+### Consequences
+
+- `lib/orchestration/handle-family-result.ts` reads enums; `FamilyOutcome` is unchanged.
+- `FamilyCallInput` widens to carry `eventId`, the full `person` and the full `contact`, mirroring the Phase 3 Companion widening.
+- `TrustedContact` has no language field in the frozen §16 schema, so a Family call inherits the vulnerable person's `locale`/`region`. Revisit if a contact ever speaks another language.
+- `EventRecord.currentContactPriority` — a frozen §9 column that was dead — is now populated, but only for display; the cascade reads the derived already-called set.
+- Fake mode is byte-identical: the Marie → Julie → Marc demo produces the same nine timeline entries and the same `CASE_CLOSED` outcome.
+- Recursion depth is bounded by the number of trusted contacts.
+- One attempt per contact. Per-contact re-dialling is recurring retry scheduling, still out of scope (see DEC-003).
+
+### Approval
+
+Project owner approval: approved, with two mandatory corrections (per-contact phone environment variables, and never trusting the model-returned `contact_id`) and two additional safeguards (a configuration error must not strand the event or crash the route; no-answer and decline must produce valid results via the sentinels) all specified before implementation.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

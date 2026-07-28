@@ -30,22 +30,24 @@ const COMPANION_SCENARIOS: Record<string, CompanionStructuredResult> = {
 const FAMILY_SCENARIOS: Record<string, FamilyStructuredResult> = {
   contact_julie: {
     contact_id: "contact_julie",
-    answered: false,
-    situation_understood: false,
-    can_intervene: false,
-    intervention_type: null,
-    estimated_time: null,
-    contact_next_person: true,
+    answered: "no",
+    situation_understood: "unknown",
+    can_intervene: "no",
+    // Sentinels, not nulls (DEC-005): a no-answer must still be a schema-valid
+    // result, otherwise an ordinary cascade step looks malformed.
+    intervention_type: "other",
+    estimated_time: "",
+    contact_next_person: "yes",
     summary: "Julie did not answer.",
   },
   contact_marc: {
     contact_id: "contact_marc",
-    answered: true,
-    situation_understood: true,
-    can_intervene: true,
+    answered: "yes",
+    situation_understood: "yes",
+    can_intervene: "yes",
     intervention_type: "visit",
     estimated_time: "17:30",
-    contact_next_person: false,
+    contact_next_person: "no",
     summary: "Marc confirmed that he will visit Marie at 17:30.",
   },
 };
@@ -77,7 +79,7 @@ export class FakeCalleAdapter implements CalleAdapter {
 
   async startFamilyCall(input: FamilyCallInput): Promise<CallReference> {
     return {
-      callId: encodeCallId("family", input.contactId),
+      callId: encodeCallId("family", input.contact.id),
       idempotencyKey: input.idempotencyKey,
     };
   }

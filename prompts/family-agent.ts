@@ -1,0 +1,110 @@
+import type { TrustedContact, VulnerablePerson } from "@/lib/database/types";
+
+// Builds the natural-language `task` sent to CALL-E for a Family Agent call,
+// per PRODUCT_SPECIFICATION.md §9.3 (direct, factual, calm, decision-oriented
+// — deliberately not a long conversation), §17.2 (must identify itself as an
+// automated assistant) and §17.3 (transmit only what is necessary).
+//
+// `informationToShare` is the complete set of facts this call may mention. It
+// is chosen deterministically by the orchestrator from the validated Companion
+// result — the agent must not add anything from the original conversation.
+//
+// The contact's phone number is never written into the task text: it belongs in
+// the CALL-E request's `recipients[].phones` only (CLAUDE.md safety rules).
+export function buildFamilyTask(
+  person: VulnerablePerson,
+  contact: TrustedContact,
+  informationToShare: string[]
+): string {
+  const facts =
+    informationToShare.length > 0
+      ? informationToShare.map((fact) => `- ${fact}`).join("\n")
+      : "- no specific detail was recorded";
+
+  return [
+    `Call ${contact.firstName}, who is the ${contact.relationship} of ${person.firstName}, on behalf of KinCall.`,
+    "Introduce yourself immediately and clearly as KinCall, an automated assistant that regularly checks in on " +
+      `${person.firstName} — do not claim to be a family member, a doctor, a nurse, an emergency operator or any human service.`,
+    "Be brief, factual and calm. This is not a long conversation: the goal is to share the situation and find out whether they can help today.",
+    `Explain that you have just spoken with ${person.firstName}, and share only these facts:`,
+    facts,
+    "Report each fact as something the person said or indicated, never as a diagnosis or a certainty. " +
+      `For example say "${person.firstName} told me she is having difficulty walking", not "${person.firstName} cannot walk".`,
+    "Do not repeat the rest of the conversation, do not speculate about causes, do not give medical advice, and do not promise that anyone will intervene.",
+    `Then ask clearly whether they are able to check on ${person.firstName} today, for example by visiting or by calling her.`,
+    "If they can, find out what they intend to do and roughly at what time. If they cannot, ask whether you should contact the next person in the trusted circle.",
+    "End the call politely as soon as you have a clear answer.",
+  ].join(" ");
+}
+
+// Categorical result_schema (docs/DECISION_LOG.md DEC-005) — matches
+// lib/calle/schemas.ts's FamilyStructuredResult field-for-field.
+// Hand-written literal: CALL-E's result_schema supports no $ref and no null,
+// hence the "other"/"" sentinels rather than nullable fields.
+export function buildFamilyResultSchema(contactId: string) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "contact_id",
+      "answered",
+      "situation_understood",
+      "can_intervene",
+      "intervention_type",
+      "estimated_time",
+      "contact_next_person",
+      "summary",
+    ],
+    properties: {
+      contact_id: {
+        type: "string",
+        description:
+          `Always return exactly this identifier, copied verbatim: "${contactId}". ` +
+          "Never substitute the person's name, a phone number, or any other identifier.",
+      },
+      answered: {
+        type: "string",
+        enum: ["yes", "no", "unknown"],
+        description:
+          "Use yes only if the person themselves answered and spoke with you. Use no for voicemail, an answering machine, or no pick-up. Use unknown if you cannot tell.",
+      },
+      situation_understood: {
+        type: "string",
+        enum: ["yes", "no", "unknown"],
+        description:
+          "Use yes if they acknowledged understanding what you told them about the situation. Use unknown if it was not clear.",
+      },
+      can_intervene: {
+        type: "string",
+        enum: ["yes", "no", "unknown"],
+        description:
+          "Use yes ONLY if they clearly committed to checking on the person today. Use no if they clearly said they cannot. " +
+          "Use unknown for anything vague, conditional or non-committal such as 'maybe', 'I'll try' or 'I'll see' — do not guess yes.",
+      },
+      intervention_type: {
+        type: "string",
+        enum: ["visit", "call", "other"],
+        description:
+          "How they said they would check in: visit if they will go in person, call if they will telephone. " +
+          "Use other when no intervention applies, including when nobody answered or they declined. Never leave this empty.",
+      },
+      estimated_time: {
+        type: "string",
+        description:
+          "The time they said they would check in, as they said it (for example \"17:30\" or \"this evening\"). " +
+          "Return an empty string when no time is known, including when nobody answered or they declined. Never return null.",
+      },
+      contact_next_person: {
+        type: "string",
+        enum: ["yes", "no", "unknown"],
+        description:
+          "Use yes if they explicitly asked that someone else in the trusted circle be contacted instead. Use unknown if it did not come up.",
+      },
+      summary: {
+        type: "string",
+        description:
+          "One or two neutral sentences describing what this contact said and what they agreed to do.",
+      },
+    },
+  } as const;
+}

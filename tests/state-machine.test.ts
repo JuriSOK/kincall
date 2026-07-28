@@ -33,6 +33,18 @@ describe("transitions", () => {
     expect(nextStatus("PERSON_DID_NOT_ANSWER", "COMPANION_CALL_STARTED")).toBe("CALLING_PERSON");
   });
 
+  it("reaches HUMAN_REVIEW_REQUIRED when a contact cannot be called at all", () => {
+    expect(nextStatus("ATTENTION_REQUIRED", "FAMILY_CALL_NOT_POSSIBLE")).toBe(
+      "HUMAN_REVIEW_REQUIRED"
+    );
+    expect(nextStatus("CONTACT_DID_NOT_ANSWER", "FAMILY_CALL_NOT_POSSIBLE")).toBe(
+      "HUMAN_REVIEW_REQUIRED"
+    );
+    expect(nextStatus("CONTACT_DECLINED", "FAMILY_CALL_NOT_POSSIBLE")).toBe(
+      "HUMAN_REVIEW_REQUIRED"
+    );
+  });
+
   it("still rejects an illegal transition out of ANALYSING_CONVERSATION", () => {
     expect(() => nextStatus("ANALYSING_CONVERSATION", "FAMILY_CONFIRMED")).toThrow(
       /Illegal transition/
@@ -149,21 +161,41 @@ describe("isCompanionStructuredResult", () => {
 describe("isFamilyStructuredResult", () => {
   const validFamilyResult = {
     contact_id: "contact_julie",
-    answered: false,
-    situation_understood: false,
-    can_intervene: false,
-    intervention_type: null,
-    estimated_time: null,
-    contact_next_person: true,
+    answered: "no",
+    situation_understood: "unknown",
+    can_intervene: "no",
+    intervention_type: "other",
+    estimated_time: "",
+    contact_next_person: "yes",
     summary: "No answer.",
   };
 
-  it("accepts a well-formed result", () => {
+  it("accepts a well-formed categorical result", () => {
     expect(isFamilyStructuredResult(validFamilyResult)).toBe(true);
   });
 
-  it("rejects a result with the wrong type for a field", () => {
-    expect(isFamilyStructuredResult({ ...validFamilyResult, answered: "yes" })).toBe(false);
+  it("accepts the no-answer sentinels rather than judging them malformed", () => {
+    expect(
+      isFamilyStructuredResult({
+        ...validFamilyResult,
+        intervention_type: "other",
+        estimated_time: "",
+      })
+    ).toBe(true);
+  });
+
+  it("rejects the pre-DEC-005 boolean shape", () => {
+    expect(isFamilyStructuredResult({ ...validFamilyResult, answered: false })).toBe(false);
+    expect(isFamilyStructuredResult({ ...validFamilyResult, can_intervene: true })).toBe(false);
+  });
+
+  it("rejects nulls where CALL-E can only send a sentinel", () => {
+    expect(isFamilyStructuredResult({ ...validFamilyResult, intervention_type: null })).toBe(false);
+    expect(isFamilyStructuredResult({ ...validFamilyResult, estimated_time: null })).toBe(false);
+  });
+
+  it("rejects an unrecognised enum value", () => {
+    expect(isFamilyStructuredResult({ ...validFamilyResult, answered: "maybe" })).toBe(false);
   });
 });
 

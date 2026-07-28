@@ -26,12 +26,12 @@ const nicole: TrustedContact = {
 function familyResult(overrides: Partial<FamilyStructuredResult>): FamilyStructuredResult {
   return {
     contact_id: "contact_julie",
-    answered: false,
-    situation_understood: false,
-    can_intervene: false,
-    intervention_type: null,
-    estimated_time: null,
-    contact_next_person: true,
+    answered: "no",
+    situation_understood: "unknown",
+    can_intervene: "no",
+    intervention_type: "other",
+    estimated_time: "",
+    contact_next_person: "yes",
     summary: "",
     ...overrides,
   };
@@ -39,12 +39,12 @@ function familyResult(overrides: Partial<FamilyStructuredResult>): FamilyStructu
 
 describe("handleFamilyResult", () => {
   it("calls the next contact when the first contact does not answer", () => {
-    const outcome = handleFamilyResult(familyResult({ answered: false }), [marc, nicole]);
+    const outcome = handleFamilyResult(familyResult({ answered: "no" }), [marc, nicole]);
     expect(outcome).toEqual({ kind: "no_answer", nextContactId: "contact_marc" });
   });
 
   it("calls the next contact when a contact declines", () => {
-    const outcome = handleFamilyResult(familyResult({ answered: true, can_intervene: false }), [
+    const outcome = handleFamilyResult(familyResult({ answered: "yes", can_intervene: "no" }), [
       marc,
       nicole,
     ]);
@@ -52,20 +52,36 @@ describe("handleFamilyResult", () => {
   });
 
   it("stops the cascade when a contact confirms", () => {
-    const outcome = handleFamilyResult(familyResult({ answered: true, can_intervene: true }), [
+    const outcome = handleFamilyResult(familyResult({ answered: "yes", can_intervene: "yes" }), [
       marc,
       nicole,
     ]);
     expect(outcome).toEqual({ kind: "confirmed" });
   });
 
+  it("does not confirm when the contact answered but was non-committal", () => {
+    const outcome = handleFamilyResult(
+      familyResult({ answered: "yes", can_intervene: "unknown" }),
+      [marc, nicole]
+    );
+    expect(outcome).toEqual({ kind: "declined", nextContactId: "contact_marc" });
+  });
+
+  it("does not confirm when reachability and intent are both unknown", () => {
+    const outcome = handleFamilyResult(
+      familyResult({ answered: "unknown", can_intervene: "unknown" }),
+      [marc, nicole]
+    );
+    expect(outcome).toEqual({ kind: "no_answer", nextContactId: "contact_marc" });
+  });
+
   it("requests human review when no contacts remain after a no-answer", () => {
-    const outcome = handleFamilyResult(familyResult({ answered: false }), []);
+    const outcome = handleFamilyResult(familyResult({ answered: "no" }), []);
     expect(outcome).toEqual({ kind: "no_answer_no_contacts_remaining" });
   });
 
   it("requests human review when no contacts remain after a decline", () => {
-    const outcome = handleFamilyResult(familyResult({ answered: true, can_intervene: false }), []);
+    const outcome = handleFamilyResult(familyResult({ answered: "yes", can_intervene: "no" }), []);
     expect(outcome).toEqual({ kind: "declined_no_contacts_remaining" });
   });
 });
