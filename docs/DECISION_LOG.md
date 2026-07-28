@@ -37,6 +37,35 @@ This is the smallest architecture that supports the frozen KinCall workflow whil
 
 ---
 
+## DEC-002 — Flat categorical Companion result_schema
+
+**Date:** 28 July 2026
+**Status:** Approved
+
+### Context
+
+Phase 3 (live Companion Agent integration) required reading CALL-E's actual OpenAPI spec (`calle.openapi.yaml` v0.2.0) rather than TECHNICAL_ARCHITECTURE.md §5's illustrative example. The spec documents real `result_schema` constraints: supported features are `type`/`properties`/`required`/`enum`/nested `object`/"simple" `array.items`; unsupported: `$ref`, `oneOf`, `anyOf`, `allOf`, recursive schemas, `additionalProperties: true`. It explicitly recommends "string enums over booleans... include an `unknown` enum value" for exactly this kind of extraction. PRODUCT_SPECIFICATION.md §9.1's example shows a nested `signals: [{type, value, confidence}]` array, which is both an array-of-objects (CALL-E's "simple array.items" support for this is undefined) and boolean-valued (against CALL-E's own stated preference).
+
+### Decision
+
+The Companion `result_schema` sent to CALL-E — and the corresponding `CompanionStructuredResult` TS type in `lib/calle/schemas.ts` — flattens the `signals[]` array into two top-level categorical fields (`fall_mentioned`, `mobility_difficulty`, each `yes`/`no`/`unknown`), matching TECHNICAL_ARCHITECTURE.md §5's own "Recommended categorical values" pattern. Every other field §9.1 describes (`person_requests_help`, `conversation_change.shorter_than_usual`, `conversation_change.unusual_confusion`) is kept, also flattened to top-level categorical fields rather than dropped. `call_status` is removed from the structured result because it is now redundant with the adapter-level `CallResult.status` field (sourced from CALL-E's own `CallTask.status`).
+
+### Product-scope check
+
+No product feature changes. §9.1 describes the *information* the Companion Agent gathers (fall mentioned, mobility difficulty, doesn't want to disturb family, unusual signals, attention level) — this decision only changes the wire representation of that same information, and preserves every field. Nothing is added, removed, or reinterpreted as mandatory/optional at the product level.
+
+### Consequences
+
+- `lib/calle/schemas.ts`, `lib/calle/fake-adapter.ts`, and `prompts/companion-agent.ts`'s `companionResultSchema` all use the flat shape.
+- Existing Phase 2 tests asserting the nested shape (`tests/state-machine.test.ts`, `tests/fake-adapter.test.ts`, `tests/engine.test.ts`) were updated to match.
+- Fake mode and live mode now share one Companion result shape, rather than diverging.
+
+### Approval
+
+Project owner approval: approved (confirmed via explicit choice between the nested and flattened shape during Phase 3 planning).
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.
