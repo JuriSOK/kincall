@@ -310,7 +310,8 @@ async function runFamilyCascade(deps: EngineDeps, event: EventRecord): Promise<E
 
     current = applyTransition(deps, current, "FAMILY_CALL_STARTED", `Calling ${contact.firstName}`);
 
-    const idempotencyKey = `${event.id}_${contact.id}_attempt_1`;
+    // Derived from runId, not id: see EventRecord.runId and DEC-004.
+    const idempotencyKey = `${event.runId}_${contact.id}_attempt_1`;
     const callEvent = await ensureFamilyCallStarted(
       deps,
       current.id,
@@ -346,7 +347,8 @@ export async function startDemoEvent(
   const created = deps.repository.createEvent(personId);
   let current = applyTransition(deps, created, "COMPANION_CALL_STARTED", "Check-in call started");
 
-  const idempotencyKey = `${current.id}_companion_attempt_1`;
+  // Derived from runId, not id: see EventRecord.runId and DEC-004.
+  const idempotencyKey = `${current.runId}_companion_attempt_1`;
   const callEvent = await ensureCompanionCallStarted(deps, current.id, personId, idempotencyKey);
 
   current = applyTransition(deps, current, "COMPANION_CONVERSATION_STARTED");

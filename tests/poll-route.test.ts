@@ -22,7 +22,7 @@ function seedPendingCompanionCall() {
     agentType: "companion",
     contactId: null,
     calleCallId: `fake_companion_person_marie_${randomUUID()}`,
-    idempotencyKey: `${event.id}_companion_attempt_1`,
+    idempotencyKey: `${event.runId}_companion_attempt_1`,
     status: "in_progress",
     summary: null,
     structuredResult: null,

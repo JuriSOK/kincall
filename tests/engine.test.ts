@@ -110,9 +110,9 @@ describe("startDemoEvent — Marie / Julie / Marc end-to-end", () => {
     expect(callEvents).toHaveLength(3);
     expect(new Set(callEvents.map((call) => call.idempotencyKey))).toEqual(
       new Set([
-        `${event.id}_companion_attempt_1`,
-        `${event.id}_contact_julie_attempt_1`,
-        `${event.id}_contact_marc_attempt_1`,
+        `${event.runId}_companion_attempt_1`,
+        `${event.runId}_contact_julie_attempt_1`,
+        `${event.runId}_contact_marc_attempt_1`,
       ])
     );
   });
@@ -268,11 +268,31 @@ describe("startDemoEvent — orchestration rules", () => {
 });
 
 describe("idempotency", () => {
+  it("derives different companion idempotency keys across two repository lifetimes even though their sequential event ids collide (DEC-004)", () => {
+    // Each InMemoryRepository stands in for one process lifetime: its
+    // eventSequence always restarts at 0, so both produce "event_001". If the
+    // idempotency key were still derived from that id, both "restarts" would
+    // reuse the exact same CALL-E idempotency key for a different request —
+    // the observed `idempotency_conflict` bug.
+    const before = new InMemoryRepository();
+    const beforeEvent = before.createEvent("person_marie");
+
+    const after = new InMemoryRepository();
+    const afterEvent = after.createEvent("person_marie");
+
+    expect(beforeEvent.id).toBe(afterEvent.id);
+    expect(beforeEvent.runId).not.toBe(afterEvent.runId);
+
+    const keyBefore = `${beforeEvent.runId}_companion_attempt_1`;
+    const keyAfter = `${afterEvent.runId}_companion_attempt_1`;
+    expect(keyBefore).not.toBe(keyAfter);
+  });
+
   it("does not start a second companion call for a duplicate retry with the same key", async () => {
     const adapter = new ScriptedCalleAdapter();
     const deps = createDeps(adapter);
     const event = deps.repository.createEvent("person_marie");
-    const idempotencyKey = `${event.id}_companion_attempt_1`;
+    const idempotencyKey = `${event.runId}_companion_attempt_1`;
 
     const first = await ensureCompanionCallStarted(deps, event.id, "person_marie", idempotencyKey);
     const second = await ensureCompanionCallStarted(deps, event.id, "person_marie", idempotencyKey);
@@ -286,7 +306,7 @@ describe("idempotency", () => {
     const deps = createDeps(adapter);
     const event = deps.repository.createEvent("person_marie");
     const julie = deps.repository.getTrustedContacts("person_marie")[0];
-    const idempotencyKey = `${event.id}_${julie.id}_attempt_1`;
+    const idempotencyKey = `${event.runId}_${julie.id}_attempt_1`;
 
     const first = await ensureFamilyCallStarted(
       deps,
@@ -313,7 +333,7 @@ describe("idempotency", () => {
     deps.repository.updateEvent(event.id, { status: "CALLING_PERSON" });
     deps.repository.updateEvent(event.id, { status: "CONVERSATION_IN_PROGRESS" });
 
-    const idempotencyKey = `${event.id}_companion_attempt_1`;
+    const idempotencyKey = `${event.runId}_companion_attempt_1`;
     const callEvent = await ensureCompanionCallStarted(
       deps,
       event.id,

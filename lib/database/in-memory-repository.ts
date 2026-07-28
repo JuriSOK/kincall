@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { EventStatus } from "../orchestration/states";
 import type { Repository } from "./repository";
 import type {
@@ -46,6 +47,9 @@ export class InMemoryRepository implements Repository {
     const id = `event_${String(this.eventSequence).padStart(3, "0")}`;
     const event: EventRecord = {
       id,
+      // crypto.randomUUID(), not derived from the sequential `id`: it must
+      // stay unique even after a process restart resets eventSequence to 0.
+      runId: randomUUID(),
       personId,
       status: "SCHEDULED",
       priority: null,

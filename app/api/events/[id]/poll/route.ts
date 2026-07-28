@@ -15,7 +15,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Unknown event." }, { status: 404 });
   }
 
-  const companionIdempotencyKey = `${event.id}_companion_attempt_1`;
+  // Derived from runId, not id: see EventRecord.runId and DEC-004.
+  const companionIdempotencyKey = `${event.runId}_companion_attempt_1`;
   const callEvent = repository.findCallEventByIdempotencyKey(companionIdempotencyKey);
 
   if (!callEvent) {

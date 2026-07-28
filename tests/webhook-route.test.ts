@@ -62,7 +62,7 @@ function seedPendingCompanionCall(agentType: "companion" | "family" = "companion
   repository.updateEvent(created.id, { status: "CALLING_PERSON" });
   const event = repository.updateEvent(created.id, { status: "CONVERSATION_IN_PROGRESS" });
 
-  const idempotencyKey = `${event.id}_${agentType}_attempt_1`;
+  const idempotencyKey = `${event.runId}_${agentType}_attempt_1`;
   const subjectId = agentType === "companion" ? "person_marie" : "contact_marc";
   const callEvent = repository.createCallEvent({
     eventId: event.id,

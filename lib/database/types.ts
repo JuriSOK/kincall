@@ -27,6 +27,14 @@ export interface TrustedContact {
 
 export interface EventRecord {
   id: string;
+  // Globally unique and immutable for the lifetime of this event, unlike
+  // `id` (a sequential, human-readable counter that restarts at 1 whenever
+  // the in-memory repository is recreated). Companion/Family idempotency
+  // keys are derived from this, not from `id` — CALL-E's idempotency store
+  // is durable across our restarts, so a key that can repeat after a
+  // restart is a correctness bug, not just a cosmetic one (see
+  // docs/DECISION_LOG.md DEC-004).
+  runId: string;
   personId: string;
   status: EventStatus;
   priority: Priority | null;
