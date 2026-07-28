@@ -95,11 +95,11 @@ describe("seeded contact phone configuration", () => {
     return repository;
   }
 
-  it("falls back to reserved-for-fiction numbers when nothing is configured", () => {
+  it("falls back to reserved-for-fiction numbers when nothing is configured", async () => {
     const repository = seeded();
-    const contacts = repository.getTrustedContacts("person_marie");
+    const contacts = await repository.getTrustedContacts("person_marie");
 
-    expect(repository.getPerson("person_marie")?.phone).toBe(RESERVED_FICTION_PHONES.marie);
+    expect((await repository.getPerson("person_marie"))?.phone).toBe(RESERVED_FICTION_PHONES.marie);
     expect(contacts.map((contact) => contact.phone)).toEqual([
       RESERVED_FICTION_PHONES.julie,
       RESERVED_FICTION_PHONES.marc,
@@ -111,11 +111,11 @@ describe("seeded contact phone configuration", () => {
     }
   });
 
-  it("uses each contact's configured number when present", () => {
+  it("uses each contact's configured number when present", async () => {
     vi.stubEnv("KINCALL_JULIE_PHONE", "+33611111111");
     vi.stubEnv("KINCALL_MARC_PHONE", "+33622222222");
 
-    const contacts = seeded().getTrustedContacts("person_marie");
+    const contacts = await seeded().getTrustedContacts("person_marie");
 
     expect(contacts[0].phone).toBe("+33611111111");
     expect(contacts[1].phone).toBe("+33622222222");
@@ -124,9 +124,9 @@ describe("seeded contact phone configuration", () => {
     expect(contacts[2].phone).toBe(RESERVED_FICTION_PHONES.nicole);
   });
 
-  it("ignores a blank configured value rather than dialling an empty number", () => {
+  it("ignores a blank configured value rather than dialling an empty number", async () => {
     vi.stubEnv("KINCALL_JULIE_PHONE", "   ");
-    const contacts = seeded().getTrustedContacts("person_marie");
+    const contacts = await seeded().getTrustedContacts("person_marie");
     expect(contacts[0].phone).toBe(RESERVED_FICTION_PHONES.julie);
   });
 });

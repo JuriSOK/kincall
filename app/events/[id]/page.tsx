@@ -160,16 +160,18 @@ export function describeOwnership(event: EventRecord): string {
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const repository = getRepository();
-  const event = repository.getEvent(id);
+  const event = await repository.getEvent(id);
 
   if (!event) {
     notFound();
   }
 
-  const person = repository.getPerson(event.personId);
-  const timeline = repository.listTimeline(event.id);
-  const callEvents = repository.listCallEvents(event.id);
-  const contacts = repository.getTrustedContacts(event.personId);
+  const [person, timeline, callEvents, contacts] = await Promise.all([
+    repository.getPerson(event.personId),
+    repository.listTimeline(event.id),
+    repository.listCallEvents(event.id),
+    repository.getTrustedContacts(event.personId),
+  ]);
   const confirmation = findConfirmation(callEvents, contacts);
   const companionCallEvent = callEvents.find((call) => call.agentType === "companion");
 

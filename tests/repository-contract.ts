@@ -1,0 +1,464 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { CallIntentIntegrityError, UnknownRecordError } from "@/lib/database/errors";
+import type { Repository } from "@/lib/database/repository";
+
+// The behaviours BOTH implementations must share. SupabaseRepository is held
+// to InMemoryRepository's exact contract rather than to a hand-written mirror
+// of it, so a divergence surfaces as a failing assertion in one shared suite.
+export interface ContractHarness {
+  // A fresh, seeded repository.
+  make(): Promise<Repository>;
+  // A second repository over the SAME data — a stand-in for a second process,
+  // which is what makes restart recovery assertable.
+  reopen(repository: Repository): Promise<Repository>;
+  // Moves the clock forward so lease expiry is testable without waiting.
+  advance(seconds: number): Promise<void>;
+  // How long a lease lasts in this harness.
+  leaseSeconds: number;
+}
+
+const COMPANION_KEY = "run:start:COMPANION_CALL_STARTED";
+
+export function repositoryContract(name: string, harness: ContractHarness): void {
+  describe(`${name} — repository contract`, () => {
+    let repository: Repository;
+
+    beforeEach(async () => {
+      repository = await harness.make();
+    });
+
+    // Creates an event plus a companion intent through the only path that can.
+    async function seedIntent(overrides: { idempotencyKey?: string } = {}) {
+      const event = await repository.createEvent("person_marie");
+      const result = await repository.commitTransitionWithCallIntent({
+        eventId: event.id,
+        operationKey: COMPANION_KEY,
+        transitionEvent: "COMPANION_CALL_STARTED",
+        expectedFromStatus: "SCHEDULED",
+        status: "CALLING_PERSON",
+        messages: ["Check-in call started"],
+        intent: {
+          agentType: "companion",
+          contactId: null,
+          idempotencyKey: overrides.idempotencyKey ?? `${event.runId}_companion_attempt_1`,
+        },
+      });
+      return { event, result, callEvent: result.callEvent! };
+    }
+
+    describe("reads", () => {
+      it("returns the trusted circle in priority order", async () => {
+        const contacts = await repository.getTrustedContacts("person_marie");
+        expect(contacts.map((contact) => contact.firstName)).toEqual(["Julie", "Marc", "Nicole"]);
+        expect(contacts.map((contact) => contact.priority)).toEqual([1, 2, 3]);
+      });
+
+      it("creates events with a human-readable id and a distinct runId each time", async () => {
+        const first = await repository.createEvent("person_marie");
+        const second = await repository.createEvent("person_marie");
+
+        expect(first.id).toMatch(/^event_\d{3,}$/);
+        expect(first.status).toBe("SCHEDULED");
+        expect(first.runId).not.toBe(second.runId);
+        expect(first.id).not.toBe(second.id);
+      });
+
+      it("throws UnknownRecordError for an unknown event or call event", async () => {
+        await expect(repository.updateEvent("event_nope", { status: "CASE_CLOSED" })).rejects.toThrow(
+          UnknownRecordError
+        );
+        await expect(repository.updateCallEvent("call_event_nope", { summary: "x" })).rejects.toThrow(
+          UnknownRecordError
+        );
+      });
+
+      it("keeps timeline entries in insertion order even when written within one millisecond", async () => {
+        const event = await repository.createEvent("person_marie");
+        for (let index = 0; index < 10; index += 1) {
+          await repository.appendTimelineEntry(event.id, "SCHEDULED", `entry ${index}`);
+        }
+
+        const timeline = await repository.listTimeline(event.id);
+        expect(timeline.map((entry) => entry.message)).toEqual(
+          Array.from({ length: 10 }, (_, index) => `entry ${index}`)
+        );
+      });
+
+      it("round-trips a structured result deep-equal", async () => {
+        const { callEvent } = await seedIntent();
+        const structuredResult = {
+          contact_id: "contact_marc",
+          answered: "yes",
+          nested: { list: [1, 2, 3], flag: false },
+        };
+
+        await repository.updateCallEvent(callEvent.id, { structuredResult });
+        const reread = await repository.getCallEvent(callEvent.id);
+        expect(reread?.structuredResult).toEqual(structuredResult);
+      });
+
+      it("round-trips array and nullable columns, with null staying null", async () => {
+        const person = await repository.getPerson("person_marie");
+        expect(person?.interests).toEqual(["gardening", "family"]);
+
+        const event = await repository.createEvent("person_marie");
+        expect(event.closedAt).toBeNull();
+        expect(event.priority).toBeNull();
+        expect(event.decision).toBeNull();
+        expect(event.currentContactPriority).toBeNull();
+      });
+    });
+
+    describe("transition + call intent atomicity", () => {
+      it("creates the intent and the ledger link in one operation", async () => {
+        const { result, callEvent } = await seedIntent();
+
+        expect(result.applied).toBe(true);
+        expect(result.conflict).toBe(false);
+        expect(callEvent.status).toBe("starting");
+        expect(callEvent.calleCallId).toBeNull();
+
+        const byKey = await repository.findCallEventByIdempotencyKey(callEvent.idempotencyKey);
+        expect(byKey?.id).toBe(callEvent.id);
+
+        const linked = await repository.getAppliedTransitionWithCallIntent(
+          result.event.id,
+          COMPANION_KEY
+        );
+        expect(linked?.callEvent.id).toBe(callEvent.id);
+      });
+
+      it("returns the EXACT prior intent on a duplicate operation key, not merely applied:false", async () => {
+        const { event, callEvent } = await seedIntent();
+
+        const replay = await repository.commitTransitionWithCallIntent({
+          eventId: event.id,
+          operationKey: COMPANION_KEY,
+          transitionEvent: "COMPANION_CALL_STARTED",
+          // Deliberately stale: a replay must win before the status check.
+          expectedFromStatus: "SCHEDULED",
+          status: "CALLING_PERSON",
+          messages: ["Check-in call started"],
+          intent: {
+            agentType: "companion",
+            contactId: null,
+            idempotencyKey: callEvent.idempotencyKey,
+          },
+        });
+
+        expect(replay.applied).toBe(false);
+        expect(replay.conflict).toBe(false);
+        expect(replay.callEvent!.id).toBe(callEvent.id);
+        // And no second timeline entry.
+        expect(await repository.listTimeline(event.id)).toHaveLength(1);
+      });
+
+      it("writes nothing at all — not even an intent — on a status conflict", async () => {
+        const event = await repository.createEvent("person_marie");
+        await repository.updateEvent(event.id, { status: "CASE_CLOSED" });
+
+        const conflicted = await repository.commitTransitionWithCallIntent({
+          eventId: event.id,
+          operationKey: COMPANION_KEY,
+          transitionEvent: "COMPANION_CALL_STARTED",
+          expectedFromStatus: "SCHEDULED",
+          status: "CALLING_PERSON",
+          messages: ["Check-in call started"],
+          intent: {
+            agentType: "companion",
+            contactId: null,
+            idempotencyKey: `${event.runId}_companion_attempt_1`,
+          },
+        });
+
+        expect(conflicted.conflict).toBe(true);
+        expect(conflicted.applied).toBe(false);
+        expect(conflicted.callEvent).toBeNull();
+        expect(await repository.listCallEvents(event.id)).toHaveLength(0);
+        expect(await repository.listTimeline(event.id)).toHaveLength(0);
+        expect(await repository.findAppliedOperation(event.id, COMPANION_KEY)).toBe(false);
+      });
+
+      it("raises CallIntentIntegrityError for drifted parameters, and creates no second intent", async () => {
+        const { event } = await seedIntent();
+
+        await expect(
+          repository.commitTransitionWithCallIntent({
+            eventId: event.id,
+            operationKey: COMPANION_KEY,
+            transitionEvent: "COMPANION_CALL_STARTED",
+            expectedFromStatus: "SCHEDULED",
+            status: "CALLING_PERSON",
+            intent: {
+              agentType: "companion",
+              contactId: null,
+              idempotencyKey: "a_completely_different_key",
+            },
+          })
+        ).rejects.toThrow(CallIntentIntegrityError);
+
+        expect(await repository.listCallEvents(event.id)).toHaveLength(1);
+      });
+
+      it("raises CallIntentIntegrityError when an applied operation started no call", async () => {
+        const event = await repository.createEvent("person_marie");
+        await repository.commitTransition({
+          eventId: event.id,
+          operationKey: "plain",
+          transitionEvent: "COMPANION_CALL_STARTED",
+          expectedFromStatus: "SCHEDULED",
+          status: "CALLING_PERSON",
+        });
+
+        await expect(
+          repository.getAppliedTransitionWithCallIntent(event.id, "plain")
+        ).rejects.toThrow(CallIntentIntegrityError);
+      });
+
+      it("returns null from getAppliedTransitionWithCallIntent for a key never applied", async () => {
+        const event = await repository.createEvent("person_marie");
+        expect(await repository.getAppliedTransitionWithCallIntent(event.id, "nope")).toBeNull();
+      });
+
+      it("rejects a second companion intent for one event", async () => {
+        const { event } = await seedIntent();
+        await expect(
+          repository.commitTransitionWithCallIntent({
+            eventId: event.id,
+            operationKey: "another:start:COMPANION_CALL_STARTED",
+            transitionEvent: "COMPANION_CALL_STARTED",
+            expectedFromStatus: "CALLING_PERSON",
+            status: "CALLING_PERSON",
+            intent: {
+              agentType: "companion",
+              contactId: null,
+              idempotencyKey: `${event.runId}_companion_attempt_2`,
+            },
+          })
+        ).rejects.toThrow();
+      });
+    });
+
+    describe("attachCalleCallId", () => {
+      it("attaches the id and flips the status out of 'starting'", async () => {
+        const { callEvent } = await seedIntent();
+        const attached = await repository.attachCalleCallId(callEvent.id, "calle_123");
+
+        expect(attached.calleCallId).toBe("calle_123");
+        expect(attached.status).toBe("in_progress");
+      });
+
+      it("leaves the first id in place when a second attach arrives", async () => {
+        const { callEvent } = await seedIntent();
+        await repository.attachCalleCallId(callEvent.id, "calle_first");
+        const second = await repository.attachCalleCallId(callEvent.id, "calle_second");
+
+        expect(second.calleCallId).toBe("calle_first");
+      });
+    });
+
+    describe("processing lease", () => {
+      async function leasable() {
+        const { callEvent } = await seedIntent();
+        return repository.attachCalleCallId(callEvent.id, "calle_lease");
+      }
+
+      it("grants the lease once and refuses a live second holder", async () => {
+        const callEvent = await leasable();
+
+        const first = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+        const second = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+
+        expect(first).not.toBeNull();
+        expect(second).toBeNull();
+      });
+
+      it("NEVER sets resultProcessedAt when the lease is acquired", async () => {
+        // This inversion — consuming the result at claim time — is precisely
+        // what made a crash mid-branch strand the event permanently.
+        const callEvent = await leasable();
+        const lease = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+
+        expect(lease!.callEvent.resultProcessedAt).toBeNull();
+        expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).toBeNull();
+      });
+
+      it("lets another worker reclaim a stale lease with a different token", async () => {
+        const callEvent = await leasable();
+        const first = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+
+        await harness.advance(harness.leaseSeconds + 1);
+
+        const second = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+        expect(second).not.toBeNull();
+        expect(second!.token).not.toBe(first!.token);
+      });
+
+      it("finalizes with the holder's token and blocks any further lease", async () => {
+        const callEvent = await leasable();
+        const lease = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+
+        const finalized = await repository.finalizeCallEventResult(callEvent.id, lease!.token, {
+          status: "completed",
+          summary: "done",
+          structuredResult: { ok: true },
+          endedAt: new Date().toISOString(),
+        });
+
+        expect(finalized).not.toBeNull();
+        expect(finalized!.resultProcessedAt).not.toBeNull();
+        expect(finalized!.processingToken).toBeNull();
+        expect(await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds)).toBeNull();
+      });
+
+      it("returns null and changes nothing when finalizing with a stale token", async () => {
+        const callEvent = await leasable();
+        const stale = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+        await harness.advance(harness.leaseSeconds + 1);
+        await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+
+        const finalized = await repository.finalizeCallEventResult(callEvent.id, stale!.token, {
+          status: "completed",
+          summary: "stale worker",
+          structuredResult: null,
+          endedAt: new Date().toISOString(),
+        });
+
+        expect(finalized).toBeNull();
+        const current = await repository.getCallEvent(callEvent.id);
+        expect(current?.resultProcessedAt).toBeNull();
+        expect(current?.summary).not.toBe("stale worker");
+      });
+
+      it("releases for the holder and no-ops for a stale token", async () => {
+        const callEvent = await leasable();
+        const lease = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+
+        await repository.releaseCallEventLease(callEvent.id, "not-the-token");
+        expect((await repository.getCallEvent(callEvent.id))?.processingToken).toBe(lease!.token);
+
+        await repository.releaseCallEventLease(callEvent.id, lease!.token);
+        expect((await repository.getCallEvent(callEvent.id))?.processingToken).toBeNull();
+        // And it is immediately available again, without waiting out the lease.
+        expect(
+          await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds)
+        ).not.toBeNull();
+      });
+
+      it("marks a superseded result processed with no ledger row for it", async () => {
+        const callEvent = await leasable();
+        const lease = await repository.claimCallEventResult(callEvent.id, harness.leaseSeconds);
+        await repository.finalizeCallEventResult(callEvent.id, lease!.token, {
+          status: "completed",
+          summary: "superseded",
+          structuredResult: { kept: true },
+          endedAt: new Date().toISOString(),
+        });
+
+        const current = await repository.getCallEvent(callEvent.id);
+        expect(current?.resultProcessedAt).not.toBeNull();
+        expect(current?.processingToken).toBeNull();
+        // The outcome stays inspectable even though it changed nothing.
+        expect(current?.structuredResult).toEqual({ kept: true });
+        // No result-stage operation was recorded: that absence IS "superseded".
+        const resultKey = `${callEvent.id}:result:FAMILY_NO_ANSWER`;
+        expect(await repository.findAppliedOperation(callEvent.eventId, resultKey)).toBe(false);
+      });
+    });
+
+    describe("commitTransition", () => {
+      it("applies the full patch and every message under one operation", async () => {
+        const event = await repository.createEvent("person_marie");
+        const result = await repository.commitTransition({
+          eventId: event.id,
+          operationKey: "op-1",
+          transitionEvent: "COMPANION_CALL_STARTED",
+          expectedFromStatus: "SCHEDULED",
+          status: "CALLING_PERSON",
+          patch: { priority: "high", decision: "CONTACT_TRUSTED_PERSON", decisionReason: "why" },
+          messages: ["first", "second"],
+        });
+
+        expect(result.applied).toBe(true);
+        expect(result.event.status).toBe("CALLING_PERSON");
+        expect(result.event.priority).toBe("high");
+        expect(result.event.decision).toBe("CONTACT_TRUSTED_PERSON");
+        expect(result.event.decisionReason).toBe("why");
+        expect((await repository.listTimeline(event.id)).map((e) => e.message)).toEqual([
+          "first",
+          "second",
+        ]);
+      });
+
+      it("is a no-op on a duplicate key, even from a status that no longer matches", async () => {
+        const event = await repository.createEvent("person_marie");
+        const input = {
+          eventId: event.id,
+          operationKey: "op-1",
+          transitionEvent: "COMPANION_CALL_STARTED" as const,
+          expectedFromStatus: "SCHEDULED" as const,
+          status: "CALLING_PERSON" as const,
+          messages: ["only once"],
+        };
+        await repository.commitTransition(input);
+        // The event has since moved on; the replay must still be a clean no-op.
+        await repository.updateEvent(event.id, { status: "CASE_CLOSED" });
+
+        const replay = await repository.commitTransition(input);
+
+        expect(replay.applied).toBe(false);
+        expect(replay.conflict).toBe(false);
+        expect(await repository.listTimeline(event.id)).toHaveLength(1);
+        expect(replay.event.status).toBe("CASE_CLOSED");
+      });
+
+      it("reports a conflict for a NEW key from the wrong status, then succeeds from the right one", async () => {
+        const event = await repository.createEvent("person_marie");
+        await repository.updateEvent(event.id, { status: "CALLING_PERSON" });
+
+        const conflicted = await repository.commitTransition({
+          eventId: event.id,
+          operationKey: "op-2",
+          transitionEvent: "COMPANION_CALL_STARTED",
+          expectedFromStatus: "SCHEDULED",
+          status: "CALLING_PERSON",
+          messages: ["nope"],
+        });
+        expect(conflicted.conflict).toBe(true);
+        expect(await repository.listTimeline(event.id)).toHaveLength(0);
+        expect(await repository.findAppliedOperation(event.id, "op-2")).toBe(false);
+
+        const applied = await repository.commitTransition({
+          eventId: event.id,
+          operationKey: "op-2",
+          transitionEvent: "COMPANION_CONVERSATION_STARTED",
+          expectedFromStatus: "CALLING_PERSON",
+          status: "CONVERSATION_IN_PROGRESS",
+          messages: ["yes"],
+        });
+        expect(applied.applied).toBe(true);
+      });
+    });
+
+    describe("restart recovery", () => {
+      it("reads an event, an unprocessed call event and a starting intent back through a second instance", async () => {
+        const { event, callEvent } = await seedIntent();
+
+        const reopened = await harness.reopen(repository);
+
+        const recoveredEvent = await reopened.getEvent(event.id);
+        const recoveredCall = await reopened.getCallEvent(callEvent.id);
+
+        expect(recoveredEvent?.status).toBe("CALLING_PERSON");
+        expect(recoveredEvent?.runId).toBe(event.runId);
+        expect(recoveredCall?.status).toBe("starting");
+        expect(recoveredCall?.calleCallId).toBeNull();
+        expect(recoveredCall?.resultProcessedAt).toBeNull();
+        expect(recoveredCall?.idempotencyKey).toBe(callEvent.idempotencyKey);
+        // And the ledger link survives, so a replay can still find the intent.
+        const linked = await reopened.getAppliedTransitionWithCallIntent(event.id, COMPANION_KEY);
+        expect(linked?.callEvent.id).toBe(callEvent.id);
+      });
+    });
+  });
+}

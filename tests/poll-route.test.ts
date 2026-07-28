@@ -1,37 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/events/[id]/poll/route";
 import { getRepository } from "@/lib/database/store";
+import { seedPendingCompanionCall } from "./support/seed-calls";
 
 function pollRequest(id: string) {
   return POST(new Request(`https://kincall.test/api/events/${id}/poll`, { method: "POST" }), {
     params: Promise.resolve({ id }),
   });
-}
-
-// Mirrors the state a live run leaves behind: the companion call is started
-// and the event waits at CONVERSATION_IN_PROGRESS for a webhook or a poll.
-function seedPendingCompanionCall() {
-  const repository = getRepository();
-  const created = repository.createEvent("person_marie");
-  repository.updateEvent(created.id, { status: "CALLING_PERSON" });
-  const event = repository.updateEvent(created.id, { status: "CONVERSATION_IN_PROGRESS" });
-
-  const callEvent = repository.createCallEvent({
-    eventId: event.id,
-    agentType: "companion",
-    contactId: null,
-    calleCallId: `fake_companion_person_marie_${randomUUID()}`,
-    idempotencyKey: `${event.runId}_companion_attempt_1`,
-    status: "in_progress",
-    summary: null,
-    structuredResult: null,
-    startedAt: new Date().toISOString(),
-    endedAt: null,
-    resultProcessedAt: null,
-  });
-
-  return { event, callEvent };
 }
 
 describe("POST /api/events/[id]/poll", () => {
@@ -51,7 +26,7 @@ describe("POST /api/events/[id]/poll", () => {
   });
 
   it("returns the current status when no companion call has been started yet", async () => {
-    const event = getRepository().createEvent("person_marie");
+    const event = await getRepository().createEvent("person_marie");
 
     const response = await pollRequest(event.id);
 
@@ -60,7 +35,7 @@ describe("POST /api/events/[id]/poll", () => {
   });
 
   it("processes a terminal companion call and drives the cascade to a close", async () => {
-    const { event, callEvent } = seedPendingCompanionCall();
+    const { event, callEvent } = await seedPendingCompanionCall(getRepository());
 
     const response = await pollRequest(event.id);
 
@@ -70,8 +45,11 @@ describe("POST /api/events/[id]/poll", () => {
     await expect(response.json()).resolves.toEqual({ status: "CASE_CLOSED" });
 
     const repository = getRepository();
-    expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).not.toBeNull();
-    expect(repository.listTimeline(event.id).map((entry) => entry.message)).toEqual([
+    expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).not.toBeNull();
+    expect((await repository.listTimeline(event.id)).map((entry) => entry.message)).toEqual([
+      // Written by the seed helper, which now drives the real
+      // COMPANION_CALL_STARTED transition rather than forcing the status.
+      "Check-in call started",
       "Check-in call completed",
       "Fall and mobility difficulty detected",
       "Calling Julie",
@@ -84,14 +62,14 @@ describe("POST /api/events/[id]/poll", () => {
   });
 
   it("is a no-op when polled again after the result was already processed", async () => {
-    const { event } = seedPendingCompanionCall();
+    const { event } = await seedPendingCompanionCall(getRepository());
 
     await pollRequest(event.id);
-    const timelineAfterFirst = getRepository().listTimeline(event.id);
+    const timelineAfterFirst = await getRepository().listTimeline(event.id);
 
     const response = await pollRequest(event.id);
 
     await expect(response.json()).resolves.toEqual({ status: "CASE_CLOSED" });
-    expect(getRepository().listTimeline(event.id)).toEqual(timelineAfterFirst);
+    expect(await getRepository().listTimeline(event.id)).toEqual(timelineAfterFirst);
   });
 });

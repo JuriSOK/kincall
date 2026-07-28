@@ -39,15 +39,29 @@ export async function POST(request: Request) {
   }
 
   const repository = getRepository();
-  const callEvent = repository.findCallEventByIdempotencyKey(idempotencyKey);
+  let callEvent = await repository.findCallEventByIdempotencyKey(idempotencyKey);
 
-  // Unknown call event or mismatched call id: acknowledge anyway so CALL-E
-  // doesn't retry forever over something we'll never be able to process.
-  if (!callEvent || callEvent.calleCallId !== payload.data.id) {
+  // Unknown call event: acknowledge anyway so CALL-E doesn't retry forever
+  // over something we'll never be able to process.
+  if (!callEvent) {
     return NextResponse.json({ ok: true });
   }
 
-  const event = repository.getEvent(callEvent.eventId);
+  // The webhook can arrive before our own POST /v1/calls response did — the
+  // row is then still an intent with no call id. Adopt the id rather than
+  // rejecting on a mismatch against null: the payload was HMAC-verified above,
+  // and the row was located by KinCall's own idempotency key, so this is the
+  // same trust level as the matched case (DEC-006).
+  if (callEvent.calleCallId === null) {
+    callEvent = await repository.attachCalleCallId(callEvent.id, payload.data.id);
+  }
+
+  // A genuine mismatch: acknowledge without processing.
+  if (callEvent.calleCallId !== payload.data.id) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const event = await repository.getEvent(callEvent.eventId);
   if (event) {
     const deps = { repository, calleAdapter: getCalleAdapter() };
     if (callEvent.agentType === "companion") {

@@ -10,7 +10,7 @@ import { processCompanionResult, processFamilyResult } from "@/lib/orchestration
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const repository = getRepository();
-  const event = repository.getEvent(id);
+  const event = await repository.getEvent(id);
 
   if (!event) {
     return NextResponse.json({ error: "Unknown event." }, { status: 404 });
@@ -18,10 +18,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   // At most one call is ever in flight per event, so the single unprocessed
   // call event is the one to resume. Derived rather than reconstructed from an
-  // idempotency-key pattern, so it works for every contact in the cascade.
-  const pending = repository
-    .listCallEvents(event.id)
-    .find((call) => call.resultProcessedAt === null);
+  // idempotency-key pattern, so it works for every contact in the cascade —
+  // and it includes a "starting" intent whose CALL-E request never completed,
+  // which processCompanionResult/processFamilyResult re-drive on the same key.
+  const pending = (await repository.listCallEvents(event.id)).find(
+    (call) => call.resultProcessedAt === null
+  );
 
   if (!pending) {
     return NextResponse.json({ status: event.status });

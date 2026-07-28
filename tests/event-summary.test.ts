@@ -159,6 +159,8 @@ function familyCall(overrides: Partial<CallEventRecord> = {}): CallEventRecord {
     structuredResult: familyResult(),
     startedAt: new Date().toISOString(),
     endedAt: new Date().toISOString(),
+    processingToken: null,
+    processingStartedAt: null,
     resultProcessedAt: new Date().toISOString(),
     ...overrides,
   };

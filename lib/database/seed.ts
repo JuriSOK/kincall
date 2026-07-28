@@ -12,6 +12,17 @@ function configuredPhone(envVar: string, fictionFallback: string): string {
   return configured && configured.length > 0 ? configured : fictionFallback;
 }
 
+// Applied when READING a persisted person or contact, so a consenting
+// participant's real number lives only in environment variables — never in a
+// table, a migration file, or a database dump. The stored value is always the
+// reserved-for-fiction default, which is safe to commit and which
+// LiveCalleAdapter refuses to dial.
+export function resolveConfiguredPhone(entityId: string, storedPhone: string): string {
+  const envVar = CONTACT_PHONE_ENV_VARS[entityId];
+  if (!envVar) return storedPhone;
+  return configuredPhone(envVar, storedPhone);
+}
+
 // Matches TECHNICAL_ARCHITECTURE.md §10 / PRODUCT_SPECIFICATION.md §12 ids.
 export function seedRepository(repository: InMemoryRepository): void {
   repository.seedPerson({

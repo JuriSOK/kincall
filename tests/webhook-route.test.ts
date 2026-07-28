@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/webhooks/calle/route";
 import { getRepository } from "@/lib/database/store";
+import { seedPendingCompanionCall, seedPendingFamilyCall } from "./support/seed-calls";
 import type { CallEventRecord, EventRecord } from "@/lib/database/types";
 
 const SECRET = "whsec_test_secret";
@@ -49,36 +50,19 @@ function request(payload: unknown, options: { secret?: string; headers?: boolean
   });
 }
 
-// Seeds a companion call event on the shared (globalThis-cached) repository,
-// with the event already parked at CONVERSATION_IN_PROGRESS the way a live
-// run leaves it while CALL-E is still on the phone.
-function seedPendingCompanionCall(agentType: "companion" | "family" = "companion"): {
-  event: EventRecord;
-  callEvent: CallEventRecord;
-  idempotencyKey: string;
-} {
+// Seeds a call event on the shared (globalThis-cached) repository, with the
+// event already parked the way a live run leaves it while CALL-E is still on
+// the phone.
+async function seedPendingCall(
+  agentType: "companion" | "family" = "companion"
+): Promise<{ event: EventRecord; callEvent: CallEventRecord; idempotencyKey: string }> {
   const repository = getRepository();
-  const created = repository.createEvent("person_marie");
-  repository.updateEvent(created.id, { status: "CALLING_PERSON" });
-  const event = repository.updateEvent(created.id, { status: "CONVERSATION_IN_PROGRESS" });
+  const { event, callEvent } =
+    agentType === "companion"
+      ? await seedPendingCompanionCall(repository)
+      : await seedPendingFamilyCall(repository, "contact_marc");
 
-  const idempotencyKey = `${event.runId}_${agentType}_attempt_1`;
-  const subjectId = agentType === "companion" ? "person_marie" : "contact_marc";
-  const callEvent = repository.createCallEvent({
-    eventId: event.id,
-    agentType,
-    contactId: agentType === "family" ? "contact_marc" : null,
-    calleCallId: `fake_${agentType}_${subjectId}_${randomUUID()}`,
-    idempotencyKey,
-    status: "in_progress",
-    summary: null,
-    structuredResult: null,
-    startedAt: new Date().toISOString(),
-    endedAt: null,
-    resultProcessedAt: null,
-  });
-
-  return { event, callEvent, idempotencyKey };
+  return { event, callEvent, idempotencyKey: callEvent.idempotencyKey };
 }
 
 describe("POST /api/webhooks/calle", () => {
@@ -93,41 +77,41 @@ describe("POST /api/webhooks/calle", () => {
 
   it("rejects with 400 when no webhook secret is configured", async () => {
     vi.stubEnv("CALLE_WEBHOOK_SECRET", "");
-    const { callEvent, idempotencyKey } = seedPendingCompanionCall();
+    const { callEvent, idempotencyKey } = await seedPendingCall();
 
-    const response = await POST(request(webhookPayload(callEvent.calleCallId, idempotencyKey)));
+    const response = await POST(request(webhookPayload(callEvent.calleCallId!, idempotencyKey)));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Webhook receiver is not configured.",
     });
-    expect(getRepository().getCallEvent(callEvent.id)?.resultProcessedAt).toBeNull();
+    expect((await getRepository().getCallEvent(callEvent.id))?.resultProcessedAt).toBeNull();
   });
 
   it("rejects with 400 when the signature headers are missing", async () => {
-    const { callEvent, idempotencyKey } = seedPendingCompanionCall();
+    const { callEvent, idempotencyKey } = await seedPendingCall();
 
     const response = await POST(
-      request(webhookPayload(callEvent.calleCallId, idempotencyKey), { headers: false })
+      request(webhookPayload(callEvent.calleCallId!, idempotencyKey), { headers: false })
     );
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: "Missing webhook signature headers.",
     });
-    expect(getRepository().getCallEvent(callEvent.id)?.resultProcessedAt).toBeNull();
+    expect((await getRepository().getCallEvent(callEvent.id))?.resultProcessedAt).toBeNull();
   });
 
   it("rejects with 400 when the signature was produced with the wrong secret", async () => {
-    const { callEvent, idempotencyKey } = seedPendingCompanionCall();
+    const { callEvent, idempotencyKey } = await seedPendingCall();
 
     const response = await POST(
-      request(webhookPayload(callEvent.calleCallId, idempotencyKey), { secret: "wrong_secret" })
+      request(webhookPayload(callEvent.calleCallId!, idempotencyKey), { secret: "wrong_secret" })
     );
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Invalid webhook signature." });
-    expect(getRepository().getCallEvent(callEvent.id)?.resultProcessedAt).toBeNull();
+    expect((await getRepository().getCallEvent(callEvent.id))?.resultProcessedAt).toBeNull();
   });
 
   it("acknowledges an unknown idempotency key without processing anything", async () => {
@@ -138,7 +122,7 @@ describe("POST /api/webhooks/calle", () => {
   });
 
   it("acknowledges without processing when the call id does not match the stored one", async () => {
-    const { event, callEvent, idempotencyKey } = seedPendingCompanionCall();
+    const { event, callEvent, idempotencyKey } = await seedPendingCall();
 
     const response = await POST(
       request(webhookPayload("call_someone_elses_call", idempotencyKey))
@@ -146,50 +130,26 @@ describe("POST /api/webhooks/calle", () => {
 
     expect(response.status).toBe(200);
     const repository = getRepository();
-    expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).toBeNull();
-    expect(repository.getEvent(event.id)?.status).toBe("CONVERSATION_IN_PROGRESS");
+    expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).toBeNull();
+    expect((await repository.getEvent(event.id))?.status).toBe("CONVERSATION_IN_PROGRESS");
   });
 
   it("resumes the cascade when a family-agent webhook arrives", async () => {
     const repository = getRepository();
-    const created = repository.createEvent("person_marie");
     // Mid-cascade: Julie has been called and KinCall is waiting on her result.
-    for (const status of [
-      "CALLING_PERSON",
-      "CONVERSATION_IN_PROGRESS",
-      "ANALYSING_CONVERSATION",
-      "ATTENTION_REQUIRED",
-      "CALLING_TRUSTED_CONTACT",
-    ] as const) {
-      repository.updateEvent(created.id, { status });
-    }
-    const event = repository.getEvent(created.id)!;
-
-    const idempotencyKey = `${event.runId}_contact_julie_attempt_1`;
-    const callEvent = repository.createCallEvent({
-      eventId: event.id,
-      agentType: "family",
-      contactId: "contact_julie",
-      calleCallId: `fake_family_contact_julie_${randomUUID()}`,
-      idempotencyKey,
-      status: "in_progress",
-      summary: null,
-      structuredResult: null,
-      startedAt: new Date().toISOString(),
-      endedAt: null,
-      resultProcessedAt: null,
-    });
+    const { event, callEvent } = await seedPendingFamilyCall(repository, "contact_julie");
+    const idempotencyKey = callEvent.idempotencyKey;
 
     const response = await POST(
-      request(webhookPayload(callEvent.calleCallId, idempotencyKey, "family"))
+      request(webhookPayload(callEvent.calleCallId!, idempotencyKey, "family"))
     );
 
     expect(response.status).toBe(200);
-    expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).not.toBeNull();
+    expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).not.toBeNull();
     // Julie did not answer, so the webhook advances the cascade to Marc, who
     // confirms — the case closes without a second inbound delivery.
-    expect(repository.getEvent(event.id)?.status).toBe("CASE_CLOSED");
-    expect(repository.listTimeline(event.id).map((entry) => entry.message)).toEqual([
+    expect((await repository.getEvent(event.id))?.status).toBe("CASE_CLOSED");
+    expect((await repository.listTimeline(event.id)).map((entry) => entry.message)).toEqual([
       "No answer",
       "Calling Marc",
       "Marc answered",
@@ -199,30 +159,30 @@ describe("POST /api/webhooks/calle", () => {
   });
 
   it("processes a valid companion webhook and advances the event", async () => {
-    const { event, callEvent, idempotencyKey } = seedPendingCompanionCall();
+    const { event, callEvent, idempotencyKey } = await seedPendingCall();
 
-    const response = await POST(request(webhookPayload(callEvent.calleCallId, idempotencyKey)));
+    const response = await POST(request(webhookPayload(callEvent.calleCallId!, idempotencyKey)));
 
     expect(response.status).toBe(200);
     const repository = getRepository();
     // Fake-mode family results are instant, so the companion webhook carries
     // the event through the whole cascade in one delivery.
-    expect(repository.getEvent(event.id)?.status).toBe("CASE_CLOSED");
-    expect(repository.getCallEvent(callEvent.id)?.resultProcessedAt).not.toBeNull();
+    expect((await repository.getEvent(event.id))?.status).toBe("CASE_CLOSED");
+    expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).not.toBeNull();
   });
 
   it("does not apply a second transition when the same webhook is delivered twice", async () => {
-    const { event, callEvent, idempotencyKey } = seedPendingCompanionCall();
-    const payload = webhookPayload(callEvent.calleCallId, idempotencyKey);
+    const { event, callEvent, idempotencyKey } = await seedPendingCall();
+    const payload = webhookPayload(callEvent.calleCallId!, idempotencyKey);
 
     await POST(request(payload));
     const repository = getRepository();
-    const timelineAfterFirst = repository.listTimeline(event.id);
+    const timelineAfterFirst = await repository.listTimeline(event.id);
 
     const second = await POST(request(payload));
 
     expect(second.status).toBe(200);
-    expect(repository.listTimeline(event.id)).toEqual(timelineAfterFirst);
-    expect(repository.getEvent(event.id)?.status).toBe("CASE_CLOSED");
+    expect(await repository.listTimeline(event.id)).toEqual(timelineAfterFirst);
+    expect((await repository.getEvent(event.id))?.status).toBe("CASE_CLOSED");
   });
 });

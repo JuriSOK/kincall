@@ -203,6 +203,61 @@ Project owner approval: approved, with two mandatory corrections (per-contact ph
 
 ---
 
+## DEC-006 — Supabase persistence: processing leases, an operation ledger, and intent-before-CALL-E
+
+**Date:** 28 July 2026
+**Status:** Approved
+
+### Context
+
+Phases 1–4 are validated, but every row lives in `globalThis.__kincallRepository` and is lost on every restart, redeploy or cold start. `TECHNICAL_ARCHITECTURE.md` §1 already names Supabase PostgreSQL as the frozen baseline, so this implements the baseline rather than deviating from it. The failure it removes is not cosmetic:
+
+- An event mid-cascade at `CALLING_TRUSTED_CONTACT` is orphaned by a restart. A real call is in flight for a vulnerable person and nothing remains that can process its result.
+- The inbound webhook then finds no `CallEventRecord` for its idempotency key and acknowledges without processing, silently discarding the result.
+- DEC-004 exists because the restart-unstable `event_001` counter reused a CALL-E idempotency key. `runId` treated the symptom; missing persistence was the cause.
+- On Vercel each serverless instance has its own `globalThis`, so a webhook landing on instance B cannot see an event created on instance A **even without a restart**.
+
+Making the repository durable also makes three latent concurrency defects reachable, all of which had to be solved together:
+
+1. `resultProcessedAt` was a read-then-write check with an `await getCallResult()` in the middle — safe only because one process is single-threaded.
+2. Nothing made a *transition* idempotent, so any retry would duplicate timeline entries.
+3. `ensure*CallStarted` called CALL-E first and inserted the row second, so a crash in that window left CALL-E holding a call KinCall could not find.
+
+### Decision
+
+1. **Async `Repository` interface.** `@supabase/supabase-js` is HTTP-based and there is no synchronous Postgres client for the Vercel runtime, so every method returns a `Promise`. `InMemoryRepository` is kept and remains the default.
+2. **Opt-in driver.** `KINCALL_PERSISTENCE` defaults to `memory`, so fake mode and `npm test` need zero configuration and cannot reach the network, and rollback is an environment-variable flip rather than a code change.
+3. **Atomicity in SQL functions.** PostgREST cannot span a transaction across HTTP calls, so multi-statement atomicity lives in five `SECURITY INVOKER` functions. The deterministic state machine stays entirely in TypeScript: `nextStatus()` computes the status and SQL only writes it.
+4. **Processing lease, not a claim.** `processing_token` + `processing_started_at` grant a time-bounded exclusive right to process a terminal result; `result_processed_at` is set **only after the whole branch succeeds**. A crash therefore expires rather than permanently consuming the result. The lease is taken *after* the result is known terminal, so a still-queued call never burns one.
+5. **Operation-key ledger.** `event_operations` records every applied transition under `UNIQUE (event_id, operation_key)`, making a replay a no-op instead of a duplicate timeline entry. Keys are `${trigger}:${stage}:${transitionEvent}`, derived only from durable facts (`call_events.id` or `runId`).
+6. **Compare-and-set on `events.status`.** The lease is scoped to one call event, not to the event, so two call events can race one `EventRecord`. A *new* operation may only be applied from the status the caller reasoned about; a *duplicate key* is an idempotent no-op regardless of current status.
+7. **Superseded, not abandoned.** When a terminal result can never be applied because the event has moved on, it is finalized under the current lease with its outcome stored and nothing else touched — otherwise the lease would expire and the same dead result would be reclaimed every lease period forever.
+8. **Call intent before CALL-E.** `call_events` rows are created with `status='starting'` and a null `calle_call_id` **in the same transaction as the transition that decided to place the call**. `createCallEvent` and any standalone intent-creation method are absent from the interface, so an intent cannot exist outside its transition. A webhook arriving before our own response *adopts* the returned id rather than rejecting on a null mismatch.
+9. **The ledger names its intent.** `event_operations.call_event_id` permanently records which intent a call-start transition created. A replay reads the intent from that foreign key and verifies its `eventId`/`agentType`/`contactId`/`idempotencyKey`, raising `CallIntentIntegrityError` on a mismatch rather than creating a second intent.
+10. **Replays never evaluate `nextStatus()`.** A replayed `FAMILY_CALL_STARTED` arrives when the event is already at `CALLING_TRUSTED_CONTACT`, from which that edge is illegal, so the applied-operation lookup runs first and short-circuits.
+11. **Cascade order by priority succession.** The next contact is chosen from the contact whose result triggered the step, not from "who has not been called yet" — the latter reads the answer out of which rows exist, so a replay would skip the intended contact and dial the one after them.
+12. **Phone numbers overlaid on read.** Rows store only the reserved-for-fiction default; `KINCALL_*_PHONE` is applied when a person or contact is read, so a consenting participant's real number never enters a table, a migration, or a backup.
+13. **RLS enabled and forced with no policies**, all privileges revoked from `anon`/`authenticated` including on future objects, and `EXECUTE` on every RPC granted only to `service_role`.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted. No state, transition, decision rule, prompt or screen changes, and `lib/calle/` is untouched. The Marie → Julie → Marc demo produces the identical nine-entry timeline. §9's five tables are implemented as specified; `event_operations` is a sixth, which §9 permits by specifying *minimum* tables, and it is required for crash safety rather than for any product behaviour.
+
+### Consequences
+
+- `CallEventRecord` gains `processingToken`, `processingStartedAt`, and a nullable `calleCallId`; `status` gains `"starting"`. `TimelineEntry` gains `operationId`. As with DEC-002/003/004, `TECHNICAL_ARCHITECTURE.md` §9's column listing is recorded as behind the implementation here rather than edited.
+- `ensureCompanionCallStarted` / `ensureFamilyCallStarted` are replaced by `placeCallForIntent`, which can only be called with an already-persisted intent.
+- A failure *starting* a call (`CallStartFailedError`, meaning CALL-E refused and no call is in flight) is escalated to human review per DEC-005. A failure to *record* a call CALL-E already accepted is deliberately **not** escalated: the event must stay in a state its eventual result can be applied from, so that error propagates and a later poll or webhook re-drives the same idempotency key.
+- Recovery assumes repeating `POST /v1/calls` under an already-used `Idempotency-Key` returns the original call rather than erroring. DEC-004 established that CALL-E rejects a *different* body under the same key; that an *identical* body replays cleanly is inferred and should be confirmed before the next live run.
+- Automated coverage grows from 181 to 260 tests, including a shared repository contract suite run against both implementations, a fourteen-point crash-injection matrix, and concurrency tests for lease races and superseded results. The Supabase lane is gated on four credentials and runs serially.
+- Local development and the whole default test run require no Supabase project at all.
+
+### Approval
+
+Project owner approval: approved, after five rounds of mandated corrections — the processing lease replacing an irreversible early claim; idempotent transition persistence; event-status compare-and-set with side effects gated on a newly-applied transition; call intent persisted before CALL-E, atomically with its transition; and the ledger-to-intent foreign key with a replay path that bypasses `nextStatus()`.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

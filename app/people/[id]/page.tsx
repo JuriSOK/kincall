@@ -5,13 +5,13 @@ import { LaunchDemoButton } from "./launch-demo-button";
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const repository = getRepository();
-  const person = repository.getPerson(id);
+  const person = await repository.getPerson(id);
 
   if (!person) {
     notFound();
   }
 
-  const trustedCircle = repository.getTrustedContacts(person.id);
+  const trustedCircle = await repository.getTrustedContacts(person.id);
 
   return (
     <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">

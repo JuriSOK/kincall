@@ -12,8 +12,11 @@ import { InMemoryRepository } from "@/lib/database/in-memory-repository";
 import type { FamilyStructuredResult } from "@/lib/calle/schemas";
 import { seedRepository } from "@/lib/database/seed";
 import {
-  ensureCompanionCallStarted,
-  ensureFamilyCallStarted,
+  seedPendingCompanionCallIntent,
+  seedPendingFamilyCallIntent,
+} from "./support/seed-calls";
+import {
+  placeCallForIntent,
   processCompanionResult,
   processFamilyResult,
   startDemoEvent,
@@ -128,7 +131,7 @@ describe("startDemoEvent — Marie / Julie / Marc end-to-end", () => {
     expect(event.status).toBe("CASE_CLOSED");
     expect(event.closedAt).not.toBeNull();
 
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toEqual([
       "Check-in call started",
       "Check-in call completed",
@@ -141,7 +144,7 @@ describe("startDemoEvent — Marie / Julie / Marc end-to-end", () => {
       "Case closed",
     ]);
 
-    const callEvents = deps.repository.listCallEvents(event.id);
+    const callEvents = await deps.repository.listCallEvents(event.id);
     expect(callEvents).toHaveLength(3);
     expect(new Set(callEvents.map((call) => call.idempotencyKey))).toEqual(
       new Set([
@@ -171,7 +174,7 @@ describe("confirmed-visit timeline wording", () => {
     const deps = createDeps(adapter);
     const event = await startDemoEvent("person_marie", deps);
 
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toContain("Visit confirmed — vers 18h00");
     expect(messages.some((message) => message.includes("at vers"))).toBe(false);
   });
@@ -221,7 +224,7 @@ describe("startDemoEvent — orchestration rules", () => {
     expect(event.closedAt).toBeNull();
     expect(adapter.startFamilyCallSpy).not.toHaveBeenCalled();
 
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toEqual([
       "Check-in call started",
       "Check-in call completed",
@@ -265,7 +268,7 @@ describe("startDemoEvent — orchestration rules", () => {
     // The cascade was entered rather than the event being downgraded to a
     // reachability review — that is what unknown reachability must not do.
     expect(adapter.startFamilyCallSpy).toHaveBeenCalled();
-    expect(deps.repository.listTimeline(event.id).map((entry) => entry.message)).toContain(
+    expect((await deps.repository.listTimeline(event.id)).map((entry) => entry.message)).toContain(
       "Fall and mobility difficulty detected"
     );
   });
@@ -332,11 +335,11 @@ describe("family cascade — live-shaped async behaviour", () => {
 
     expect(event.status).toBe("CALLING_TRUSTED_CONTACT");
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
-    expect(deps.repository.listCallEvents(event.id)).toHaveLength(2);
+    expect(await deps.repository.listCallEvents(event.id)).toHaveLength(2);
 
-    const familyCall = deps.repository
-      .listCallEvents(event.id)
-      .find((call) => call.agentType === "family");
+    const familyCall = (await deps.repository.listCallEvents(event.id)).find(
+      (call) => call.agentType === "family"
+    );
     expect(familyCall?.resultProcessedAt).toBeNull();
   });
 
@@ -364,14 +367,14 @@ describe("family cascade — live-shaped async behaviour", () => {
       }),
     };
 
-    const julieCall = deps.repository
-      .listCallEvents(pending.id)
-      .find((call) => call.agentType === "family");
+    const julieCall = (await deps.repository.listCallEvents(pending.id)).find(
+      (call) => call.agentType === "family"
+    );
     const resumed = await processFamilyResult(deps, pending, julieCall!.id);
 
     expect(resumed.status).toBe("CASE_CLOSED");
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(2);
-    expect(deps.repository.listTimeline(resumed.id).map((entry) => entry.message)).toEqual([
+    expect((await deps.repository.listTimeline(resumed.id)).map((entry) => entry.message)).toEqual([
       "Check-in call started",
       "Check-in call completed",
       "Fall and mobility difficulty detected",
@@ -430,7 +433,7 @@ describe("family cascade — live-shaped async behaviour", () => {
     // Julie is recorded as declined, not confirmed, and Marc is still called.
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(2);
     expect(event.status).toBe("CASE_CLOSED");
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toContain("Julie declined");
     expect(messages).toContain("Calling Marc");
   });
@@ -447,7 +450,7 @@ describe("family cascade — live-shaped async behaviour", () => {
     // All three contacts attempted, then human review — never a silent stop.
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(3);
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toContain("Could not reach Julie — Invalid recipient number.");
     expect(messages).toContain("Human review required — no contacts remaining");
   });
@@ -471,7 +474,7 @@ describe("family cascade — live-shaped async behaviour", () => {
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
     expect(event.closedAt).toBeNull();
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
-    expect(deps.repository.listTimeline(event.id).map((entry) => entry.message)).toContain(
+    expect((await deps.repository.listTimeline(event.id)).map((entry) => entry.message)).toContain(
       "Human review required — family result identified the wrong contact"
     );
   });
@@ -495,7 +498,7 @@ describe("family cascade — live-shaped async behaviour", () => {
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("CASE_CLOSED");
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).not.toContain("Human review required — malformed family result");
     expect(messages).toContain("Intervention confirmed");
   });
@@ -534,7 +537,7 @@ describe("family cascade — unusable contact phone numbers", () => {
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
     expect(adapter.startFamilyCallSpy).not.toHaveBeenCalled();
 
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     // No misleading "Calling Julie" for a call that never happened.
     expect(messages).not.toContain("Calling Julie");
     expect(messages.some((message) => message.includes("KINCALL_JULIE_PHONE"))).toBe(true);
@@ -561,24 +564,24 @@ describe("family cascade — unusable contact phone numbers", () => {
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
-    expect(deps.repository.listTimeline(event.id).map((entry) => entry.message)).toContain(
+    expect((await deps.repository.listTimeline(event.id)).map((entry) => entry.message)).toContain(
       "Human review required — could not start the call to Julie (network unreachable)"
     );
   });
 });
 
 describe("idempotency", () => {
-  it("derives different companion idempotency keys across two repository lifetimes even though their sequential event ids collide (DEC-004)", () => {
+  it("derives different companion idempotency keys across two repository lifetimes even though their sequential event ids collide (DEC-004)", async () => {
     // Each InMemoryRepository stands in for one process lifetime: its
     // eventSequence always restarts at 0, so both produce "event_001". If the
     // idempotency key were still derived from that id, both "restarts" would
     // reuse the exact same CALL-E idempotency key for a different request —
     // the observed `idempotency_conflict` bug.
     const before = new InMemoryRepository();
-    const beforeEvent = before.createEvent("person_marie");
+    const beforeEvent = await before.createEvent("person_marie");
 
     const after = new InMemoryRepository();
-    const afterEvent = after.createEvent("person_marie");
+    const afterEvent = await after.createEvent("person_marie");
 
     expect(beforeEvent.id).toBe(afterEvent.id);
     expect(beforeEvent.runId).not.toBe(afterEvent.runId);
@@ -588,40 +591,29 @@ describe("idempotency", () => {
     expect(keyBefore).not.toBe(keyAfter);
   });
 
-  it("does not start a second companion call for a duplicate retry with the same key", async () => {
+  it("does not start a second companion call when the intent is driven twice", async () => {
     const adapter = new ScriptedCalleAdapter();
     const deps = createDeps(adapter);
-    const event = deps.repository.createEvent("person_marie");
-    const idempotencyKey = `${event.runId}_companion_attempt_1`;
+    const { callEvent } = await seedPendingCompanionCallIntent(deps);
 
-    const first = await ensureCompanionCallStarted(deps, event.id, "person_marie", idempotencyKey);
-    const second = await ensureCompanionCallStarted(deps, event.id, "person_marie", idempotencyKey);
+    // placeCallForIntent is the only path to the adapter, and it returns
+    // immediately once the call id is attached.
+    const first = await placeCallForIntent(deps, callEvent);
+    const second = await placeCallForIntent(deps, first);
 
     expect(second.id).toBe(first.id);
+    expect(second.calleCallId).toBe(first.calleCallId);
     expect(adapter.startCompanionCallSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("does not start a second family call for a duplicate retry with the same key", async () => {
+  it("does not start a second family call when the intent is driven twice", async () => {
     const adapter = new ScriptedCalleAdapter();
     const deps = createDeps(adapter);
-    const event = deps.repository.createEvent("person_marie");
-    const julie = deps.repository.getTrustedContacts("person_marie")[0];
-    const idempotencyKey = `${event.runId}_${julie.id}_attempt_1`;
+    const julie = (await deps.repository.getTrustedContacts("person_marie"))[0];
+    const { callEvent } = await seedPendingFamilyCallIntent(deps, julie.id);
 
-    const first = await ensureFamilyCallStarted(
-      deps,
-      event.id,
-      "person_marie",
-      julie,
-      idempotencyKey
-    );
-    const second = await ensureFamilyCallStarted(
-      deps,
-      event.id,
-      "person_marie",
-      julie,
-      idempotencyKey
-    );
+    const first = await placeCallForIntent(deps, callEvent);
+    const second = await placeCallForIntent(deps, first);
 
     expect(second.id).toBe(first.id);
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
@@ -629,24 +621,16 @@ describe("idempotency", () => {
 
   it("does not apply a duplicate transition when a companion result is processed twice", async () => {
     const deps = createDeps();
-    const event = deps.repository.createEvent("person_marie");
-    deps.repository.updateEvent(event.id, { status: "CALLING_PERSON" });
-    deps.repository.updateEvent(event.id, { status: "CONVERSATION_IN_PROGRESS" });
+    const { event, callEvent: intent } = await seedPendingCompanionCallIntent(deps);
 
-    const idempotencyKey = `${event.runId}_companion_attempt_1`;
-    const callEvent = await ensureCompanionCallStarted(
-      deps,
-      event.id,
-      "person_marie",
-      idempotencyKey
-    );
+    const callEvent = await placeCallForIntent(deps, intent);
 
-    const current = deps.repository.getEvent(event.id)!;
+    const current = (await deps.repository.getEvent(event.id))!;
     const first = await processCompanionResult(deps, current, callEvent.id);
-    const timelineAfterFirst = deps.repository.listTimeline(event.id);
+    const timelineAfterFirst = await deps.repository.listTimeline(event.id);
 
     const second = await processCompanionResult(deps, first, callEvent.id);
-    const timelineAfterSecond = deps.repository.listTimeline(event.id);
+    const timelineAfterSecond = await deps.repository.listTimeline(event.id);
 
     expect(second.status).toBe(first.status);
     expect(second.decision).toBe(first.decision);
@@ -663,7 +647,7 @@ describe("processCompanionResult — call lifecycle (live-mode async statuses)",
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("CONVERSATION_IN_PROGRESS");
-    const callEvent = deps.repository.listCallEvents(event.id)[0];
+    const callEvent = (await deps.repository.listCallEvents(event.id))[0];
     expect(callEvent.resultProcessedAt).toBeNull();
   });
 
@@ -680,13 +664,13 @@ describe("processCompanionResult — call lifecycle (live-mode async statuses)",
     // The family calls stay queued, so the cascade starts but does not finish.
     adapter.nextFamilyStatus = "queued";
 
-    const callEvent = deps.repository.listCallEvents(pending.id)[0];
+    const callEvent = (await deps.repository.listCallEvents(pending.id))[0];
     const resumed = await processCompanionResult(deps, pending, callEvent.id);
 
     // A concerning companion result immediately starts the first family call.
     expect(resumed.status).toBe("CALLING_TRUSTED_CONTACT");
     expect(adapter.startFamilyCallSpy).toHaveBeenCalledTimes(1);
-    expect(deps.repository.listTimeline(pending.id).map((entry) => entry.message)).toContain(
+    expect((await deps.repository.listTimeline(pending.id)).map((entry) => entry.message)).toContain(
       "Fall and mobility difficulty detected"
     );
   });
@@ -699,9 +683,9 @@ describe("processCompanionResult — call lifecycle (live-mode async statuses)",
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
-    const callEvent = deps.repository.listCallEvents(event.id)[0];
+    const callEvent = (await deps.repository.listCallEvents(event.id))[0];
     expect(callEvent.resultProcessedAt).not.toBeNull();
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages.some((message) => message.includes("call canceled"))).toBe(true);
   });
 
@@ -717,7 +701,7 @@ describe("processCompanionResult — call lifecycle (live-mode async statuses)",
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
-    const messages = deps.repository.listTimeline(event.id).map((entry) => entry.message);
+    const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages.some((message) => message.includes("The recipient phone number was invalid."))).toBe(
       true
     );

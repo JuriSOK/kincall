@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { getRepository } from "@/lib/database/store";
 
-export default function Home() {
-  const people = getRepository().listPeople();
+export default async function Home() {
+  const people = await getRepository().listPeople();
 
   return (
     <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">
