@@ -4,6 +4,7 @@ import { isFamilyStructuredResult } from "@/lib/calle/schemas";
 import type { FamilyStructuredResult } from "@/lib/calle/schemas";
 import { getRepository } from "@/lib/database/store";
 import type { CallEventRecord, EventRecord } from "@/lib/database/types";
+import { EventPollIndicator } from "./event-poll-indicator";
 
 function findConfirmation(callEvents: CallEventRecord[]): FamilyStructuredResult | null {
   for (const callEvent of callEvents) {
@@ -116,7 +117,10 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           ← {person?.firstName ?? "Back"}
         </Link>
         <h1 className="text-3xl font-semibold">Event {event.id}</h1>
-        <p className="text-sm opacity-60">Status: {event.status}</p>
+        <p className="flex items-center gap-2 text-sm opacity-60">
+          Status: {event.status}
+          <EventPollIndicator eventId={event.id} status={event.status} />
+        </p>
       </div>
 
       <section className="flex flex-col gap-3">
