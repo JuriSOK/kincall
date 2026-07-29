@@ -120,6 +120,7 @@ const julie: TrustedContact = {
   relationship: "daughter",
   priority: 1,
   consentStatus: "confirmed",
+  archivedAt: null,
 };
 
 const marc: TrustedContact = {
@@ -130,6 +131,7 @@ const marc: TrustedContact = {
   relationship: "son",
   priority: 2,
   consentStatus: "confirmed",
+  archivedAt: null,
 };
 
 function familyResult(overrides: Partial<FamilyStructuredResult> = {}): FamilyStructuredResult {

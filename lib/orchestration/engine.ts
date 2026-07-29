@@ -162,7 +162,10 @@ export async function placeCallForIntent(
 
   let contact: TrustedContact | undefined;
   if (callEvent.agentType === "family") {
-    const contacts = await deps.repository.getTrustedContacts(event.personId);
+    // Active-only (DEC-009): this contact's call is still an unprocessed
+    // intent at this point, and the safety rule that blocks archiving a
+    // contact with an active call means they cannot have been archived yet.
+    const contacts = await deps.repository.getActiveTrustedContacts(event.personId);
     contact = contacts.find((candidate) => candidate.id === callEvent.contactId);
     if (!contact) {
       throw new Error(`Engine: call event "${callEvent.id}" has no known trusted contact.`);
@@ -257,7 +260,9 @@ async function startNextFamilyCall(
   // Chosen by priority succession from the contact whose result triggered this
   // step, NOT by "who has not been called yet" — the latter reads the answer
   // out of which rows exist, so a replay would skip the intended contact.
-  const contacts = await deps.repository.getTrustedContacts(current.personId);
+  // Active-only (DEC-009): an archived contact must never be selected for a
+  // new cascade step.
+  const contacts = await deps.repository.getActiveTrustedContacts(current.personId);
   const intended = nextContactAfter(contacts, options.previousContactId);
 
   if (!intended) {
@@ -565,7 +570,10 @@ export async function processFamilyResult(
   const callEvent = await prepareCallEvent(deps, callEventId);
   if (!callEvent) return reread();
 
-  const contacts = await deps.repository.getTrustedContacts(event.personId);
+  // Active-only (DEC-009): this call's own contact cannot have been archived
+  // while its result is still unprocessed (the same safety rule as above), and
+  // `remaining` must only ever count contacts the cascade could actually call.
+  const contacts = await deps.repository.getActiveTrustedContacts(event.personId);
   const contact = contacts.find((candidate) => candidate.id === callEvent.contactId);
   if (!contact) {
     throw new Error(`Engine: call event "${callEventId}" has no known trusted contact.`);

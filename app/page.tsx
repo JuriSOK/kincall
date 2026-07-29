@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getRepository } from "@/lib/database/store";
+import { DeletePersonButton } from "./people/delete-person-button";
 
 export default async function Home() {
   const people = await getRepository().listPeople();
@@ -24,13 +25,14 @@ export default async function Home() {
         <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Profiles</h2>
         <ul className="flex flex-col gap-2">
           {people.map((person) => (
-            <li key={person.id}>
-              <Link
-                href={`/people/${person.id}`}
-                className="block rounded-md border border-black/10 px-4 py-3 hover:border-black/30 dark:border-white/10 dark:hover:border-white/30"
-              >
+            <li
+              key={person.id}
+              className="flex items-center gap-2 rounded-md border border-black/10 px-4 py-3 hover:border-black/30 dark:border-white/10 dark:hover:border-white/30"
+            >
+              <Link href={`/people/${person.id}`} className="flex-1">
                 {person.firstName}
               </Link>
+              <DeletePersonButton personId={person.id} personName={person.firstName} mode="refresh" />
             </li>
           ))}
         </ul>

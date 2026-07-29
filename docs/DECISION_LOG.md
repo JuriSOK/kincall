@@ -434,6 +434,112 @@ places a real call.
 
 ---
 
+## DEC-009 — Soft deletion for people and trusted contacts
+
+**Date:** 29 July 2026
+**Status:** Approved
+
+### Context
+
+This is **optional interface administration, not a core orchestration feature**: nothing in
+`PRODUCT_SPECIFICATION.md` §13.1's mandatory feature list requires deleting a profile or a
+contact, and the frozen state machine, cascade logic and CALL-E adapters are untouched by this
+work. It exists so a profile or contact created by mistake, or no longer needed, can be removed
+from view without corrupting the historical record §14.3/§14.4 depend on.
+
+Physically deleting a `vulnerable_people` or `trusted_contacts` row was never an option: every
+historical `events` row, `call_events` row and timeline entry references a `person_id` /
+`contact_id`, and the event page (`app/events/[id]/page.tsx`) resolves names from those tables
+live, on every view. A hard delete would either cascade-destroy history or leave the event page
+unable to resolve a name for an old, perfectly valid event — either outcome breaks "historical
+events and call summaries must still resolve and display archived people/contact names
+correctly."
+
+### Decision
+
+**Soft deletion via a nullable `archived_at` timestamp** on both tables (migration
+`0007_archive_entities.sql`). Rows are never physically removed.
+
+- `Repository.getPerson` / `Repository.getTrustedContacts` stay **unfiltered** — they are the
+  historical reads the event page depends on, and continue to resolve an archived row by id
+  exactly as before.
+- `Repository.listPeople` and the new `Repository.getActiveTrustedContacts` are the **active**
+  reads: `archivedAt === null` only. `listPeople` backs the home page; `getActiveTrustedContacts`
+  backs the person page's circle display, the contacts-management page, and — critically — every
+  cascade decision point in `lib/orchestration/engine.ts` (`placeCallForIntent`,
+  `startNextFamilyCall`, `processFamilyResult`). An archived contact is therefore structurally
+  incapable of being selected for a new cascade step: the list the cascade reasons over simply
+  does not contain them.
+- `archivePerson(personId)` and `archiveTrustedContact(contactId)` are new repository methods,
+  implemented identically in both drivers and covered by the shared contract suite:
+  - **Idempotent.** Archiving an already-archived row is a no-op, not an error.
+  - **Refuse, don't silently skip.** `archivePerson` throws `PersonHasActiveEventError` while any
+    of the person's events is not yet terminal (`isTerminalEventStatus`:
+    `CASE_CLOSED`/`HUMAN_REVIEW_REQUIRED`). `archiveTrustedContact` throws
+    `ContactHasActiveCallError` while the contact has a call whose result is not yet processed —
+    the same "in flight" definition the poll route already uses
+    (`resultProcessedAt === null`). Both checks run inside the same atomic operation as the write
+    (`for update` locked in Supabase), so there is no window between checking and archiving.
+- `reorderTrustedContacts` and `createTrustedContact`'s priority assignment are both restricted to
+  the **active** circle: reordering validates the supplied ids against active contacts only (an
+  archived contact supplied in the list is rejected as "not an active contact in this trusted
+  circle"), and a new contact is appended after the highest **active** priority, so archived
+  contacts' stale priority values never resurface or collide.
+- The two archive RPCs are `SECURITY INVOKER`, with `EXECUTE` revoked from
+  `public`/`anon`/`authenticated` and granted only to `service_role`, matching every other RPC in
+  this schema (`0004_security.sql`'s pattern). `reorder_trusted_contacts` is redefined
+  (`create or replace`, identical signature) to exclude archived contacts from its own validation;
+  its existing grants are untouched by the replacement.
+- **No CALL-E call is ever placed by archiving.** The operation only ever writes a timestamp (or,
+  on refusal, writes nothing at all) — there is no path from either archive method to
+  `CalleAdapter`.
+
+### UI
+
+- A small trash-icon button (🗑, matching the existing Unicode-glyph convention already used for
+  the ↑/↓ reorder buttons — no icon library is introduced) appears next to each profile name on
+  the home page and next to each trusted contact in the circle-management screen, each with an
+  `aria-label` naming who it deletes.
+- Confirmation is the browser's native `window.confirm()` — deliberate, since no modal component
+  exists in this codebase yet and a native dialog needs no dependency.
+- On refusal (409) or an unknown id (404), the button shows the server's message inline and
+  changes nothing else — no optimistic removal, so a refused deletion can never appear to have
+  silently succeeded.
+- On success: the home page and the contacts-management page call `router.refresh()`; the
+  person's own detail page, when deleting the profile it is currently displaying, redirects to
+  `/` instead, since refreshing the same page after deleting its own subject makes no sense.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted, and no frozen document is touched. Soft
+deletion is infrastructure for the Phase 5 interface, not a new workflow: the cascade, the state
+machine and CALL-E integration behave identically for every currently-active person/contact:
+their behaviour is entirely unchanged by this decision. §16's `VulnerablePerson`/`TrustedContact`
+gain one bookkeeping field, the same way `DEC-004`'s `runId` and `DEC-006`'s lease fields were
+added without being product features.
+
+### Consequences
+
+- `CreatePersonInput` / `CreateTrustedContactInput` both exclude `archivedAt` — it is never
+  caller-supplied, only ever set by the two archive methods.
+- `app/events/[id]/page.tsx` is untouched: it already used the unfiltered `getTrustedContacts`,
+  so historical resolution for an archived contact works with zero changes to that file.
+- `app/people/[id]/contacts/contact-manager.tsx` gained a small, directly-motivated fix alongside
+  this feature: its `order` state was derived from the `contacts` prop only at mount
+  (`useState`'s initializer is ignored on subsequent renders), so a deleted — or newly added —
+  contact would not actually disappear from view after `router.refresh()` without it. A `useEffect`
+  keyed on the joined id list resyncs `order` whenever the active contact set changes, without
+  resetting an in-progress local reorder on an unrelated re-render.
+
+### Approval
+
+Project owner approval: approved, with the explicit requirements that rows are never physically
+deleted, active-event and active-call protection are enforced server-side and tested, contact
+ordering and cascade selection operate only on active contacts, historical display keeps working
+unchanged, and no CALL-E call is ever placed as part of deletion.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

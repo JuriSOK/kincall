@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { CallIntentIntegrityError, UnknownRecordError } from "@/lib/database/errors";
+import {
+  CallIntentIntegrityError,
+  ContactHasActiveCallError,
+  PersonHasActiveEventError,
+  UnknownRecordError,
+} from "@/lib/database/errors";
 import type { Repository } from "@/lib/database/repository";
+import { seedPendingFamilyCallIntent } from "./support/seed-calls";
 
 // The behaviours BOTH implementations must share. SupabaseRepository is held
 // to InMemoryRepository's exact contract rather than to a hand-written mirror
@@ -628,6 +634,164 @@ export function repositoryContract(name: string, harness: ContractHarness): void
 
       it("is empty for a person with no events", async () => {
         expect(await repository.listEvents("person_marie")).toEqual([]);
+      });
+    });
+
+    describe("soft deletion (DEC-009) — listPeople / getActiveTrustedContacts", () => {
+      it("listPeople excludes an archived person, but getPerson still resolves them", async () => {
+        await repository.archivePerson("person_marie");
+
+        expect((await repository.listPeople()).map((p) => p.id)).not.toContain("person_marie");
+        // Historical resolution must be unaffected.
+        expect((await repository.getPerson("person_marie"))?.archivedAt).not.toBeNull();
+      });
+
+      it("getActiveTrustedContacts excludes an archived contact, but getTrustedContacts (unfiltered) still includes them", async () => {
+        await repository.archiveTrustedContact("contact_julie");
+
+        const active = await repository.getActiveTrustedContacts("person_marie");
+        expect(active.map((c) => c.id)).not.toContain("contact_julie");
+
+        // The one list historical event/call-summary resolution depends on.
+        const all = await repository.getTrustedContacts("person_marie");
+        expect(all.map((c) => c.id)).toContain("contact_julie");
+      });
+    });
+
+    describe("archivePerson", () => {
+      it("sets archivedAt for a person with no events", async () => {
+        const archived = await repository.archivePerson("person_marie");
+        expect(archived.archivedAt).not.toBeNull();
+      });
+
+      it("is idempotent: archiving twice does not change the timestamp or error", async () => {
+        const first = await repository.archivePerson("person_marie");
+        const second = await repository.archivePerson("person_marie");
+        expect(second.archivedAt).toBe(first.archivedAt);
+      });
+
+      it("refuses while a non-terminal event is open, and changes nothing", async () => {
+        const event = await repository.createEvent("person_marie"); // SCHEDULED — not terminal
+
+        await expect(repository.archivePerson("person_marie")).rejects.toThrow(
+          PersonHasActiveEventError
+        );
+
+        expect((await repository.getPerson("person_marie"))?.archivedAt).toBeNull();
+        expect((await repository.getEvent(event.id))?.status).toBe("SCHEDULED");
+      });
+
+      it("succeeds once the open event reaches a terminal status", async () => {
+        const event = await repository.createEvent("person_marie");
+        await repository.updateEvent(event.id, { status: "CASE_CLOSED" });
+
+        const archived = await repository.archivePerson("person_marie");
+        expect(archived.archivedAt).not.toBeNull();
+      });
+
+      it("throws UnknownRecordError for an unknown person", async () => {
+        await expect(repository.archivePerson("person_does_not_exist")).rejects.toThrow(
+          UnknownRecordError
+        );
+      });
+    });
+
+    describe("archiveTrustedContact", () => {
+      it("sets archivedAt for a contact with no active call", async () => {
+        const archived = await repository.archiveTrustedContact("contact_julie");
+        expect(archived.archivedAt).not.toBeNull();
+      });
+
+      it("is idempotent: archiving twice does not change the timestamp or error", async () => {
+        const first = await repository.archiveTrustedContact("contact_julie");
+        const second = await repository.archiveTrustedContact("contact_julie");
+        expect(second.archivedAt).toBe(first.archivedAt);
+      });
+
+      it("refuses while the contact has an active (unprocessed) call, and changes nothing", async () => {
+        const { callEvent } = await seedPendingFamilyCallIntent(repository, "contact_julie");
+
+        await expect(repository.archiveTrustedContact("contact_julie")).rejects.toThrow(
+          ContactHasActiveCallError
+        );
+
+        expect((await repository.getTrustedContacts("person_marie")).find(
+          (c) => c.id === "contact_julie"
+        )?.archivedAt).toBeNull();
+        expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).toBeNull();
+      });
+
+      it("succeeds once that call's result has been processed", async () => {
+        const { callEvent } = await seedPendingFamilyCallIntent(repository, "contact_julie");
+        await repository.updateCallEvent(callEvent.id, {
+          resultProcessedAt: new Date().toISOString(),
+        });
+
+        const archived = await repository.archiveTrustedContact("contact_julie");
+        expect(archived.archivedAt).not.toBeNull();
+      });
+
+      it("throws UnknownRecordError for an unknown contact", async () => {
+        await expect(repository.archiveTrustedContact("contact_does_not_exist")).rejects.toThrow(
+          UnknownRecordError
+        );
+      });
+    });
+
+    describe("reorderTrustedContacts operates only on active contacts", () => {
+      it("rejects a supplied list that includes an archived contact", async () => {
+        const before = await repository.getTrustedContacts("person_marie");
+        await repository.archiveTrustedContact("contact_julie");
+
+        // The full pre-archive circle no longer matches "exactly the active
+        // circle" — it must be rejected, not silently accepted.
+        await expect(
+          repository.reorderTrustedContacts(
+            "person_marie",
+            before.map((c) => c.id)
+          )
+        ).rejects.toThrow();
+      });
+
+      it("succeeds when supplied exactly the active circle", async () => {
+        await repository.archiveTrustedContact("contact_julie");
+        const active = await repository.getActiveTrustedContacts("person_marie");
+
+        const reversed = [...active].reverse().map((c) => c.id);
+        const result = await repository.reorderTrustedContacts("person_marie", reversed);
+        expect(result.map((c) => c.id)).toEqual(reversed);
+      });
+    });
+
+    describe("createTrustedContact priority ignores archived siblings", () => {
+      it("appends after the highest ACTIVE priority, not the highest overall", async () => {
+        // Nicole is priority 3, the highest in the seeded circle. Archiving her
+        // must not force the next contact to priority 4.
+        await repository.archiveTrustedContact("contact_nicole");
+
+        const created = await repository.createTrustedContact("person_marie", {
+          firstName: "Paul",
+          phone: "+33644444444",
+          relationship: "neighbour",
+          consentStatus: "confirmed",
+        });
+
+        expect(created.priority).toBe(3);
+      });
+    });
+
+    describe("restart recovery — archived state persists", () => {
+      it("survives a reopen through a second repository instance", async () => {
+        await repository.archivePerson("person_marie");
+        await repository.archiveTrustedContact("contact_julie");
+
+        const reopened = await harness.reopen(repository);
+
+        expect((await reopened.getPerson("person_marie"))?.archivedAt).not.toBeNull();
+        const contact = (await reopened.getTrustedContacts("person_marie")).find(
+          (c) => c.id === "contact_julie"
+        );
+        expect(contact?.archivedAt).not.toBeNull();
       });
     });
 

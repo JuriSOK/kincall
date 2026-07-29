@@ -13,6 +13,7 @@ function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
     preferredCallTime: "09:00",
     interests: ["gardening"],
     consentStatus: "confirmed",
+    archivedAt: null,
     ...overrides,
   };
 }

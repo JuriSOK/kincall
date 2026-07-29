@@ -13,6 +13,7 @@ function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
     preferredCallTime: "09:00",
     interests: ["gardening"],
     consentStatus: "confirmed",
+    archivedAt: null,
     ...overrides,
   };
 }
@@ -26,6 +27,7 @@ function contact(overrides: Partial<TrustedContact> = {}): TrustedContact {
     relationship: "daughter",
     priority: 1,
     consentStatus: "confirmed",
+    archivedAt: null,
     ...overrides,
   };
 }

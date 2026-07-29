@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { EventStatus } from "../orchestration/states";
+import { isTerminalEventStatus, type EventStatus } from "../orchestration/states";
 import { slugify } from "../validation/profile";
 import {
   assertIntentMatches,
   CallIntentIntegrityError,
+  ContactHasActiveCallError,
   InvalidContactOrderError,
+  PersonHasActiveEventError,
   UnknownRecordError,
 } from "./errors";
 import type {
@@ -92,13 +94,19 @@ export class InMemoryRepository implements Repository {
   }
 
   async listPeople(): Promise<VulnerablePerson[]> {
-    return [...this.store.people.values()];
+    return [...this.store.people.values()].filter((person) => person.archivedAt === null);
   }
 
   async getTrustedContacts(personId: string): Promise<TrustedContact[]> {
     return [...this.store.contacts.values()]
       .filter((contact) => contact.personId === personId)
       .sort((a, b) => a.priority - b.priority);
+  }
+
+  async getActiveTrustedContacts(personId: string): Promise<TrustedContact[]> {
+    return (await this.getTrustedContacts(personId)).filter(
+      (contact) => contact.archivedAt === null
+    );
   }
 
   // Slug-based ids matching the seeded convention (person_marie), retrying
@@ -119,7 +127,7 @@ export class InMemoryRepository implements Repository {
     );
     // input.phone is already a validated E.164 number (DEC-008) — stored as
     // given, never minted.
-    const person: VulnerablePerson = { ...input, id };
+    const person: VulnerablePerson = { ...input, id, archivedAt: null };
     this.store.people.set(id, person);
     return person;
   }
@@ -130,9 +138,10 @@ export class InMemoryRepository implements Repository {
   ): Promise<TrustedContact> {
     if (!this.store.people.has(personId)) throw new UnknownRecordError("person", personId);
 
-    const siblings = [...this.store.contacts.values()].filter(
-      (contact) => contact.personId === personId
-    );
+    // Appended after the highest ACTIVE priority: an archived contact's stale
+    // priority is irrelevant, since only active contacts are ever renumbered
+    // or dialled (DEC-009).
+    const activeSiblings = await this.getActiveTrustedContacts(personId);
     const id = this.allocateId("contact", input.firstName, (candidate) =>
       this.store.contacts.has(candidate)
     );
@@ -142,8 +151,8 @@ export class InMemoryRepository implements Repository {
       ...input,
       id,
       personId,
-      // Appended, so adding a contact never reorders the existing cascade.
-      priority: siblings.reduce((max, sibling) => Math.max(max, sibling.priority), 0) + 1,
+      archivedAt: null,
+      priority: activeSiblings.reduce((max, sibling) => Math.max(max, sibling.priority), 0) + 1,
     };
     this.store.contacts.set(id, contact);
     return contact;
@@ -153,9 +162,9 @@ export class InMemoryRepository implements Repository {
     personId: string,
     orderedIds: string[]
   ): Promise<TrustedContact[]> {
-    const circle = [...this.store.contacts.values()].filter(
-      (contact) => contact.personId === personId
-    );
+    // Archived contacts are invisible to this validation entirely: they must
+    // never be part of "exactly this circle" and are never renumbered.
+    const circle = await this.getActiveTrustedContacts(personId);
 
     // Validate the whole request before writing anything: a partial apply
     // could drop a contact out of the cascade entirely.
@@ -165,20 +174,54 @@ export class InMemoryRepository implements Repository {
     if (orderedIds.length !== circle.length) {
       throw new InvalidContactOrderError(
         personId,
-        `expected all ${circle.length} contacts, received ${orderedIds.length}`
+        `expected all ${circle.length} active contacts, received ${orderedIds.length}`
       );
     }
     const known = new Set(circle.map((contact) => contact.id));
     for (const id of orderedIds) {
       if (!known.has(id)) {
-        throw new InvalidContactOrderError(personId, `"${id}" is not in this trusted circle`);
+        throw new InvalidContactOrderError(
+          personId,
+          `"${id}" is not an active contact in this trusted circle`
+        );
       }
     }
 
     orderedIds.forEach((id, index) => {
       this.store.contacts.set(id, { ...this.store.contacts.get(id)!, priority: index + 1 });
     });
-    return this.getTrustedContacts(personId);
+    return this.getActiveTrustedContacts(personId);
+  }
+
+  // ── Soft deletion (DEC-009) ─────────────────────────────────────────────────
+  async archivePerson(personId: string): Promise<VulnerablePerson> {
+    const existing = this.store.people.get(personId);
+    if (!existing) throw new UnknownRecordError("person", personId);
+    if (existing.archivedAt !== null) return existing; // idempotent no-op
+
+    const hasActiveEvent = [...this.store.events.values()].some(
+      (event) => event.personId === personId && !isTerminalEventStatus(event.status)
+    );
+    if (hasActiveEvent) throw new PersonHasActiveEventError(personId);
+
+    const updated: VulnerablePerson = { ...existing, archivedAt: this.nowIso() };
+    this.store.people.set(personId, updated);
+    return updated;
+  }
+
+  async archiveTrustedContact(contactId: string): Promise<TrustedContact> {
+    const existing = this.store.contacts.get(contactId);
+    if (!existing) throw new UnknownRecordError("trusted contact", contactId);
+    if (existing.archivedAt !== null) return existing; // idempotent no-op
+
+    const hasActiveCall = [...this.store.callEvents.values()].some(
+      (call) => call.contactId === contactId && call.resultProcessedAt === null
+    );
+    if (hasActiveCall) throw new ContactHasActiveCallError(contactId);
+
+    const updated: TrustedContact = { ...existing, archivedAt: this.nowIso() };
+    this.store.contacts.set(contactId, updated);
+    return updated;
   }
 
   async listEvents(personId: string, limit?: number): Promise<EventRecord[]> {

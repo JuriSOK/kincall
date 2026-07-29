@@ -13,6 +13,10 @@ export interface VulnerablePerson {
   preferredCallTime: string;
   interests: string[];
   consentStatus: ConsentStatus;
+  // Soft deletion (optional interface administration, not core orchestration
+  // — see docs/DECISION_LOG.md DEC-009). Never physically deleted: historical
+  // events must keep resolving this person's name. Null means active.
+  archivedAt: string | null;
 }
 
 export interface TrustedContact {
@@ -23,6 +27,9 @@ export interface TrustedContact {
   relationship: string;
   priority: number;
   consentStatus: ConsentStatus;
+  // Soft deletion (DEC-009). An archived contact disappears from the active
+  // circle and the cascade, but historical call summaries still resolve it.
+  archivedAt: string | null;
 }
 
 export interface EventRecord {

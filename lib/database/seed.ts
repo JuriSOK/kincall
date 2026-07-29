@@ -47,6 +47,7 @@ export function seedRepository(repository: InMemoryRepository): void {
     preferredCallTime: "09:00",
     interests: ["gardening", "family"],
     consentStatus: "confirmed",
+    archivedAt: null,
   });
 
   repository.seedContact({
@@ -57,6 +58,7 @@ export function seedRepository(repository: InMemoryRepository): void {
     relationship: "daughter",
     priority: 1,
     consentStatus: "confirmed",
+    archivedAt: null,
   });
 
   repository.seedContact({
@@ -67,6 +69,7 @@ export function seedRepository(repository: InMemoryRepository): void {
     relationship: "son",
     priority: 2,
     consentStatus: "confirmed",
+    archivedAt: null,
   });
 
   repository.seedContact({
@@ -77,6 +80,7 @@ export function seedRepository(repository: InMemoryRepository): void {
     relationship: "trusted neighbour",
     priority: 3,
     consentStatus: "confirmed",
+    archivedAt: null,
   });
 }
 

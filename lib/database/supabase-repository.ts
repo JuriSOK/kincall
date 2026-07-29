@@ -2,8 +2,10 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { EventStatus } from "../orchestration/states";
 import {
   CallIntentIntegrityError,
+  ContactHasActiveCallError,
   DuplicateIdempotencyKeyError,
   InvalidContactOrderError,
+  PersonHasActiveEventError,
   UnknownRecordError,
 } from "./errors";
 import { slugify } from "../validation/profile";
@@ -69,7 +71,11 @@ export class SupabaseRepository implements Repository {
   }
 
   async listPeople(): Promise<VulnerablePerson[]> {
-    const { data, error } = await this.client.from("vulnerable_people").select("*").order("id");
+    const { data, error } = await this.client
+      .from("vulnerable_people")
+      .select("*")
+      .is("archived_at", null)
+      .order("id");
     if (error) fail("listPeople", error);
     return (data as PersonRow[]).map(toPerson);
   }
@@ -81,6 +87,17 @@ export class SupabaseRepository implements Repository {
       .eq("person_id", personId)
       .order("priority", { ascending: true });
     if (error) fail("getTrustedContacts", error);
+    return (data as ContactRow[]).map(toContact);
+  }
+
+  async getActiveTrustedContacts(personId: string): Promise<TrustedContact[]> {
+    const { data, error } = await this.client
+      .from("trusted_contacts")
+      .select("*")
+      .eq("person_id", personId)
+      .is("archived_at", null)
+      .order("priority", { ascending: true });
+    if (error) fail("getActiveTrustedContacts", error);
     return (data as ContactRow[]).map(toContact);
   }
 
@@ -133,8 +150,10 @@ export class SupabaseRepository implements Repository {
     personId: string,
     input: CreateTrustedContactInput
   ): Promise<TrustedContact> {
-    const circle = await this.getTrustedContacts(personId);
-    // Appended, so adding a contact never reorders the existing cascade.
+    // Appended after the highest ACTIVE priority: an archived contact's stale
+    // priority is irrelevant, since only active contacts are ever renumbered
+    // or dialled (DEC-009).
+    const circle = await this.getActiveTrustedContacts(personId);
     const priority = circle.reduce((max, contact) => Math.max(max, contact.priority), 0) + 1;
 
     const row = await this.insertWithSlugId<ContactRow>(
@@ -172,6 +191,33 @@ export class SupabaseRepository implements Repository {
       fail("reorderTrustedContacts", error);
     }
     return ((data ?? []) as ContactRow[]).map(toContact);
+  }
+
+  // ── Soft deletion (DEC-009) ─────────────────────────────────────────────────
+  async archivePerson(personId: string): Promise<VulnerablePerson> {
+    const { data, error } = await this.client.rpc("archive_person", {
+      p_person_id: personId,
+    });
+    if (error) {
+      if (error.code === INTEGRITY_VIOLATION) throw new PersonHasActiveEventError(personId);
+      fail("archivePerson", error);
+    }
+    const row = firstRow<PersonRow>(data);
+    if (!row) throw new UnknownRecordError("person", personId);
+    return toPerson(row);
+  }
+
+  async archiveTrustedContact(contactId: string): Promise<TrustedContact> {
+    const { data, error } = await this.client.rpc("archive_trusted_contact", {
+      p_contact_id: contactId,
+    });
+    if (error) {
+      if (error.code === INTEGRITY_VIOLATION) throw new ContactHasActiveCallError(contactId);
+      fail("archiveTrustedContact", error);
+    }
+    const row = firstRow<ContactRow>(data);
+    if (!row) throw new UnknownRecordError("trusted contact", contactId);
+    return toContact(row);
   }
 
   async listEvents(personId: string, limit?: number): Promise<EventRecord[]> {

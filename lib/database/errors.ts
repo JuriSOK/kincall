@@ -56,6 +56,31 @@ export class ConsentNotConfirmedError extends Error {
   }
 }
 
+// DEC-009: a person may not be archived (soft-deleted) while any of their
+// events is still open. Historical events are unaffected either way — this
+// guards against archiving someone mid-check-in, which would leave a live
+// cascade with nowhere to resolve back to.
+export class PersonHasActiveEventError extends Error {
+  constructor(public readonly personId: string) {
+    super(
+      `Repository: cannot archive person "${personId}" — an active event is still open.`
+    );
+    this.name = "PersonHasActiveEventError";
+  }
+}
+
+// DEC-009: a trusted contact may not be archived while they have a call whose
+// result is not yet processed — that call is either ringing or awaiting a
+// webhook/poll, and archiving mid-call would orphan its eventual result.
+export class ContactHasActiveCallError extends Error {
+  constructor(public readonly contactId: string) {
+    super(
+      `Repository: cannot archive contact "${contactId}" — an active call is in progress.`
+    );
+    this.name = "ContactHasActiveCallError";
+  }
+}
+
 // `orderedIds` was not exactly the person's trusted circle. Rejected whole:
 // applying a partial order could silently drop somebody out of the cascade,
 // which for a vulnerable person means nobody calls them.

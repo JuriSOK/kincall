@@ -5,6 +5,9 @@
 -- exactly its pre-Supabase behaviour with the schema left untouched. Run this
 -- only after confirming no in-flight event needs its data.
 
+drop function if exists archive_trusted_contact(text);
+drop function if exists archive_person(text);
+drop function if exists reorder_trusted_contacts(text, text[]);
 drop function if exists commit_transition_with_call_intent(
   text, text, text, text, text, text[], jsonb, text, text, text);
 drop function if exists commit_transition(text, text, text, text, text, text[], jsonb);

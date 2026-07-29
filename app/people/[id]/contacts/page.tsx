@@ -17,7 +17,9 @@ export default async function ContactsPage({ params }: { params: Promise<{ id: s
     notFound();
   }
 
-  const contacts = await repository.getTrustedContacts(person.id);
+  // Active-only (DEC-009): management/reordering must never see or touch an
+  // archived contact.
+  const contacts = await repository.getActiveTrustedContacts(person.id);
 
   // Computed on the server: readiness depends on CALLE_MODE and the
   // environment variables, neither of which the browser can see.

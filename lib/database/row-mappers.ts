@@ -32,6 +32,7 @@ export interface PersonRow {
   preferred_call_time: string;
   interests: string[] | null;
   consent_status: string;
+  archived_at: string | null;
 }
 
 export function toPerson(row: PersonRow): VulnerablePerson {
@@ -46,6 +47,7 @@ export function toPerson(row: PersonRow): VulnerablePerson {
     preferredCallTime: row.preferred_call_time,
     interests: row.interests ?? [],
     consentStatus: row.consent_status as ConsentStatus,
+    archivedAt: iso(row.archived_at),
   };
 }
 
@@ -57,6 +59,7 @@ export interface ContactRow {
   relationship: string;
   priority: number;
   consent_status: string;
+  archived_at: string | null;
 }
 
 export function toContact(row: ContactRow): TrustedContact {
@@ -68,6 +71,7 @@ export function toContact(row: ContactRow): TrustedContact {
     relationship: row.relationship,
     priority: row.priority,
     consentStatus: row.consent_status as ConsentStatus,
+    archivedAt: iso(row.archived_at),
   };
 }
 

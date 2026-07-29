@@ -4,6 +4,7 @@ import { getRepository } from "@/lib/database/store";
 import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
+import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
 
 const TONE_CLASSES = {
@@ -21,8 +22,11 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
     notFound();
   }
 
+  // Active-only (DEC-009): an archived contact must disappear from this
+  // display. Historical resolution (app/events/[id]/page.tsx) uses the
+  // unfiltered getTrustedContacts instead.
   const [trustedCircle, events] = await Promise.all([
-    repository.getTrustedContacts(person.id),
+    repository.getActiveTrustedContacts(person.id),
     repository.listEvents(person.id, 20),
   ]);
 
@@ -37,7 +41,14 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         <Link href="/" className="text-sm opacity-60 hover:underline">
           ← Profiles
         </Link>
-        <h1 className="text-3xl font-semibold">{person.firstName}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-3xl font-semibold">{person.firstName}</h1>
+          <DeletePersonButton
+            personId={person.id}
+            personName={person.firstName}
+            mode="redirect-home"
+          />
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-full border px-3 py-1 text-xs ${TONE_CLASSES[status.tone]}`}>

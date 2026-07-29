@@ -11,6 +11,7 @@ const marie: VulnerablePerson = {
   preferredCallTime: "09:00",
   interests: ["gardening"],
   consentStatus: "confirmed",
+  archivedAt: null,
 };
 
 const julie: TrustedContact = {
@@ -21,6 +22,7 @@ const julie: TrustedContact = {
   relationship: "daughter",
   priority: 1,
   consentStatus: "confirmed",
+  archivedAt: null,
 };
 
 describe("buildFamilyTask", () => {

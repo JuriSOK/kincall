@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FieldErrors } from "@/lib/validation/profile";
 import { submitContactForm } from "./contact-form-submit";
+import { DeleteContactButton } from "./delete-contact-button";
 
 // Deliberately NOT TrustedContact: the real, unmasked phone must never cross
 // into a Client Component's props, since those are serialized into the page
@@ -29,6 +30,17 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
   const [order, setOrder] = useState(contacts.map((contact) => contact.id));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
+
+  // useState's initializer only runs on mount, so without this, adding or
+  // deleting a contact and calling router.refresh() would leave `order`
+  // holding stale ids — the very set this component is supposed to reflect.
+  // Keyed on the joined id list (not the `contacts` array reference) so an
+  // unrelated re-render can never reset an in-progress local reorder before
+  // the user has clicked "Save order".
+  const contactIdsKey = contacts.map((contact) => contact.id).join(",");
+  useEffect(() => {
+    setOrder(contacts.map((contact) => contact.id));
+  }, [contactIdsKey]);
 
   const byId = new Map(contacts.map((contact) => [contact.id, contact]));
   const dirty = order.some((id, index) => contacts[index]?.id !== id);
@@ -146,6 +158,11 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
                   >
                     ↓
                   </button>
+                  <DeleteContactButton
+                    personId={personId}
+                    contactId={contact.id}
+                    contactName={contact.firstName}
+                  />
                 </li>
               );
             })}

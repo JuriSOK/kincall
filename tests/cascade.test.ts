@@ -11,6 +11,7 @@ const marc: TrustedContact = {
   relationship: "son",
   priority: 2,
   consentStatus: "confirmed",
+  archivedAt: null,
 };
 
 const nicole: TrustedContact = {
@@ -21,6 +22,7 @@ const nicole: TrustedContact = {
   relationship: "trusted neighbour",
   priority: 3,
   consentStatus: "confirmed",
+  archivedAt: null,
 };
 
 function familyResult(overrides: Partial<FamilyStructuredResult>): FamilyStructuredResult {

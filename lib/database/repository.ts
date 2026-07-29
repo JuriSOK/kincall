@@ -64,26 +64,58 @@ export interface CommitTransitionWithCallIntentResult extends CommitTransitionRe
 // is stored exactly as given. A per-entity KINCALL_PHONE_<ID> environment
 // variable can still override it on read (phoneEnvVarFor), which is how the
 // four legacy demo entities keep working without ever storing a real number.
-export type CreatePersonInput = Omit<VulnerablePerson, "id">;
+// `archivedAt` is never supplied by a caller — it starts null and is only
+// ever set by archivePerson/archiveTrustedContact (DEC-009).
+export type CreatePersonInput = Omit<VulnerablePerson, "id" | "archivedAt">;
 // `personId` is a separate argument, and `priority` is assigned by appending.
-export type CreateTrustedContactInput = Omit<TrustedContact, "id" | "priority" | "personId">;
+export type CreateTrustedContactInput = Omit<
+  TrustedContact,
+  "id" | "priority" | "personId" | "archivedAt"
+>;
 
 export interface Repository {
+  // Unfiltered by design: an archived person's own row must still resolve so
+  // historical events can display their name (DEC-009). getPerson/getEvent/
+  // getTrustedContacts are the "historical" reads; listPeople/
+  // getActiveTrustedContacts are the "currently active" reads.
   getPerson(personId: string): Promise<VulnerablePerson | undefined>;
+  // Active people only (archivedAt === null) — backs the home page. Use
+  // getPerson for a single archived-or-not lookup by id.
   listPeople(): Promise<VulnerablePerson[]>;
-  getTrustedContacts(personId: string): Promise<TrustedContact[]>; // priority ascending
+  // Unfiltered, priority ascending, INCLUDING archived contacts — the one
+  // list historical event/call-summary resolution depends on
+  // (app/events/[id]/page.tsx). Never use this to decide who the cascade may
+  // call next; use getActiveTrustedContacts for that.
+  getTrustedContacts(personId: string): Promise<TrustedContact[]>;
+  // Active contacts only (archivedAt === null), priority ascending. The only
+  // list the cascade, the ordering UI and the trusted-circle display may use
+  // — an archived contact must never be selected for a new cascade step.
+  getActiveTrustedContacts(personId: string): Promise<TrustedContact[]>;
 
   createPerson(input: CreatePersonInput): Promise<VulnerablePerson>;
-  // Appended at the end of the circle, so adding a contact never silently
-  // reorders the cascade.
+  // Appended at the end of the ACTIVE circle, so adding a contact never
+  // silently reorders the cascade and never collides with an archived
+  // contact's stale priority.
   createTrustedContact(
     personId: string,
     input: CreateTrustedContactInput
   ): Promise<TrustedContact>;
   // Rewrites priorities to 1..n in the given order, atomically. `orderedIds`
-  // must be exactly this person's circle — no duplicates, nothing missing,
-  // nothing foreign — or the whole call is rejected and nothing changes.
+  // must be exactly this person's ACTIVE circle — no duplicates, nothing
+  // missing, nothing foreign, and no archived contact — or the whole call is
+  // rejected and nothing changes.
   reorderTrustedContacts(personId: string, orderedIds: string[]): Promise<TrustedContact[]>;
+
+  // ── Soft deletion (DEC-009): optional interface administration, not a core
+  // orchestration feature. Rows are never physically deleted. Idempotent —
+  // archiving an already-archived row is a no-op, not an error.
+  //
+  // Refuses (PersonHasActiveEventError) while any of the person's events is
+  // not yet terminal (isTerminalEventStatus).
+  archivePerson(personId: string): Promise<VulnerablePerson>;
+  // Refuses (ContactHasActiveCallError) while the contact has any call whose
+  // result is not yet processed.
+  archiveTrustedContact(contactId: string): Promise<TrustedContact>;
 
   createEvent(personId: string): Promise<EventRecord>;
   listEvents(personId: string, limit?: number): Promise<EventRecord[]>; // newest first

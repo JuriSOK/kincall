@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { POST as createPerson } from "@/app/api/people/route";
+import { DELETE as deletePerson } from "@/app/api/people/[id]/route";
 import { POST as createContact } from "@/app/api/people/[id]/contacts/route";
+import { DELETE as deleteContact } from "@/app/api/people/[id]/contacts/[contactId]/route";
 import { PATCH as reorderContacts } from "@/app/api/people/[id]/contacts/order/route";
 import { getRepository } from "@/lib/database/store";
+import { seedPendingFamilyCallIntent } from "./support/seed-calls";
 
 function post(url: string, body: unknown): Request {
   return new Request(url, {
@@ -18,6 +21,10 @@ function patch(url: string, body: unknown): Request {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+function del(url: string): Request {
+  return new Request(url, { method: "DELETE" });
 }
 
 const VALID_PERSON = {
@@ -243,5 +250,174 @@ describe("PATCH /api/people/[id]/contacts/order", () => {
       params("person_nope")
     );
     expect(response.status).toBe(404);
+  });
+});
+
+// DEC-009: soft deletion is optional interface administration — server
+// behaviour only. The confirmation dialog itself is client-side (native
+// window.confirm()) and not exercised here; these tests prove the route
+// behaves correctly regardless of what any confirmation UI decided to send.
+//
+// Each test creates its OWN fresh person (and contact, where relevant) rather
+// than reusing the globally shared person_marie/contact_julie fixtures: the
+// repository singleton persists across every test in this file, so scenarios
+// that permanently mutate a seeded record (an open event, an archive) would
+// otherwise leak into unrelated later tests.
+describe("DELETE /api/people/[id]", () => {
+  const params = (id: string) => ({ params: Promise.resolve({ id }) });
+
+  async function freshPerson(firstName: string): Promise<string> {
+    const created = await createPerson(
+      post("https://kincall.test/api/people", { ...VALID_PERSON, firstName })
+    );
+    return ((await created.json()) as { personId: string }).personId;
+  }
+
+  it("archives a profile with no active event", async () => {
+    const personId = await freshPerson("DeleteMe1");
+
+    const response = await deletePerson(
+      del(`https://kincall.test/api/people/${personId}`),
+      params(personId)
+    );
+
+    expect(response.status).toBe(200);
+    expect((await getRepository().getPerson(personId))?.archivedAt).not.toBeNull();
+    // Archived people disappear from the home-page list.
+    expect((await getRepository().listPeople()).map((p) => p.id)).not.toContain(personId);
+  });
+
+  it("404s for an unknown person", async () => {
+    const response = await deletePerson(
+      del("https://kincall.test/api/people/person_nope"),
+      params("person_nope")
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("refuses with 409 while an active event is open, and archives nothing", async () => {
+    const personId = await freshPerson("DeleteMe2");
+    await getRepository().createEvent(personId); // SCHEDULED — not terminal
+
+    const response = await deletePerson(
+      del(`https://kincall.test/api/people/${personId}`),
+      params(personId)
+    );
+
+    expect(response.status).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+    expect(error).toMatch(/active check-in/i);
+    expect((await getRepository().getPerson(personId))?.archivedAt).toBeNull();
+    expect((await getRepository().listPeople()).map((p) => p.id)).toContain(personId);
+  });
+
+  it("is idempotent: deleting an already-archived profile succeeds again", async () => {
+    const personId = await freshPerson("DeleteMe3");
+    await deletePerson(del(`https://kincall.test/api/people/${personId}`), params(personId));
+
+    const response = await deletePerson(
+      del(`https://kincall.test/api/people/${personId}`),
+      params(personId)
+    );
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("DELETE /api/people/[id]/contacts/[contactId]", () => {
+  const params = (id: string, contactId: string) => ({ params: Promise.resolve({ id, contactId }) });
+
+  async function freshPersonWithContact(
+    personName: string,
+    contactName: string
+  ): Promise<{ personId: string; contactId: string }> {
+    const created = await createPerson(
+      post("https://kincall.test/api/people", { ...VALID_PERSON, firstName: personName })
+    );
+    const { personId } = (await created.json()) as { personId: string };
+
+    const contactResponse = await createContact(
+      post(`https://kincall.test/api/people/${personId}/contacts`, {
+        firstName: contactName,
+        phone: "+33655555555",
+        relationship: "friend",
+        consentStatus: "confirmed",
+      }),
+      { params: Promise.resolve({ id: personId }) }
+    );
+    const { contactId } = (await contactResponse.json()) as { contactId: string };
+    return { personId, contactId };
+  }
+
+  it("archives a contact with no active call", async () => {
+    const { personId, contactId } = await freshPersonWithContact("Host1", "Ana");
+
+    const response = await deleteContact(
+      del(`https://kincall.test/api/people/${personId}/contacts/${contactId}`),
+      params(personId, contactId)
+    );
+
+    expect(response.status).toBe(200);
+    const contact = (await getRepository().getTrustedContacts(personId)).find(
+      (c) => c.id === contactId
+    );
+    expect(contact?.archivedAt).not.toBeNull();
+    // Disappears from the active circle used by ordering and the cascade.
+    expect(
+      (await getRepository().getActiveTrustedContacts(personId)).map((c) => c.id)
+    ).not.toContain(contactId);
+  });
+
+  it("404s for an unknown person", async () => {
+    const response = await deleteContact(
+      del("https://kincall.test/api/people/person_nope/contacts/contact_nope"),
+      params("person_nope", "contact_nope")
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("404s for an unknown contact on a known person", async () => {
+    const { personId } = await freshPersonWithContact("Host2", "Ben");
+
+    const response = await deleteContact(
+      del(`https://kincall.test/api/people/${personId}/contacts/contact_nope`),
+      params(personId, "contact_nope")
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("refuses with 409 while the contact has an active call, and archives nothing", async () => {
+    // The active-call check keys on contact id alone, so the seeded
+    // contact_julie (with a real active-call fixture available) is used here
+    // deliberately — this is the one scenario in this block that must NOT
+    // create a fresh contact, since seedPendingFamilyCallIntent only knows how
+    // to attach a call to person_marie's seeded circle.
+    await seedPendingFamilyCallIntent(getRepository(), "contact_julie");
+
+    const response = await deleteContact(
+      del("https://kincall.test/api/people/person_marie/contacts/contact_julie"),
+      params("person_marie", "contact_julie")
+    );
+
+    expect(response.status).toBe(409);
+    const { error } = (await response.json()) as { error: string };
+    expect(error).toMatch(/active call/i);
+    const contact = (await getRepository().getTrustedContacts("person_marie")).find(
+      (c) => c.id === "contact_julie"
+    );
+    expect(contact?.archivedAt).toBeNull();
+  });
+
+  it("is idempotent: deleting an already-archived contact succeeds again", async () => {
+    const { personId, contactId } = await freshPersonWithContact("Host3", "Cleo");
+    await deleteContact(
+      del(`https://kincall.test/api/people/${personId}/contacts/${contactId}`),
+      params(personId, contactId)
+    );
+
+    const response = await deleteContact(
+      del(`https://kincall.test/api/people/${personId}/contacts/${contactId}`),
+      params(personId, contactId)
+    );
+    expect(response.status).toBe(200);
   });
 });

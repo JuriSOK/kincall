@@ -24,6 +24,14 @@ export type OrchestrationDecision =
 
 export type Priority = "low" | "medium" | "high";
 
+// DEC-009: a person cannot be archived while any of their events is still
+// open. "Open" means not yet at one of these two terminal statuses — matching
+// the check the engine and crash-recovery tests already use elsewhere
+// (e.g. startNextFamilyCall's "another worker already finished this event").
+export function isTerminalEventStatus(status: EventStatus): boolean {
+  return status === "CASE_CLOSED" || status === "HUMAN_REVIEW_REQUIRED";
+}
+
 export type TransitionEvent =
   | "COMPANION_CALL_STARTED"
   | "COMPANION_CONVERSATION_STARTED"
