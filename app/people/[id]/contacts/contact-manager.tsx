@@ -91,7 +91,12 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
     };
 
     setBusy(true);
-    const result = await submitContactForm(form, fieldValues, { personId, fetchImpl: fetch });
+    // fetchImpl is intentionally omitted: submitContactForm's own default
+    // safely wraps the global fetch. Passing the bare `fetch` reference here
+    // directly is exactly the "Illegal invocation" bug this must never repeat
+    // — browsers require native fetch to be called with the global object as
+    // `this`, and handing the reference to another module detaches it.
+    const result = await submitContactForm(form, fieldValues, { personId });
     setBusy(false);
 
     if (!result.ok) {

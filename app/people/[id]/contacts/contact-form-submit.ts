@@ -13,8 +13,25 @@ export interface SubmitContactResult {
 
 export interface SubmitContactDeps {
   personId: string;
-  fetchImpl: typeof fetch;
+  // Optional: defaults to defaultFetch below. If you DO supply one, it must
+  // be a plain wrapper function — never the bare `fetch`/`window.fetch`
+  // reference itself. Native fetch is a "legacy platform object" method:
+  // browsers require it to be invoked with the global object as `this`, and
+  // capturing the reference and calling it any other way — as a property on
+  // this deps object (`deps.fetchImpl(...)`), a destructured local, or
+  // anything else that detaches it from that receiver — throws
+  // `TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation.`
+  // Node's fetch does not enforce this, which is exactly why the bug this
+  // fixes passed every test yet broke in every real browser.
+  fetchImpl?: typeof fetch;
 }
+
+// The safe default. This arrow function's body performs its OWN fresh, direct
+// call to the literal `fetch` identifier every time it runs, so native
+// fetch's receiver requirement is satisfied regardless of how THIS wrapper
+// itself was invoked. Reassigning `deps.fetchImpl = fetch` directly instead of
+// going through a wrapper like this one is exactly the mistake to never repeat.
+const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
 
 export interface ContactFieldValues {
   firstName: string;
@@ -47,7 +64,8 @@ export async function submitContactForm(
     return { ok: false, errors: local.errors };
   }
 
-  const response = await deps.fetchImpl(`/api/people/${deps.personId}/contacts`, {
+  const fetchImpl = deps.fetchImpl ?? defaultFetch;
+  const response = await fetchImpl(`/api/people/${deps.personId}/contacts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(local.values),

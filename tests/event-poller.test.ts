@@ -313,3 +313,85 @@ describe("startPolling — temporary errors never terminate the workflow", () =>
     controller.stop();
   });
 });
+
+// Regression coverage for "TypeError: Failed to execute 'fetch' on 'Window':
+// Illegal invocation" — the identical bug fixed in submitContactForm
+// (app/people/[id]/contacts/contact-form-submit.ts), here in startPolling's
+// own default. A real browser's native fetch only works when invoked as a
+// plain top-level reference; assigning the captured reference to a variable
+// (as the old `fetchImpl = fetch` default did) and calling it from there
+// detaches it from that requirement. Node's fetch does not enforce this,
+// which is why the bug passed every existing test above yet broke live.
+//
+// Node cannot reproduce the browser's exact internal receiver check, but it
+// can faithfully reproduce the one distinction that matters: a property call
+// (`obj.fn()`) supplies `obj` as `this`, while a call through a plain
+// top-level reference — a bare call, or one made from inside a wrapper
+// function's own body — supplies `undefined` in strict mode. That is exactly
+// the difference between the buggy assignment and the fixed one, so this
+// fixture requires `this === undefined` to succeed and throws otherwise.
+function nativeLikeFetch(): typeof fetch {
+  const impl = function (this: unknown) {
+    if (this !== undefined) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    }
+    return Promise.resolve(jsonResponse({ status: "CASE_CLOSED" }));
+  };
+  return impl as unknown as typeof fetch;
+}
+
+describe("startPolling — regression: native fetch must never be passed unbound", () => {
+  it("reproduces the bug: invoking the raw reference as obj.fetchImpl(...) throws", () => {
+    // Standalone proof of the root cause, independent of startPolling: this
+    // is the call shape a detached assignment eventually produces elsewhere,
+    // and it detaches the reference from the plain top-level call native
+    // fetch requires.
+    const holder = { fetchImpl: nativeLikeFetch() };
+    expect(() => holder.fetchImpl("/x")).toThrow("Illegal invocation");
+  });
+
+  it("is safe by default: omitting fetchImpl entirely still succeeds against a receiver-sensitive global fetch", async () => {
+    // Replaces the actual global fetch with the receiver-checking fixture, so
+    // this proves startPolling's OWN internal default (defaultFetch) never
+    // calls it in a detached way.
+    vi.stubGlobal("fetch", nativeLikeFetch());
+    const onPollSuccess = vi.fn();
+
+    try {
+      const controller = startPolling({
+        eventId: "event_001",
+        status: "ATTENTION_REQUIRED",
+        onPollSuccess,
+        // fetchImpl deliberately omitted.
+      });
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(onPollSuccess).toHaveBeenCalledWith("CASE_CLOSED");
+      controller.stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a caller-supplied wrapper survives detachment even when passed through another layer", async () => {
+    const native = nativeLikeFetch();
+    // The recommended wrapper: its body performs a fresh, direct reference to
+    // `native`, so it stays safe regardless of how the wrapper itself gets
+    // invoked.
+    const fetchImpl: typeof fetch = (input, init) => native(input, init);
+    const onPollSuccess = vi.fn();
+
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "ATTENTION_REQUIRED",
+      fetchImpl,
+      onPollSuccess,
+    });
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(onPollSuccess).toHaveBeenCalledWith("CASE_CLOSED");
+    controller.stop();
+  });
+});

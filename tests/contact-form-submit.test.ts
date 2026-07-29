@@ -98,3 +98,94 @@ describe("submitContactForm — regression: form reference must survive the awai
     expect(capturedForm.reset).toHaveBeenCalledTimes(1);
   });
 });
+
+// Regression coverage for "TypeError: Failed to execute 'fetch' on 'Window':
+// Illegal invocation". A real browser's native fetch is a "legacy platform
+// object" method: it only works when invoked with the global object as its
+// receiver, and throws for any other receiver. Node's own fetch does not
+// enforce this at all, which is exactly why the original bug — assigning the
+// bare `fetch` reference to `fetchImpl` and later invoking it as
+// `deps.fetchImpl(...)` (a property/method call, receiver = deps) — passed
+// every existing test yet broke in every real browser.
+//
+// Node cannot reproduce the browser's exact internal receiver-brand check, but
+// it CAN faithfully reproduce the one distinction that actually matters here:
+// a property/method call (`obj.fn()`) supplies `obj` as `this`, while a call
+// through a plain top-level reference — a bare call, or a call made from
+// inside a wrapper function's own body — supplies `undefined` as `this` in
+// strict mode. That is the exact difference between the buggy call style and
+// the fixed one, so this fixture requires `this === undefined` to succeed and
+// throws for anything else, exactly mirroring how a real detached native
+// fetch would reject the property-call form and accept the direct form.
+function nativeLikeFetch(): typeof fetch {
+  const impl = function (this: unknown) {
+    if (this !== undefined) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify({ contactId: "contact_marc" }), { status: 201 })
+    );
+  };
+  return impl as unknown as typeof fetch;
+}
+
+describe("submitContactForm — regression: native fetch must never be passed unbound", () => {
+  it("reproduces the bug: invoking the raw reference as obj.fetchImpl(...) throws", () => {
+    // Standalone proof of the root cause, independent of submitContactForm:
+    // this is exactly the call shape the original code used
+    // (`deps.fetchImpl(...)`), and it detaches the reference from the plain
+    // top-level call native fetch requires.
+    const holder = { fetchImpl: nativeLikeFetch() };
+    expect(() => holder.fetchImpl("/x")).toThrow("Illegal invocation");
+  });
+
+  it("submitContactForm itself never re-detaches a caller-supplied fetchImpl", async () => {
+    const form = fakeForm();
+    // The exact raw, receiver-sensitive reference the original bug passed as
+    // fetchImpl directly — submitContactForm must invoke it as a plain
+    // top-level reference internally, never as `deps.fetchImpl(...)`.
+    const fetchImpl = nativeLikeFetch();
+
+    const result = await submitContactForm(form, VALID_FIELDS, {
+      personId: "person_marie",
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(form.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("the recommended wrapper survives detachment even when passed through another layer", async () => {
+    const form = fakeForm();
+    const native = nativeLikeFetch();
+    // The wrapper's body performs a fresh, direct reference to `native` — the
+    // pattern the task's requirements prescribe — so it stays safe regardless
+    // of how the wrapper itself gets invoked.
+    const fetchImpl: typeof fetch = (input, init) => native(input, init);
+
+    const result = await submitContactForm(form, VALID_FIELDS, {
+      personId: "person_marie",
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(form.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("is safe by default: omitting fetchImpl entirely still succeeds against a receiver-sensitive global fetch", async () => {
+    const form = fakeForm();
+    // Replaces the actual global fetch with the receiver-checking fixture, so
+    // this proves submitContactForm's OWN internal default (defaultFetch)
+    // never calls it in a detached way either — not just that a
+    // caller-supplied wrapper can be made safe.
+    vi.stubGlobal("fetch", nativeLikeFetch());
+
+    try {
+      const result = await submitContactForm(form, VALID_FIELDS, { personId: "person_marie" });
+      expect(result.ok).toBe(true);
+      expect(form.reset).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

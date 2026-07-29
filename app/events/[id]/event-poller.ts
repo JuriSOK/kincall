@@ -37,10 +37,26 @@ export interface StartPollingOptions {
   // or any other terminal state. Only a later successful poll (which runs
   // the real, unmodified orchestration logic server-side) can change status.
   onError?: (error: unknown) => void;
+  // Optional: defaults to defaultFetch below. If you DO supply one, it must
+  // be a plain wrapper function — never the bare `fetch`/`window.fetch`
+  // reference itself. Native fetch is a "legacy platform object" method:
+  // browsers require it to be invoked as a plain top-level reference, and
+  // assigning the captured reference to a variable or object property and
+  // calling it from there detaches it from that requirement and throws
+  // `TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation.`
+  // Node's fetch does not enforce this, which is exactly why that bug passes
+  // every test yet breaks in every real browser.
   fetchImpl?: typeof fetch;
 }
 
 const DEFAULT_INTERVAL_MS = 5000;
+
+// The safe default. This arrow function's body performs its own fresh, direct
+// call to the literal `fetch` identifier every time it runs, so native
+// fetch's receiver requirement is satisfied regardless of how THIS wrapper
+// itself was invoked. Assigning `fetchImpl = fetch` directly instead of going
+// through a wrapper like this one is exactly the mistake to never repeat.
+const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
 
 // Framework-agnostic poller for app/api/events/[id]/poll. Ticks every
 // intervalMs; a tick is skipped entirely (not queued) while the previous
@@ -54,7 +70,7 @@ export function startPolling(options: StartPollingOptions): PollController {
     intervalMs = DEFAULT_INTERVAL_MS,
     onPollSuccess,
     onError,
-    fetchImpl = fetch,
+    fetchImpl = defaultFetch,
   } = options;
 
   if (!isWaitingStatus(status)) {
