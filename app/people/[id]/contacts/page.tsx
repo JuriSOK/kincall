@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRepository } from "@/lib/database/store";
+import { maskPhone } from "@/lib/phone";
 import { describeCallReadiness } from "@/lib/orchestration/person-status";
 import { ContactManager } from "./contact-manager";
 
@@ -24,6 +25,17 @@ export default async function ContactsPage({ params }: { params: Promise<{ id: s
     contacts.map((contact) => [contact.id, describeCallReadiness(contact)])
   );
 
+  // The real phone number must never cross into a Client Component's props —
+  // those get serialized into the page payload sent to the browser. Only the
+  // masked form is passed to ContactManager.
+  const contactSummaries = contacts.map((contact) => ({
+    id: contact.id,
+    firstName: contact.firstName,
+    relationship: contact.relationship,
+    priority: contact.priority,
+    maskedPhone: maskPhone(contact.phone),
+  }));
+
   return (
     <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">
       <div className="flex flex-col gap-1">
@@ -33,7 +45,7 @@ export default async function ContactsPage({ params }: { params: Promise<{ id: s
         <h1 className="text-3xl font-semibold">Trusted circle</h1>
       </div>
 
-      <ContactManager personId={person.id} contacts={contacts} readiness={readiness} />
+      <ContactManager personId={person.id} contacts={contactSummaries} readiness={readiness} />
     </main>
   );
 }

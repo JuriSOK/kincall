@@ -59,16 +59,14 @@ export interface CommitTransitionWithCallIntentResult extends CommitTransitionRe
 
 // The seam a Supabase-backed implementation satisfies — engine code and the
 // pure orchestration functions never touch storage directly.
-// `phone` is deliberately absent from both create inputs: it is minted by the
-// repository as a reserved-for-fiction number, so a real number cannot reach
-// the database even by mistake. Live numbers come only from KINCALL_*_PHONE
-// and are overlaid on read (DEC-006).
-export type CreatePersonInput = Omit<VulnerablePerson, "id" | "phone">;
+// `phone` IS part of both create inputs (DEC-008): the caller must supply a
+// validated E.164 number (lib/validation/profile.ts's `phone` field), and it
+// is stored exactly as given. A per-entity KINCALL_PHONE_<ID> environment
+// variable can still override it on read (phoneEnvVarFor), which is how the
+// four legacy demo entities keep working without ever storing a real number.
+export type CreatePersonInput = Omit<VulnerablePerson, "id">;
 // `personId` is a separate argument, and `priority` is assigned by appending.
-export type CreateTrustedContactInput = Omit<
-  TrustedContact,
-  "id" | "phone" | "priority" | "personId"
->;
+export type CreateTrustedContactInput = Omit<TrustedContact, "id" | "priority" | "personId">;
 
 export interface Repository {
   getPerson(personId: string): Promise<VulnerablePerson | undefined>;

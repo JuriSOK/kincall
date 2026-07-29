@@ -26,6 +26,7 @@ describe("consent — the vulnerable person", () => {
     const d = deps();
     const person = await d.repository.createPerson({
       firstName: "Sophie",
+      phone: "+33698765432",
       preferredLanguage: "fr-FR",
       conversationProfile: "standard",
       preferredCallTime: "09:00",
@@ -44,6 +45,7 @@ describe("consent — the vulnerable person", () => {
     const d = deps();
     const person = await d.repository.createPerson({
       firstName: "Sophie",
+      phone: "+33698765432",
       preferredLanguage: "fr-FR",
       conversationProfile: "standard",
       preferredCallTime: "09:00",

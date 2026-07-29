@@ -1,3 +1,4 @@
+import { isE164, isReservedFictionPhone } from "../phone";
 import type { ConsentStatus } from "../database/types";
 
 // Pure, framework-free validation shared by the route handlers and the client
@@ -65,6 +66,39 @@ function text(
   return value;
 }
 
+// Accepts the common ways people type a number (spaces, dots, dashes,
+// parentheses) and normalises to the canonical, separator-free form isE164
+// and maskPhone both expect — so a stored phone is always in that one shape,
+// never a formatting variant of it.
+function normalizePhone(raw: string): string {
+  return raw.trim().replace(/[\s.\-()]/g, "");
+}
+
+// Required, validated E.164, and never a reserved-for-fiction number (DEC-008):
+// a real participant cannot be given a number that LiveCalleAdapter refuses to
+// dial, and accepting one here would silently defeat the whole guard.
+//
+// The error messages never repeat the submitted value — only the shape that
+// is required — so an invalid phone number is never echoed back into any
+// string this module produces.
+function phone(raw: unknown, field: string, errors: FieldErrors): string | undefined {
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    errors[field] = "This field is required.";
+    return undefined;
+  }
+  const value = normalizePhone(raw);
+  if (!isE164(value)) {
+    errors[field] = "Must be a valid E.164 number, for example +33612345678.";
+    return undefined;
+  }
+  if (isReservedFictionPhone(value)) {
+    errors[field] =
+      "This number is reserved for fiction testing and cannot belong to a real participant.";
+    return undefined;
+  }
+  return value;
+}
+
 function oneOf<T extends string>(
   raw: unknown,
   field: string,
@@ -80,6 +114,7 @@ function oneOf<T extends string>(
 
 export interface PersonInput {
   firstName: string;
+  phone: string;
   preferredLanguage: string;
   conversationProfile: string;
   preferredCallTime: string;
@@ -87,13 +122,16 @@ export interface PersonInput {
   consentStatus: ConsentStatus;
 }
 
-// `phone` is deliberately absent from the input type: it is minted by the
-// repository, so a real number cannot reach the database even by mistake.
+// DEC-008: a validated, real E.164 number is required and stored directly —
+// masked wherever it is displayed, and never logged unmasked. An environment
+// variable can still override it per entity (phoneEnvVarFor), which is how the
+// four legacy demo entities keep working without ever storing a real number.
 export function validatePersonInput(raw: unknown): ValidationResult<PersonInput> {
   const errors: FieldErrors = {};
   const body = (raw ?? {}) as Record<string, unknown>;
 
   const firstName = text(body.firstName, "firstName", { min: 1, max: 50, errors });
+  const phoneNumber = phone(body.phone, "phone", errors);
   const preferredLanguage = oneOf(
     body.preferredLanguage,
     "preferredLanguage",
@@ -125,6 +163,7 @@ export function validatePersonInput(raw: unknown): ValidationResult<PersonInput>
   if (
     Object.keys(errors).length > 0 ||
     !firstName ||
+    !phoneNumber ||
     !preferredLanguage ||
     !conversationProfile ||
     !preferredCallTime ||
@@ -138,6 +177,7 @@ export function validatePersonInput(raw: unknown): ValidationResult<PersonInput>
     errors,
     values: {
       firstName,
+      phone: phoneNumber,
       preferredLanguage,
       conversationProfile,
       preferredCallTime,
@@ -182,6 +222,7 @@ function validateInterests(raw: unknown, errors: FieldErrors): string[] | undefi
 
 export interface ContactInput {
   firstName: string;
+  phone: string;
   relationship: string;
   consentStatus: ConsentStatus;
 }
@@ -191,6 +232,7 @@ export function validateContactInput(raw: unknown): ValidationResult<ContactInpu
   const body = (raw ?? {}) as Record<string, unknown>;
 
   const firstName = text(body.firstName, "firstName", { min: 1, max: 50, errors });
+  const phoneNumber = phone(body.phone, "phone", errors);
   const relationship = text(body.relationship, "relationship", { min: 1, max: 40, errors });
   const consentStatus = oneOf(
     body.consentStatus ?? "pending",
@@ -199,10 +241,16 @@ export function validateContactInput(raw: unknown): ValidationResult<ContactInpu
     errors
   );
 
-  if (Object.keys(errors).length > 0 || !firstName || !relationship || !consentStatus) {
+  if (
+    Object.keys(errors).length > 0 ||
+    !firstName ||
+    !phoneNumber ||
+    !relationship ||
+    !consentStatus
+  ) {
     return { errors };
   }
-  return { errors, values: { firstName, relationship, consentStatus } };
+  return { errors, values: { firstName, phone: phoneNumber, relationship, consentStatus } };
 }
 
 export function validateOrderedIds(raw: unknown): ValidationResult<string[]> {

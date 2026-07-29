@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { EventStatus } from "../orchestration/states";
-import { mintFictionPhone } from "../phone";
 import { slugify } from "../validation/profile";
 import {
   assertIntentMatches,
@@ -118,12 +117,9 @@ export class InMemoryRepository implements Repository {
     const id = this.allocateId("person", input.firstName, (candidate) =>
       this.store.people.has(candidate)
     );
-    const person: VulnerablePerson = {
-      ...input,
-      id,
-      // Never a supplied value: DEC-006 keeps real numbers out of storage.
-      phone: mintFictionPhone(id),
-    };
+    // input.phone is already a validated E.164 number (DEC-008) — stored as
+    // given, never minted.
+    const person: VulnerablePerson = { ...input, id };
     this.store.people.set(id, person);
     return person;
   }
@@ -140,11 +136,12 @@ export class InMemoryRepository implements Repository {
     const id = this.allocateId("contact", input.firstName, (candidate) =>
       this.store.contacts.has(candidate)
     );
+    // input.phone is already a validated E.164 number (DEC-008) — stored as
+    // given, never minted.
     const contact: TrustedContact = {
       ...input,
       id,
       personId,
-      phone: mintFictionPhone(id),
       // Appended, so adding a contact never reorders the existing cascade.
       priority: siblings.reduce((max, sibling) => Math.max(max, sibling.priority), 0) + 1,
     };

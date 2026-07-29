@@ -52,8 +52,10 @@ export function describePersonStatus(event: EventRecord | undefined): PersonStat
 
 // Whether this person or contact can actually be called, and why not.
 //
-// DEC-006: a stored number is always reserved-for-fiction, and the live number
-// comes from KINCALL_*_PHONE. DEC-007: consent is required in every mode.
+// DEC-008: the resolved phone is either a real, validated E.164 number stored
+// for this entity, or (for the four legacy demo entities, per DEC-006) a
+// KINCALL_*_PHONE override falling back to a committed reserved-fiction
+// default. DEC-007: consent is required in every mode.
 export type CallReadiness =
   | { kind: "ready" }
   | { kind: "consent_missing"; message: string }

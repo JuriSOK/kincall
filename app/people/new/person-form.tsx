@@ -26,6 +26,7 @@ export function PersonForm() {
 
     const payload = {
       firstName: String(form.get("firstName") ?? ""),
+      phone: String(form.get("phone") ?? ""),
       preferredLanguage: String(form.get("preferredLanguage") ?? ""),
       conversationProfile: String(form.get("conversationProfile") ?? ""),
       preferredCallTime: String(form.get("preferredCallTime") ?? ""),
@@ -71,6 +72,16 @@ export function PersonForm() {
           required
           maxLength={50}
           className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
+        />
+      </Field>
+
+      <Field label="Phone (E.164)" error={errors.phone}>
+        <input
+          name="phone"
+          type="tel"
+          required
+          placeholder="+33612345678"
+          className="w-full rounded-md border border-black/20 px-3 py-2 font-mono dark:border-white/20 dark:bg-transparent"
         />
       </Field>
 
@@ -136,8 +147,9 @@ export function PersonForm() {
       </label>
 
       <p className="rounded-md border border-black/10 p-4 text-sm opacity-70 dark:border-white/10">
-        Phone numbers are never stored here. A live number is configured on the server through an
-        environment variable, shown on the profile once it is created.
+        The phone number is stored on the server only and masked wherever it is shown. An
+        environment-variable override can still redirect this profile&apos;s live number if one is
+        set.
       </p>
 
       <button

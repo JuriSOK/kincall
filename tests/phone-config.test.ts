@@ -1,12 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { phoneEnvVarFor, resolveConfiguredPhone } from "@/lib/database/seed";
-import {
-  describeUnusablePhone,
-  isE164,
-  isReservedFictionPhone,
-  mintFictionPhone,
-  RESERVED_FICTION_PHONES,
-} from "@/lib/phone";
+import { isReservedFictionPhone, RESERVED_FICTION_PHONES } from "@/lib/phone";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -36,26 +30,6 @@ describe("phoneEnvVarFor", () => {
   });
 });
 
-describe("mintFictionPhone", () => {
-  it("produces a number that is valid E.164 but never dialable", () => {
-    const phone = mintFictionPhone("contact_sophie");
-    expect(isE164(phone)).toBe(true);
-    expect(isReservedFictionPhone(phone)).toBe(true);
-    expect(describeUnusablePhone(phone)).not.toBeNull();
-  });
-
-  it("is deterministic, so a profile keeps the same number", () => {
-    expect(mintFictionPhone("contact_sophie")).toBe(mintFictionPhone("contact_sophie"));
-  });
-
-  it("stays clear of the four seeded demo numbers", () => {
-    const seeded = new Set<string>(Object.values(RESERVED_FICTION_PHONES));
-    for (const id of ["a", "b", "contact_sophie", "person_x", "contact_marie_2"]) {
-      expect(seeded.has(mintFictionPhone(id))).toBe(false);
-    }
-  });
-});
-
 describe("isReservedFictionPhone", () => {
   it("still recognises the four seeded constants", () => {
     for (const phone of Object.values(RESERVED_FICTION_PHONES)) {
@@ -78,21 +52,31 @@ describe("isReservedFictionPhone", () => {
 });
 
 describe("resolveConfiguredPhone", () => {
-  it("returns the stored fiction number when nothing is configured", () => {
-    const stored = mintFictionPhone("contact_sophie");
+  // DEC-008: for an interface-created entity the stored value is the real,
+  // validated number the operator entered, not a placeholder — so with no
+  // override configured, that stored value is exactly what gets used.
+  it("returns the stored number when nothing is configured", () => {
+    const stored = "+33698765432";
     expect(resolveConfiguredPhone("contact_sophie", stored)).toBe(stored);
   });
 
   it("overlays the configured number for a UI-created contact", () => {
     vi.stubEnv("KINCALL_PHONE_CONTACT_SOPHIE", "+33611111111");
-    expect(resolveConfiguredPhone("contact_sophie", mintFictionPhone("contact_sophie"))).toBe(
-      "+33611111111"
-    );
+    expect(resolveConfiguredPhone("contact_sophie", "+33698765432")).toBe("+33611111111");
   });
 
   it("ignores a blank value rather than resolving to an empty number", () => {
     vi.stubEnv("KINCALL_PHONE_CONTACT_SOPHIE", "   ");
-    const stored = mintFictionPhone("contact_sophie");
+    const stored = "+33698765432";
     expect(resolveConfiguredPhone("contact_sophie", stored)).toBe(stored);
+  });
+
+  // The four legacy demo entities are unaffected by DEC-008: their stored
+  // value stays the committed reserved-fiction default (DEC-006), and a live
+  // number for them only ever comes from the override.
+  it("still falls back to the reserved-fiction default for a legacy demo entity", () => {
+    expect(resolveConfiguredPhone("contact_julie", RESERVED_FICTION_PHONES.julie)).toBe(
+      RESERVED_FICTION_PHONES.julie
+    );
   });
 });

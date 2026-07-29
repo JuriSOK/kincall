@@ -10,6 +10,7 @@ import {
 function person(overrides: Record<string, unknown> = {}) {
   return {
     firstName: "Sophie",
+    phone: "+33698765432",
     preferredLanguage: "fr-FR",
     conversationProfile: "standard",
     preferredCallTime: "09:00",
@@ -25,6 +26,7 @@ describe("validatePersonInput", () => {
     expect(errors).toEqual({});
     expect(values).toEqual({
       firstName: "Sophie",
+      phone: "+33698765432",
       preferredLanguage: "fr-FR",
       conversationProfile: "standard",
       preferredCallTime: "09:00",
@@ -33,9 +35,40 @@ describe("validatePersonInput", () => {
     });
   });
 
-  it("never yields a phone field, so a number cannot reach the database", () => {
-    const { values } = validatePersonInput(person({ phone: "+33612345678" }));
-    expect(values).not.toHaveProperty("phone");
+  // DEC-008: phone is required, validated, and stored — a real, non-fiction
+  // E.164 number is now the sanctioned way to configure a live number.
+  it("requires a phone number", () => {
+    expect(validatePersonInput(person({ phone: undefined })).errors).toHaveProperty("phone");
+    expect(validatePersonInput(person({ phone: "" })).errors).toHaveProperty("phone");
+    expect(validatePersonInput(person({ phone: "   " })).errors).toHaveProperty("phone");
+  });
+
+  it("rejects a non-E.164 phone number", () => {
+    expect(validatePersonInput(person({ phone: "0612345678" })).errors).toHaveProperty("phone");
+    expect(validatePersonInput(person({ phone: "not a number" })).errors).toHaveProperty("phone");
+  });
+
+  // A real participant cannot be given a number LiveCalleAdapter already
+  // refuses to dial.
+  it("rejects a reserved-for-fiction phone number", () => {
+    expect(validatePersonInput(person({ phone: "+33639980050" })).errors).toHaveProperty("phone");
+  });
+
+  it("normalizes common formatting before validating and storing", () => {
+    expect(validatePersonInput(person({ phone: "+33 6 98 76 54 32" })).values?.phone).toBe(
+      "+33698765432"
+    );
+    expect(validatePersonInput(person({ phone: "+33.69.87.65.432" })).values?.phone).toBe(
+      "+33698765432"
+    );
+    expect(validatePersonInput(person({ phone: "+33-69-87-65-432" })).values?.phone).toBe(
+      "+33698765432"
+    );
+  });
+
+  it("never echoes the submitted value back in the error message", () => {
+    const { errors } = validatePersonInput(person({ phone: "not-a-real-number-12345" }));
+    expect(errors.phone).not.toContain("not-a-real-number-12345");
   });
 
   it("defaults consent to pending when it is not supplied", () => {
@@ -104,22 +137,49 @@ describe("validateContactInput", () => {
   it("accepts a complete contact", () => {
     const { values, errors } = validateContactInput({
       firstName: "Marc",
+      phone: "+33698765432",
       relationship: "son",
       consentStatus: "confirmed",
     });
     expect(errors).toEqual({});
-    expect(values).toEqual({ firstName: "Marc", relationship: "son", consentStatus: "confirmed" });
+    expect(values).toEqual({
+      firstName: "Marc",
+      phone: "+33698765432",
+      relationship: "son",
+      consentStatus: "confirmed",
+    });
+  });
+
+  it("requires a phone number", () => {
+    expect(
+      validateContactInput({ firstName: "Marc", relationship: "son" }).errors
+    ).toHaveProperty("phone");
+  });
+
+  it("rejects a reserved-for-fiction phone number", () => {
+    expect(
+      validateContactInput({
+        firstName: "Marc",
+        phone: "+33639980050",
+        relationship: "son",
+      }).errors
+    ).toHaveProperty("phone");
   });
 
   it("rejects a phone number hidden in the relationship", () => {
     expect(
-      validateContactInput({ firstName: "Marc", relationship: "son 0612345678" }).errors
+      validateContactInput({
+        firstName: "Marc",
+        phone: "+33698765432",
+        relationship: "son 0612345678",
+      }).errors
     ).toHaveProperty("relationship");
   });
 
   it("requires a relationship", () => {
-    expect(validateContactInput({ firstName: "Marc", relationship: "" }).errors)
-      .toHaveProperty("relationship");
+    expect(
+      validateContactInput({ firstName: "Marc", phone: "+33698765432", relationship: "" }).errors
+    ).toHaveProperty("relationship");
   });
 });
 

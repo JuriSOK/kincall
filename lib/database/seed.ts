@@ -25,11 +25,13 @@ export function phoneEnvVarFor(entityId: string): string {
   );
 }
 
-// Applied when READING a persisted person or contact, so a consenting
-// participant's real number lives only in environment variables — never in a
-// table, a migration file, or a database dump. The stored value is always a
-// reserved-for-fiction number, which is safe to commit and which
-// LiveCalleAdapter refuses to dial.
+// Applied when READING a persisted person or contact. An environment variable
+// always wins when set — which is the ONLY way the four legacy demo entities
+// are ever configured for a live call, since their stored value is always a
+// committed reserved-for-fiction default (DEC-006). For an entity created
+// through the interface, the stored value is instead the real, validated
+// E.164 number the operator entered (DEC-008), and that is what this falls
+// back to when no override is set.
 export function resolveConfiguredPhone(entityId: string, storedPhone: string): string {
   return configuredPhone(phoneEnvVarFor(entityId), storedPhone);
 }

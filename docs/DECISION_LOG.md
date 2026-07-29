@@ -342,6 +342,98 @@ before implementation, with the reorder-validation corrections mandated at plan 
 
 ---
 
+## DEC-008 — Store a validated real phone number for interface-created profiles
+
+**Date:** 29 July 2026
+**Status:** Approved — revises the phone-storage rule from DEC-006/DEC-007
+
+### Context
+
+DEC-006 kept phone numbers out of the database entirely: every stored row held a
+reserved-for-fiction placeholder, and a real number lived only in an environment variable. That
+was the right call while every profile came from `lib/database/seed.ts` — there were only four
+entities, all hardcoded, and no interface existed that needed to collect a number from anyone.
+
+Phase 5 made profile and trusted-contact creation a real user-facing workflow
+(`app/people/new/`, `app/people/[id]/contacts/`). Requiring an environment variable per
+UI-created entity does not scale to an operator who wants to add a person and their circle in
+one sitting: they would need to create the profile, find its generated id, then go edit server
+environment variables outside the application before the contact could ever be called live.
+That is not "usable in the interface" — it is the interface deferring its own job to a
+deployment step.
+
+### Decision
+
+**Person and trusted-contact creation now require a phone number, validated server-side, and
+store it directly in the database.**
+
+- `lib/validation/profile.ts` gains a `phone` field on both `PersonInput` and `ContactInput`:
+  required, normalized (tolerates spaces/dots/dashes/parentheses the way people actually type a
+  number), must satisfy `isE164`, and must **not** be `isReservedFictionPhone` — a real
+  participant cannot be assigned a number `LiveCalleAdapter` already refuses to dial.
+- `CreatePersonInput` and `CreateTrustedContactInput` (`lib/database/repository.ts`) include
+  `phone` again. Both repository implementations store `input.phone` exactly as validated;
+  neither mints a placeholder any more. `mintFictionPhone` is removed as dead code.
+- **The override mechanism from DEC-006/DEC-007 is unchanged and still layered on top:**
+  `resolveConfiguredPhone` still checks `phoneEnvVarFor(entityId)` first and falls back to the
+  stored value only when no override is set. For the four legacy demo entities the stored value
+  remains the committed reserved-for-fiction default, so they are unaffected — a live number for
+  them still only ever comes from `KINCALL_DEMO_PHONE` / `KINCALL_JULIE_PHONE` /
+  `KINCALL_MARC_PHONE` / `KINCALL_NICOLE_PHONE`. For an interface-created entity, the fallback is
+  now the real number the operator entered, so it is usable for a live call the moment it is
+  created — with an environment-variable override still available if a specific test run needs
+  to redirect that entity's number temporarily without editing the row.
+- `isReservedFictionPhone` stays range-based (unchanged from DEC-007) and remains the safety net
+  in `describeUnusablePhone` / `LiveCalleAdapter`'s own pre-flight check, regardless of whether
+  the resolved number came from the database or an override.
+- **Masking, everywhere the phone is displayed.** The person page and the trusted-circle page
+  render only `maskPhone(...)`. The one place this was not previously true: `ContactManager`
+  (`app/people/[id]/contacts/contact-manager.tsx`) is a Client Component, and its props are
+  serialized into the page payload sent to the browser — passing it a full `TrustedContact[]`
+  would have shipped the real number to the client even though nothing rendered it. The contacts
+  page now computes a masked-only summary server-side and passes that instead; the real `phone`
+  field never crosses into that component's props at all.
+- **Never logged unmasked.** Validation error messages describe the required shape ("Must be a
+  valid E.164 number, for example +33612345678.") and never echo the submitted value, so an
+  invalid number a user typed cannot end up in a string this module produces.
+- Consent enforcement (DEC-007) is untouched: a stored, valid, non-fiction number does not bypass
+  the consent check, and `startDemoEvent` / the family cascade still refuse to call anyone whose
+  `consentStatus` is not `"confirmed"`, in every mode.
+- Fake mode is untouched: `FakeCalleAdapter` never reads `phone` at all, so nothing about this
+  change affects it.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted. §16's `VulnerablePerson` and
+`TrustedContact` already specify a `phone` field; this decision changes where a *live* value for
+an interface-created entity is sourced from, not the schema. The database already had the phone
+columns (added under DEC-004/§9 baseline) — no migration is needed.
+
+### Consequences
+
+- A profile or trusted contact created through the interface can be called live the moment it is
+  created, without any separate environment-variable configuration step — configuration remains
+  available for the override case, but is no longer required.
+- `mintFictionPhone` and its dedicated tests are removed; `tests/validation.test.ts` gains
+  coverage for the new required `phone` field (missing, malformed, reserved-fiction all rejected;
+  a valid number normalizes and passes); `tests/repository-contract.ts` and
+  `tests/people-routes.test.ts` are updated to supply and assert a real stored phone instead of a
+  minted one.
+- `describeCallReadiness` (`lib/orchestration/person-status.ts`) needed no logic change: it
+  already asked "is the resolved phone usable?" via `describeUnusablePhone`, and that question is
+  answered identically whether the resolved number came from a database column or an environment
+  variable.
+
+### Approval
+
+Project owner approval: approved, with the explicit requirement that database access stays
+server-side, phone numbers are masked wherever displayed, unmasked numbers are never logged, the
+four legacy demo entities keep their environment-variable-only behavior, reserved-fiction numbers
+stay blocked in live mode, consent stays required before any live call, and fake mode never
+places a real call.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

@@ -2,12 +2,24 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { TrustedContact } from "@/lib/database/types";
-import { validateContactInput, type FieldErrors } from "@/lib/validation/profile";
+import type { FieldErrors } from "@/lib/validation/profile";
+import { submitContactForm } from "./contact-form-submit";
+
+// Deliberately NOT TrustedContact: the real, unmasked phone must never cross
+// into a Client Component's props, since those are serialized into the page
+// payload sent to the browser. The server computes `maskedPhone` and this is
+// the only phone-shaped thing this component ever sees.
+export interface ContactSummary {
+  id: string;
+  firstName: string;
+  relationship: string;
+  priority: number;
+  maskedPhone: string;
+}
 
 interface Props {
   personId: string;
-  contacts: TrustedContact[];
+  contacts: ContactSummary[];
   // Precomputed on the server, where CALLE_MODE and the environment live.
   readiness: Record<string, { kind: string; message?: string }>;
 }
@@ -54,36 +66,30 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
 
   async function addContact(formEvent: React.FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
-    const form = new FormData(formEvent.currentTarget);
-    const payload = {
-      firstName: String(form.get("firstName") ?? ""),
-      relationship: String(form.get("relationship") ?? ""),
-      consentStatus: form.get("consent") === "on" ? "confirmed" : "pending",
+    // Captured BEFORE any await: a SyntheticEvent's currentTarget can already
+    // be null by the time an async handler resumes, so this reference — not
+    // the event — is what must be used for both reading and resetting the form.
+    const form = formEvent.currentTarget;
+    const data = new FormData(form);
+    const fieldValues = {
+      firstName: String(data.get("firstName") ?? ""),
+      phone: String(data.get("phone") ?? ""),
+      relationship: String(data.get("relationship") ?? ""),
+      consentStatus: data.get("consent") === "on" ? "confirmed" : "pending",
     };
 
-    const local = validateContactInput(payload);
-    if (!local.values) {
-      setErrors(local.errors);
-      return;
-    }
-
     setBusy(true);
-    const response = await fetch(`/api/people/${personId}/contacts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const result = await submitContactForm(form, fieldValues, { personId, fetchImpl: fetch });
+    setBusy(false);
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };
-      setErrors(body.errors ?? { firstName: "Could not add this contact." });
-      setBusy(false);
+    if (!result.ok) {
+      // The form is deliberately not reset here: the entered values stay in
+      // the (uncontrolled) inputs exactly as the user left them.
+      setErrors(result.errors);
       return;
     }
 
     setErrors({});
-    setBusy(false);
-    formEvent.currentTarget.reset();
     router.refresh();
   }
 
@@ -115,6 +121,7 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
                   <span className="w-6 text-sm opacity-60">{index + 1}.</span>
                   <span className="flex-1">
                     {contact.firstName} — {contact.relationship}
+                    <span className="ml-2 font-mono text-xs opacity-50">{contact.maskedPhone}</span>
                     {state && state.kind !== "ready" && state.kind !== "fake_mode" ? (
                       <span className="block text-xs text-amber-700 dark:text-amber-400">
                         {state.message}
@@ -175,6 +182,25 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
             {errors.firstName ? (
               <span className="text-xs text-red-600 dark:text-red-400">{errors.firstName}</span>
             ) : null}
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm font-medium">Phone (E.164)</span>
+            <input
+              name="phone"
+              type="tel"
+              required
+              placeholder="+33612345678"
+              className="w-full rounded-md border border-black/20 px-3 py-2 font-mono dark:border-white/20 dark:bg-transparent"
+            />
+            {errors.phone ? (
+              <span className="text-xs text-red-600 dark:text-red-400">{errors.phone}</span>
+            ) : (
+              <span className="text-xs opacity-60">
+                Stored on the server, masked wherever it is shown. An environment-variable
+                override can still redirect this contact&apos;s live number if one is set.
+              </span>
+            )}
           </label>
 
           <label className="flex flex-col gap-1">

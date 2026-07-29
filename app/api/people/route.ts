@@ -8,8 +8,9 @@ export async function POST(request: Request) {
   const { values, errors } = validatePersonInput(body);
 
   // Validated server-side even though the form validates too: the browser is
-  // not a trusted source, and this is the boundary that keeps a phone number
-  // out of the database (DEC-006).
+  // not a trusted source, and this is the boundary that ensures only a
+  // validated E.164 number — never a reserved-fiction one — ever reaches the
+  // database (DEC-008).
   if (!values) {
     return NextResponse.json({ errors }, { status: 400 });
   }

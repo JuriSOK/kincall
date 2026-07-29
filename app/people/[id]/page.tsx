@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRepository } from "@/lib/database/store";
+import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
 import { LaunchDemoButton } from "./launch-demo-button";
@@ -45,6 +46,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <span className="text-sm opacity-60">
             Next check-in: daily at {person.preferredCallTime}
           </span>
+          <span className="font-mono text-sm opacity-50">{maskPhone(person.phone)}</span>
         </div>
       </div>
 
@@ -77,6 +79,9 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                 className="rounded-md border border-black/10 px-4 py-3 dark:border-white/10"
               >
                 {contact.priority}. {contact.firstName} — {contact.relationship}
+                <span className="ml-2 font-mono text-xs opacity-50">
+                  {maskPhone(contact.phone)}
+                </span>
                 {contactReadiness[index].kind === "consent_missing" ||
                 contactReadiness[index].kind === "phone_missing" ? (
                   <span className="block text-xs text-amber-700 dark:text-amber-400">

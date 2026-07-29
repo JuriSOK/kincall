@@ -22,6 +22,7 @@ function patch(url: string, body: unknown): Request {
 
 const VALID_PERSON = {
   firstName: "Sophie",
+  phone: "+33698765432",
   preferredLanguage: "fr-FR",
   conversationProfile: "standard",
   preferredCallTime: "09:00",
@@ -54,15 +55,57 @@ describe("POST /api/people", () => {
     expect((await getRepository().listPeople()).length).toBe(before);
   });
 
-  it("never stores a phone number, even when one is supplied", async () => {
-    const response = await createPerson(
-      post("https://kincall.test/api/people", { ...VALID_PERSON, phone: "+33612345678" })
-    );
+  // DEC-008: a validated E.164 number is required and stored exactly as given.
+  it("stores the supplied phone number exactly as given", async () => {
+    const response = await createPerson(post("https://kincall.test/api/people", VALID_PERSON));
     const { personId } = (await response.json()) as { personId: string };
 
     const person = await getRepository().getPerson(personId);
-    expect(person?.phone).not.toBe("+33612345678");
-    expect(person?.phone).toMatch(/^\+3363998\d{4}$/);
+    expect(person?.phone).toBe("+33698765432");
+  });
+
+  it("rejects a missing phone number and writes nothing", async () => {
+    const before = (await getRepository().listPeople()).length;
+    const { phone: _omit, ...withoutPhone } = VALID_PERSON;
+
+    const response = await createPerson(post("https://kincall.test/api/people", withoutPhone));
+
+    expect(response.status).toBe(400);
+    const { errors } = (await response.json()) as { errors: Record<string, string> };
+    expect(errors).toHaveProperty("phone");
+    expect((await getRepository().listPeople()).length).toBe(before);
+  });
+
+  it("rejects a non-E.164 phone number", async () => {
+    const response = await createPerson(
+      post("https://kincall.test/api/people", { ...VALID_PERSON, phone: "0612345678" })
+    );
+    expect(response.status).toBe(400);
+    const { errors } = (await response.json()) as { errors: Record<string, string> };
+    expect(errors).toHaveProperty("phone");
+  });
+
+  // A real participant cannot be assigned a number LiveCalleAdapter already
+  // refuses to dial (DEC-006/DEC-008).
+  it("rejects a reserved-for-fiction phone number", async () => {
+    const response = await createPerson(
+      post("https://kincall.test/api/people", { ...VALID_PERSON, phone: "+33639980050" })
+    );
+    expect(response.status).toBe(400);
+    const { errors } = (await response.json()) as { errors: Record<string, string> };
+    expect(errors).toHaveProperty("phone");
+  });
+
+  it("normalizes common phone formatting before validating and storing", async () => {
+    const response = await createPerson(
+      post("https://kincall.test/api/people", {
+        ...VALID_PERSON,
+        phone: "+33 6 98 76 54 32",
+      })
+    );
+    expect(response.status).toBe(201);
+    const { personId } = (await response.json()) as { personId: string };
+    expect((await getRepository().getPerson(personId))?.phone).toBe("+33698765432");
   });
 
   it("rejects a phone number smuggled into a free-text field", async () => {
@@ -86,10 +129,11 @@ describe("POST /api/people", () => {
 describe("POST /api/people/[id]/contacts", () => {
   const params = (id: string) => ({ params: Promise.resolve({ id }) });
 
-  it("appends a contact to the circle", async () => {
+  it("appends a contact to the circle with the supplied phone stored exactly", async () => {
     const response = await createContact(
       post("https://kincall.test/api/people/person_marie/contacts", {
         firstName: "Paul",
+        phone: "+33644444444",
         relationship: "neighbour",
         consentStatus: "confirmed",
       }),
@@ -99,13 +143,16 @@ describe("POST /api/people/[id]/contacts", () => {
     expect(response.status).toBe(201);
     const circle = await getRepository().getTrustedContacts("person_marie");
     // Appended, never inserted mid-cascade.
-    expect(circle[circle.length - 1].firstName).toBe("Paul");
+    const added = circle[circle.length - 1];
+    expect(added.firstName).toBe("Paul");
+    expect(added.phone).toBe("+33644444444");
   });
 
   it("404s for an unknown person", async () => {
     const response = await createContact(
       post("https://kincall.test/api/people/person_nope/contacts", {
         firstName: "Paul",
+        phone: "+33644444444",
         relationship: "neighbour",
       }),
       params("person_nope")
@@ -119,12 +166,31 @@ describe("POST /api/people/[id]/contacts", () => {
     const response = await createContact(
       post("https://kincall.test/api/people/person_marie/contacts", {
         firstName: "Paul",
+        phone: "+33644444444",
         relationship: "",
       }),
       params("person_marie")
     );
 
     expect(response.status).toBe(400);
+    expect((await getRepository().getTrustedContacts("person_marie")).length).toBe(before);
+  });
+
+  it("rejects a reserved-for-fiction phone number and writes nothing", async () => {
+    const before = (await getRepository().getTrustedContacts("person_marie")).length;
+
+    const response = await createContact(
+      post("https://kincall.test/api/people/person_marie/contacts", {
+        firstName: "Paul",
+        phone: "+33639980077",
+        relationship: "neighbour",
+      }),
+      params("person_marie")
+    );
+
+    expect(response.status).toBe(400);
+    const { errors } = (await response.json()) as { errors: Record<string, string> };
+    expect(errors).toHaveProperty("phone");
     expect((await getRepository().getTrustedContacts("person_marie")).length).toBe(before);
   });
 });

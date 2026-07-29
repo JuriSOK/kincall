@@ -6,7 +6,6 @@ import {
   InvalidContactOrderError,
   UnknownRecordError,
 } from "./errors";
-import { mintFictionPhone } from "../phone";
 import { slugify } from "../validation/profile";
 import type {
   CallEventLease,
@@ -118,8 +117,8 @@ export class SupabaseRepository implements Repository {
       (id) => ({
         id,
         first_name: input.firstName,
-        // Never a supplied value: DEC-006 keeps real numbers out of storage.
-        phone: mintFictionPhone(id),
+        // Already a validated E.164 number (DEC-008) — stored as given.
+        phone: input.phone,
         preferred_language: input.preferredLanguage,
         conversation_profile: input.conversationProfile,
         preferred_call_time: input.preferredCallTime,
@@ -146,7 +145,8 @@ export class SupabaseRepository implements Repository {
         id,
         person_id: personId,
         first_name: input.firstName,
-        phone: mintFictionPhone(id),
+        // Already a validated E.164 number (DEC-008) — stored as given.
+        phone: input.phone,
         relationship: input.relationship,
         priority,
         consent_status: input.consentStatus,

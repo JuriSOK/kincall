@@ -443,6 +443,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
     describe("profile and trusted-circle creation", () => {
       const profile = {
         firstName: "Sophie",
+        phone: "+33698765432",
         preferredLanguage: "fr-FR",
         conversationProfile: "standard",
         preferredCallTime: "09:00",
@@ -457,16 +458,11 @@ export function repositoryContract(name: string, harness: ContractHarness): void
         expect((await repository.listPeople()).map((p) => p.id)).toContain(created.id);
       });
 
-      // DEC-006: `phone` is not an input, so a real number cannot reach the
-      // database. Whatever is stored must be undialable.
-      it("mints a reserved-for-fiction phone rather than accepting one", async () => {
-        const created = await repository.createPerson({
-          ...profile,
-          // A caller trying to smuggle a number in gets it ignored entirely.
-          ...({ phone: "+33612345678" } as object),
-        });
-        expect(created.phone).not.toBe("+33612345678");
-        expect(created.phone).toMatch(/^\+3363998\d{4}$/);
+      // DEC-008: the caller supplies a validated E.164 number and it is stored
+      // exactly as given — no placeholder, no minting.
+      it("stores the supplied phone number exactly as given", async () => {
+        const created = await repository.createPerson(profile);
+        expect(created.phone).toBe("+33698765432");
       });
 
       it("allocates a distinct id when the slug is already taken", async () => {
@@ -481,17 +477,19 @@ export function repositoryContract(name: string, harness: ContractHarness): void
         const person = await repository.createPerson(profile);
         const a = await repository.createTrustedContact(person.id, {
           firstName: "Ana",
+          phone: "+33611111111",
           relationship: "daughter",
           consentStatus: "confirmed",
         });
         const b = await repository.createTrustedContact(person.id, {
           firstName: "Ben",
+          phone: "+33622222222",
           relationship: "son",
           consentStatus: "confirmed",
         });
 
         expect([a.priority, b.priority]).toEqual([1, 2]);
-        expect(b.phone).toMatch(/^\+3363998\d{4}$/);
+        expect(b.phone).toBe("+33622222222");
         expect((await repository.getTrustedContacts(person.id)).map((c) => c.id)).toEqual([
           a.id,
           b.id,
@@ -503,6 +501,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
       async function circleOf(size: number) {
         const person = await repository.createPerson({
           firstName: "Sophie",
+          phone: "+33698765432",
           preferredLanguage: "fr-FR",
           conversationProfile: "standard",
           preferredCallTime: "09:00",
@@ -510,10 +509,13 @@ export function repositoryContract(name: string, harness: ContractHarness): void
           consentStatus: "confirmed",
         });
         const contacts = [];
-        for (const name of ["Ana", "Ben", "Cleo"].slice(0, size)) {
+        const phones = ["+33611111111", "+33622222222", "+33633333333"];
+        const names = ["Ana", "Ben", "Cleo"].slice(0, size);
+        for (const [index, name] of names.entries()) {
           contacts.push(
             await repository.createTrustedContact(person.id, {
               firstName: name,
+              phone: phones[index],
               relationship: "friend",
               consentStatus: "confirmed",
             })
@@ -605,6 +607,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
 
         const other = await repository.createPerson({
           firstName: "Sophie",
+          phone: "+33698765432",
           preferredLanguage: "fr-FR",
           conversationProfile: "standard",
           preferredCallTime: "09:00",
