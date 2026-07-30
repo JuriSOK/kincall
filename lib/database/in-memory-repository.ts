@@ -18,6 +18,7 @@ import type {
   CreatePersonInput,
   CreateTrustedContactInput,
   Repository,
+  UpdatePersonInput,
 } from "./repository";
 import type {
   CallEventRecord,
@@ -126,10 +127,30 @@ export class InMemoryRepository implements Repository {
       this.store.people.has(candidate)
     );
     // input.phone is already a validated E.164 number (DEC-008) — stored as
-    // given, never minted.
-    const person: VulnerablePerson = { ...input, id, archivedAt: null };
+    // given, never minted. The five Stage-C fields are optional on
+    // CreatePersonInput (DEC-015); defaulted here identically to migration
+    // 0010's own column defaults, so the two drivers never disagree about
+    // what an omitted field becomes.
+    const person: VulnerablePerson = {
+      ...input,
+      id,
+      archivedAt: null,
+      timezone: input.timezone ?? "Europe/Paris",
+      avatarKey: input.avatarKey ?? null,
+      conversationNotes: input.conversationNotes ?? null,
+      checkInDays: input.checkInDays ?? [1, 2, 3, 4, 5, 6, 7],
+      scheduleState: input.scheduleState ?? "active",
+    };
     this.store.people.set(id, person);
     return person;
+  }
+
+  async updatePerson(personId: string, input: UpdatePersonInput): Promise<VulnerablePerson> {
+    const existing = this.store.people.get(personId);
+    if (!existing) throw new UnknownRecordError("person", personId);
+    const updated: VulnerablePerson = { ...existing, ...input };
+    this.store.people.set(personId, updated);
+    return updated;
   }
 
   async createTrustedContact(

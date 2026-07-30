@@ -3,7 +3,14 @@ import type { EventStatus, OrchestrationDecision } from "../orchestration/states
 
 export type ConsentStatus = "pending" | "confirmed" | "declined";
 
-// Field-for-field per TECHNICAL_ARCHITECTURE.md §9 / PRODUCT_SPECIFICATION.md §16.
+// Stored configuration only (Stage C, docs/DECISION_LOG.md DEC-015) — nothing
+// currently executes a schedule based on this value. A future scheduler
+// (Stage D) is what would read it to decide whether to place a check-in call.
+export type ScheduleState = "active" | "paused" | "inactive";
+
+// Field-for-field per TECHNICAL_ARCHITECTURE.md §9 / PRODUCT_SPECIFICATION.md §16,
+// enriched in Stage C (DEC-015) with a preset avatar, timezone, conversation
+// notes and schedule configuration.
 export interface VulnerablePerson {
   id: string;
   firstName: string;
@@ -17,6 +24,22 @@ export interface VulnerablePerson {
   // — see docs/DECISION_LOG.md DEC-009). Never physically deleted: historical
   // events must keep resolving this person's name. Null means active.
   archivedAt: string | null;
+  // IANA timezone identifier, e.g. "Europe/Paris". Not yet used by anything —
+  // lib/presentation/format-date.ts still renders every date in one fixed
+  // Europe/Paris display zone until Stage D wires a person's own timezone in.
+  timezone: string;
+  // A preset identifier from lib/avatars.ts's AVATAR_KEYS, or null (falls
+  // back to an initials display — see app/ui/avatars/avatar.tsx). Never an
+  // uploaded image or a URL.
+  avatarKey: string | null;
+  // Ordinary conversation preferences/habits only — validated server-side
+  // with the same phone-digit rejection as `interests`. Never a medical
+  // record. Null means none entered.
+  conversationNotes: string | null;
+  // ISO weekday numbers, 1 (Monday) through 7 (Sunday), no duplicates.
+  // Configuration only — see ScheduleState's own note.
+  checkInDays: number[];
+  scheduleState: ScheduleState;
 }
 
 export interface TrustedContact {

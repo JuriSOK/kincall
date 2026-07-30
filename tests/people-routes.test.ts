@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { POST as createPerson } from "@/app/api/people/route";
-import { DELETE as deletePerson } from "@/app/api/people/[id]/route";
+import { DELETE as deletePerson, PATCH as updatePerson } from "@/app/api/people/[id]/route";
 import { POST as createContact } from "@/app/api/people/[id]/contacts/route";
 import { DELETE as deleteContact } from "@/app/api/people/[id]/contacts/[contactId]/route";
 import { PATCH as reorderContacts } from "@/app/api/people/[id]/contacts/order/route";
@@ -130,6 +130,42 @@ describe("POST /api/people", () => {
       new Request("https://kincall.test/api/people", { method: "POST", body: "{" })
     );
     expect(response.status).toBe(400);
+  });
+
+  // Stage C (DEC-015).
+  it("creates a profile with the Stage-C enrichment fields", async () => {
+    const response = await createPerson(
+      post("https://kincall.test/api/people", {
+        ...VALID_PERSON,
+        avatarKey: "terracotta",
+        timezone: "Europe/Madrid",
+        checkInDays: [1, 3, 5],
+        scheduleState: "paused",
+        conversationNotes: "Enjoys talking about football.",
+      })
+    );
+    expect(response.status).toBe(201);
+
+    const { personId } = (await response.json()) as { personId: string };
+    const person = await getRepository().getPerson(personId);
+    expect(person).toMatchObject({
+      avatarKey: "terracotta",
+      timezone: "Europe/Madrid",
+      checkInDays: [1, 3, 5],
+      scheduleState: "paused",
+      conversationNotes: "Enjoys talking about football.",
+    });
+  });
+
+  it("rejects an unrecognised avatar key and writes nothing", async () => {
+    const before = (await getRepository().listPeople()).length;
+    const response = await createPerson(
+      post("https://kincall.test/api/people", { ...VALID_PERSON, avatarKey: "photo-upload-1" })
+    );
+    expect(response.status).toBe(400);
+    const { errors } = (await response.json()) as { errors: Record<string, string> };
+    expect(errors).toHaveProperty("avatarKey");
+    expect((await getRepository().listPeople()).length).toBe(before);
   });
 });
 
@@ -320,6 +356,87 @@ describe("DELETE /api/people/[id]", () => {
       params(personId)
     );
     expect(response.status).toBe(200);
+  });
+});
+
+// Stage C (DEC-015): the profile-edit route.
+describe("PATCH /api/people/[id]", () => {
+  const params = (id: string) => ({ params: Promise.resolve({ id }) });
+
+  async function freshPerson(firstName: string): Promise<string> {
+    const created = await createPerson(
+      post("https://kincall.test/api/people", { ...VALID_PERSON, firstName })
+    );
+    return ((await created.json()) as { personId: string }).personId;
+  }
+
+  it("applies a partial patch, preserving every field not sent", async () => {
+    const personId = await freshPerson("EditMe1");
+    const before = await getRepository().getPerson(personId);
+
+    const response = await updatePerson(
+      patch(`https://kincall.test/api/people/${personId}`, { avatarKey: "meadow" }),
+      params(personId)
+    );
+
+    expect(response.status).toBe(200);
+    const after = await getRepository().getPerson(personId);
+    expect(after?.avatarKey).toBe("meadow");
+    expect(after?.firstName).toBe(before?.firstName);
+    expect(after?.phone).toBe(before?.phone);
+    expect(after?.timezone).toBe(before?.timezone);
+  });
+
+  it("rejects an invalid payload and writes nothing", async () => {
+    const personId = await freshPerson("EditMe2");
+    const before = await getRepository().getPerson(personId);
+
+    const response = await updatePerson(
+      patch(`https://kincall.test/api/people/${personId}`, { timezone: "not a timezone" }),
+      params(personId)
+    );
+
+    expect(response.status).toBe(400);
+    const { errors } = (await response.json()) as { errors: Record<string, string> };
+    expect(errors).toHaveProperty("timezone");
+    expect(await getRepository().getPerson(personId)).toEqual(before);
+  });
+
+  it("404s for an unknown person", async () => {
+    const response = await updatePerson(
+      patch("https://kincall.test/api/people/person_nope", { avatarKey: "rose" }),
+      params("person_nope")
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("ignores firstName and phone even if a caller sends them", async () => {
+    const personId = await freshPerson("EditMe3");
+    const before = await getRepository().getPerson(personId);
+
+    const response = await updatePerson(
+      patch(`https://kincall.test/api/people/${personId}`, {
+        firstName: "Somebody Else",
+        phone: "+33600000000",
+        timezone: "UTC",
+      }),
+      params(personId)
+    );
+
+    expect(response.status).toBe(200);
+    const after = await getRepository().getPerson(personId);
+    expect(after?.firstName).toBe(before?.firstName);
+    expect(after?.phone).toBe(before?.phone);
+    expect(after?.timezone).toBe("UTC");
+  });
+
+  it("malformed JSON is a validation failure, not a crash", async () => {
+    const personId = await freshPerson("EditMe4");
+    const response = await updatePerson(
+      new Request(`https://kincall.test/api/people/${personId}`, { method: "PATCH", body: "{" }),
+      params(personId)
+    );
+    expect(response.status).toBe(400);
   });
 });
 

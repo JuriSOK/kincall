@@ -509,6 +509,142 @@ export function repositoryContract(name: string, harness: ContractHarness): void
           b.id,
         ]);
       });
+
+      // Stage C (DEC-015): the five enrichment fields are optional on
+      // CreatePersonInput, defaulted identically to migration 0010's own
+      // column defaults, so a caller that predates them keeps working.
+      it("defaults the Stage-C enrichment fields when omitted", async () => {
+        const created = await repository.createPerson(profile);
+        expect(created.timezone).toBe("Europe/Paris");
+        expect(created.avatarKey).toBeNull();
+        expect(created.conversationNotes).toBeNull();
+        expect(created.checkInDays).toEqual([1, 2, 3, 4, 5, 6, 7]);
+        expect(created.scheduleState).toBe("active");
+      });
+
+      it("stores the Stage-C enrichment fields when supplied", async () => {
+        const created = await repository.createPerson({
+          ...profile,
+          timezone: "America/New_York",
+          avatarKey: "ocean",
+          conversationNotes: "Enjoys talking about her garden.",
+          checkInDays: [1, 3, 5],
+          scheduleState: "paused",
+        });
+        expect(created.timezone).toBe("America/New_York");
+        expect(created.avatarKey).toBe("ocean");
+        expect(created.conversationNotes).toBe("Enjoys talking about her garden.");
+        expect(created.checkInDays).toEqual([1, 3, 5]);
+        expect(created.scheduleState).toBe("paused");
+      });
+    });
+
+    // Stage C (DEC-015): the profile-edit route's repository method.
+    describe("updatePerson", () => {
+      const profile = {
+        firstName: "Sophie",
+        phone: "+33698765432",
+        preferredLanguage: "fr-FR",
+        conversationProfile: "standard",
+        preferredCallTime: "09:00",
+        interests: ["reading"],
+        consentStatus: "confirmed" as const,
+      };
+
+      it("updates exactly the supplied fields, preserving everything else", async () => {
+        const created = await repository.createPerson(profile);
+        const updated = await repository.updatePerson(created.id, {
+          avatarKey: "amber",
+          conversationNotes: "Likes talking about cooking.",
+        });
+
+        expect(updated.avatarKey).toBe("amber");
+        expect(updated.conversationNotes).toBe("Likes talking about cooking.");
+        // Untouched fields survive exactly as they were.
+        expect(updated.firstName).toBe(created.firstName);
+        expect(updated.phone).toBe(created.phone);
+        expect(updated.preferredLanguage).toBe(created.preferredLanguage);
+        expect(updated.timezone).toBe(created.timezone);
+        expect(updated.checkInDays).toEqual(created.checkInDays);
+        expect(updated.scheduleState).toBe(created.scheduleState);
+        expect(updated.consentStatus).toBe(created.consentStatus);
+      });
+
+      it("an absent key means 'leave exactly as is', not 'clear it'", async () => {
+        const created = await repository.createPerson({
+          ...profile,
+          conversationNotes: "Enjoys the radio in the mornings.",
+        });
+        const updated = await repository.updatePerson(created.id, { timezone: "Europe/London" });
+        expect(updated.conversationNotes).toBe("Enjoys the radio in the mornings.");
+        expect(updated.timezone).toBe("Europe/London");
+      });
+
+      it("an explicit null clears a nullable field", async () => {
+        const created = await repository.createPerson({
+          ...profile,
+          conversationNotes: "Enjoys the radio in the mornings.",
+          avatarKey: "rose",
+        });
+        const updated = await repository.updatePerson(created.id, {
+          conversationNotes: null,
+          avatarKey: null,
+        });
+        expect(updated.conversationNotes).toBeNull();
+        expect(updated.avatarKey).toBeNull();
+      });
+
+      it("can update every editable field in one call", async () => {
+        const created = await repository.createPerson(profile);
+        const updated = await repository.updatePerson(created.id, {
+          avatarKey: "meadow",
+          preferredLanguage: "en-GB",
+          timezone: "Europe/London",
+          preferredCallTime: "18:30",
+          checkInDays: [6, 7],
+          scheduleState: "inactive",
+          interests: ["reading", "chess"],
+          conversationProfile: "speech_difficulty",
+          conversationNotes: "Prefers evening calls.",
+          consentStatus: "confirmed",
+        });
+
+        expect(updated).toMatchObject({
+          avatarKey: "meadow",
+          preferredLanguage: "en-GB",
+          timezone: "Europe/London",
+          preferredCallTime: "18:30",
+          checkInDays: [6, 7],
+          scheduleState: "inactive",
+          interests: ["reading", "chess"],
+          conversationProfile: "speech_difficulty",
+          conversationNotes: "Prefers evening calls.",
+          consentStatus: "confirmed",
+        });
+      });
+
+      it("never touches firstName or phone — UpdatePersonInput has no such fields", async () => {
+        const created = await repository.createPerson(profile);
+        // TypeScript already refuses firstName/phone in UpdatePersonInput;
+        // this asserts the runtime behaviour an update with every OTHER
+        // field still leaves them exactly as created.
+        const updated = await repository.updatePerson(created.id, { timezone: "UTC" });
+        expect(updated.firstName).toBe(created.firstName);
+        expect(updated.phone).toBe(created.phone);
+      });
+
+      it("throws UnknownRecordError for an unknown person", async () => {
+        await expect(
+          repository.updatePerson("person_nope", { timezone: "UTC" })
+        ).rejects.toThrow(UnknownRecordError);
+      });
+
+      it("works on an archived person too — nothing requires blocking that", async () => {
+        await repository.archivePerson("person_marie");
+        const updated = await repository.updatePerson("person_marie", { avatarKey: "lavender" });
+        expect(updated.avatarKey).toBe("lavender");
+        expect(updated.archivedAt).not.toBeNull();
+      });
     });
 
     describe("reorderTrustedContacts", () => {

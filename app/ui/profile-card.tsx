@@ -1,10 +1,12 @@
 import Link from "next/link";
 import type { Tone } from "./tone";
 import { Badge } from "./surfaces";
+import { Avatar } from "./avatars/avatar";
 
 export interface ProfileCardProps {
   personId: string;
   personName: string;
+  avatarKey: string | null;
   statusLabel: string;
   statusTone: Tone;
   // One plain sentence — the same text a person page/event page would show,
@@ -24,6 +26,7 @@ export interface ProfileCardProps {
 export function ProfileCard({
   personId,
   personName,
+  avatarKey,
   statusLabel,
   statusTone,
   latestResultSummary,
@@ -34,7 +37,8 @@ export function ProfileCard({
   return (
     <div className="flex flex-col gap-3 rounded-kc border border-line bg-surface p-4 shadow-kc-sm transition-colors hover:border-line-strong">
       <div className="flex items-start justify-between gap-3">
-        <Link href={`/people/${personId}`} className="text-sm font-semibold hover:text-accent">
+        <Link href={`/people/${personId}`} className="flex items-center gap-2 text-sm font-semibold hover:text-accent">
+          <Avatar avatarKey={avatarKey} name={personName} size="sm" />
           {personName}
         </Link>
         <Badge tone={statusTone}>{statusLabel}</Badge>

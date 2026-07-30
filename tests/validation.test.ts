@@ -5,7 +5,9 @@ import {
   validateContactInput,
   validateOrderedIds,
   validatePersonInput,
+  validateUpdatePersonInput,
 } from "@/lib/validation/profile";
+import { AVATAR_KEYS } from "@/lib/avatars";
 
 function person(overrides: Record<string, unknown> = {}) {
   return {
@@ -32,6 +34,14 @@ describe("validatePersonInput", () => {
       preferredCallTime: "09:00",
       interests: ["gardening"],
       consentStatus: "confirmed",
+      // Stage C (DEC-015) defaults, applied when the field is entirely
+      // absent from the submitted body — see the dedicated describe block
+      // below for the fields' own validation rules.
+      timezone: "Europe/Paris",
+      avatarKey: null,
+      conversationNotes: null,
+      checkInDays: [1, 2, 3, 4, 5, 6, 7],
+      scheduleState: "active",
     });
   });
 
@@ -130,6 +140,194 @@ describe("validatePersonInput", () => {
   it("rejects a phone number hidden in the first name", () => {
     expect(validatePersonInput(person({ firstName: "+33612345678" })).errors)
       .toHaveProperty("firstName");
+  });
+
+  // Stage C (DEC-015): avatar, timezone, check-in days, schedule state and
+  // conversation notes. Every one defaults when entirely absent from the
+  // submitted body (create semantics) — see validateUpdatePersonInput below
+  // for the different, partial-patch semantics the edit route uses instead.
+  describe("Stage C fields", () => {
+    it("defaults avatarKey to null when omitted, empty, or explicitly null", () => {
+      expect(validatePersonInput(person({ avatarKey: undefined })).values?.avatarKey).toBeNull();
+      expect(validatePersonInput(person({ avatarKey: "" })).values?.avatarKey).toBeNull();
+      expect(validatePersonInput(person({ avatarKey: null })).values?.avatarKey).toBeNull();
+    });
+
+    it("accepts every registered avatar key", () => {
+      for (const key of AVATAR_KEYS) {
+        const { values, errors } = validatePersonInput(person({ avatarKey: key }));
+        expect(errors, key).toEqual({});
+        expect(values?.avatarKey).toBe(key);
+      }
+    });
+
+    it("rejects an avatar key that is not in the registry", () => {
+      expect(validatePersonInput(person({ avatarKey: "photo-upload-1" })).errors).toHaveProperty(
+        "avatarKey"
+      );
+    });
+
+    it("defaults timezone to Europe/Paris when omitted", () => {
+      expect(validatePersonInput(person({ timezone: undefined })).values?.timezone).toBe(
+        "Europe/Paris"
+      );
+    });
+
+    it("accepts any valid IANA timezone identifier", () => {
+      expect(validatePersonInput(person({ timezone: "America/New_York" })).values?.timezone).toBe(
+        "America/New_York"
+      );
+      expect(validatePersonInput(person({ timezone: "Pacific/Noumea" })).values?.timezone).toBe(
+        "Pacific/Noumea"
+      );
+    });
+
+    it("rejects a timezone the runtime does not recognise", () => {
+      expect(validatePersonInput(person({ timezone: "Mars/Olympus_Mons" })).errors).toHaveProperty(
+        "timezone"
+      );
+      expect(validatePersonInput(person({ timezone: "not a timezone" })).errors).toHaveProperty(
+        "timezone"
+      );
+    });
+
+    it("defaults checkInDays to every day when omitted", () => {
+      expect(validatePersonInput(person({ checkInDays: undefined })).values?.checkInDays).toEqual([
+        1, 2, 3, 4, 5, 6, 7,
+      ]);
+    });
+
+    it("rejects a weekday outside 1-7", () => {
+      expect(validatePersonInput(person({ checkInDays: [0, 1] })).errors).toHaveProperty(
+        "checkInDays"
+      );
+      expect(validatePersonInput(person({ checkInDays: [1, 8] })).errors).toHaveProperty(
+        "checkInDays"
+      );
+    });
+
+    it("rejects a duplicate weekday", () => {
+      expect(validatePersonInput(person({ checkInDays: [1, 3, 3] })).errors).toHaveProperty(
+        "checkInDays"
+      );
+    });
+
+    it("rejects an empty checkInDays list", () => {
+      expect(validatePersonInput(person({ checkInDays: [] })).errors).toHaveProperty("checkInDays");
+    });
+
+    it("sorts checkInDays regardless of submitted order", () => {
+      expect(validatePersonInput(person({ checkInDays: [5, 1, 3] })).values?.checkInDays).toEqual([
+        1, 3, 5,
+      ]);
+    });
+
+    it("defaults scheduleState to active when omitted", () => {
+      expect(validatePersonInput(person({ scheduleState: undefined })).values?.scheduleState).toBe(
+        "active"
+      );
+    });
+
+    it("accepts every valid schedule state and rejects anything else", () => {
+      for (const state of ["active", "paused", "inactive"] as const) {
+        expect(validatePersonInput(person({ scheduleState: state })).values?.scheduleState).toBe(
+          state
+        );
+      }
+      expect(validatePersonInput(person({ scheduleState: "sleeping" })).errors).toHaveProperty(
+        "scheduleState"
+      );
+    });
+
+    it("defaults conversationNotes to null when omitted, empty, or explicitly null", () => {
+      expect(
+        validatePersonInput(person({ conversationNotes: undefined })).values?.conversationNotes
+      ).toBeNull();
+      expect(validatePersonInput(person({ conversationNotes: "   " })).values?.conversationNotes)
+        .toBeNull();
+      expect(validatePersonInput(person({ conversationNotes: null })).values?.conversationNotes)
+        .toBeNull();
+    });
+
+    it("rejects a phone number hidden in conversationNotes", () => {
+      expect(
+        validatePersonInput(person({ conversationNotes: "Call her daughter on 06 12 34 56 78" }))
+          .errors
+      ).toHaveProperty("conversationNotes");
+    });
+
+    it("rejects conversationNotes over 280 characters", () => {
+      expect(
+        validatePersonInput(person({ conversationNotes: "x".repeat(281) })).errors
+      ).toHaveProperty("conversationNotes");
+    });
+
+    it("accepts ordinary conversationNotes describing habits or preferences", () => {
+      const { values, errors } = validatePersonInput(
+        person({ conversationNotes: "Enjoys talking about her garden and grandchildren." })
+      );
+      expect(errors).toEqual({});
+      expect(values?.conversationNotes).toBe(
+        "Enjoys talking about her garden and grandchildren."
+      );
+    });
+  });
+});
+
+describe("validateUpdatePersonInput", () => {
+  it("includes only the fields present in the submitted body", () => {
+    const { values, errors } = validateUpdatePersonInput({ avatarKey: "ocean" });
+    expect(errors).toEqual({});
+    expect(values).toEqual({ avatarKey: "ocean" });
+  });
+
+  it("preserves everything else by omitting it — never defaults an absent field", () => {
+    const { values } = validateUpdatePersonInput({ timezone: "Europe/London" });
+    expect(values).toEqual({ timezone: "Europe/London" });
+    expect(values).not.toHaveProperty("checkInDays");
+    expect(values).not.toHaveProperty("scheduleState");
+  });
+
+  it("an explicit null on a nullable field is applied (clears it), not ignored", () => {
+    const { values, errors } = validateUpdatePersonInput({
+      avatarKey: null,
+      conversationNotes: null,
+    });
+    expect(errors).toEqual({});
+    expect(values).toEqual({ avatarKey: null, conversationNotes: null });
+  });
+
+  it("validates every present field with the same rules as creation", () => {
+    expect(validateUpdatePersonInput({ avatarKey: "not-a-real-key" }).errors).toHaveProperty(
+      "avatarKey"
+    );
+    expect(validateUpdatePersonInput({ timezone: "not a timezone" }).errors).toHaveProperty(
+      "timezone"
+    );
+    expect(validateUpdatePersonInput({ checkInDays: [1, 1] }).errors).toHaveProperty("checkInDays");
+    expect(validateUpdatePersonInput({ scheduleState: "sleeping" }).errors).toHaveProperty(
+      "scheduleState"
+    );
+    expect(validateUpdatePersonInput({ preferredCallTime: "9am" }).errors).toHaveProperty(
+      "preferredCallTime"
+    );
+  });
+
+  it("never accepts firstName or phone — they are not part of UpdatePersonInput", () => {
+    // Even if a caller (a stale client, a tampered request) sends them, they
+    // are silently ignored rather than applied — validateUpdatePersonInput
+    // only ever reads the keys UpdatePersonInput declares.
+    const { values, errors } = validateUpdatePersonInput({
+      firstName: "Someone Else",
+      phone: "+33600000000",
+      timezone: "UTC",
+    });
+    expect(errors).toEqual({});
+    expect(values).toEqual({ timezone: "UTC" });
+  });
+
+  it("accepts an entirely empty patch", () => {
+    expect(validateUpdatePersonInput({})).toEqual({ errors: {}, values: {} });
   });
 });
 

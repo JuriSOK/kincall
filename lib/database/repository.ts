@@ -67,7 +67,47 @@ export interface CommitTransitionWithCallIntentResult extends CommitTransitionRe
 // four legacy demo entities keep working without ever storing a real number.
 // `archivedAt` is never supplied by a caller — it starts null and is only
 // ever set by archivePerson/archiveTrustedContact (DEC-009).
-export type CreatePersonInput = Omit<VulnerablePerson, "id" | "archivedAt">;
+//
+// The five Stage-C enrichment fields (timezone, avatarKey, conversationNotes,
+// checkInDays, scheduleState) are optional here — unlike every other field —
+// so every caller and fixture that predates DEC-015 keeps compiling and
+// keeps working unchanged; both repository drivers apply the same defaults
+// the database column defaults express (see createPerson in each) when a
+// caller omits one.
+export type CreatePersonInput = Omit<
+  VulnerablePerson,
+  "id" | "archivedAt" | "timezone" | "avatarKey" | "conversationNotes" | "checkInDays" | "scheduleState"
+> &
+  Partial<
+    Pick<
+      VulnerablePerson,
+      "timezone" | "avatarKey" | "conversationNotes" | "checkInDays" | "scheduleState"
+    >
+  >;
+
+// The editable subset for the profile-edit route (Stage C, §3 of the brief).
+// Deliberately excludes `firstName` and `phone`: neither is in the approved
+// edit-field list, and phone in particular carries DEC-008's validation and
+// masking rules that a general-purpose patch would bypass. Every field is
+// optional so a caller may update just one — an absent key means "leave this
+// exactly as it is", never "clear it" (a nullable field must be sent
+// explicitly as `null` to be cleared).
+export type UpdatePersonInput = Partial<
+  Pick<
+    VulnerablePerson,
+    | "avatarKey"
+    | "preferredLanguage"
+    | "timezone"
+    | "preferredCallTime"
+    | "checkInDays"
+    | "scheduleState"
+    | "interests"
+    | "conversationProfile"
+    | "conversationNotes"
+    | "consentStatus"
+  >
+>;
+
 // `personId` is a separate argument, and `priority` is assigned by appending.
 export type CreateTrustedContactInput = Omit<
   TrustedContact,
@@ -94,6 +134,12 @@ export interface Repository {
   getActiveTrustedContacts(personId: string): Promise<TrustedContact[]>;
 
   createPerson(input: CreatePersonInput): Promise<VulnerablePerson>;
+  // Stage C (DEC-015). A partial patch: an absent key preserves the existing
+  // value, exactly like updateEvent. Throws UnknownRecordError for an unknown
+  // id. Works on an archived person too — nothing in this product requires
+  // blocking that, and the interface simply never offers the edit action for
+  // one.
+  updatePerson(personId: string, input: UpdatePersonInput): Promise<VulnerablePerson>;
   // Appended at the end of the ACTIVE circle, so adding a contact never
   // silently reorders the cascade and never collides with an archived
   // contact's stale priority.

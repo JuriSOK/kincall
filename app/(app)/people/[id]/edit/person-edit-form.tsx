@@ -5,24 +5,23 @@ import { useState } from "react";
 import {
   CONVERSATION_PROFILES,
   PREFERRED_LANGUAGES,
-  validatePersonInput,
   type FieldErrors,
 } from "@/lib/validation/profile";
-import { Button } from "@/app/ui/button";
+import type { VulnerablePerson } from "@/lib/database/types";
+import { Button, ButtonLink } from "@/app/ui/button";
 import { controlClasses, FormField } from "@/app/ui/form-field";
 import { Notice } from "@/app/ui/surfaces";
 import { AvatarPicker } from "@/app/ui/avatars/avatar-picker";
-import { COMMON_TIMEZONES, PROFILE_LABELS, WEEKDAYS } from "../profile-form-constants";
+import { COMMON_TIMEZONES, PROFILE_LABELS, WEEKDAYS } from "../../profile-form-constants";
+import { submitPersonEdit } from "./person-edit-submit";
 
-export function PersonForm() {
+export function PersonEditForm({ person }: { person: VulnerablePerson }) {
   const router = useRouter();
   const [errors, setErrors] = useState<FieldErrors>({});
-  // A failure that belongs to no single field: the request never reached the
-  // server, or its response could not be read. Kept separate from `errors` so
-  // a network problem is not reported as if the user mistyped a name.
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [checkInDays, setCheckInDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7]);
+  const [saved, setSaved] = useState(false);
+  const [checkInDays, setCheckInDays] = useState<number[]>(person.checkInDays);
 
   function toggleDay(day: number) {
     setCheckInDays((current) =>
@@ -35,74 +34,53 @@ export function PersonForm() {
     const form = new FormData(formEvent.currentTarget);
 
     const avatarKey = String(form.get("avatarKey") ?? "");
-    const conversationNotes = String(form.get("conversationNotes") ?? "").trim();
-
     const payload = {
-      firstName: String(form.get("firstName") ?? ""),
-      phone: String(form.get("phone") ?? ""),
       avatarKey: avatarKey.length > 0 ? avatarKey : null,
       preferredLanguage: String(form.get("preferredLanguage") ?? ""),
       timezone: String(form.get("timezone") ?? ""),
-      conversationProfile: String(form.get("conversationProfile") ?? ""),
       preferredCallTime: String(form.get("preferredCallTime") ?? ""),
       checkInDays,
       scheduleState: String(form.get("scheduleState") ?? ""),
+      conversationProfile: String(form.get("conversationProfile") ?? ""),
       interests: String(form.get("interests") ?? "")
         .split(",")
         .map((interest) => interest.trim())
         .filter(Boolean),
-      conversationNotes: conversationNotes.length > 0 ? conversationNotes : null,
-      // Unticked means "pending", which blocks calling entirely (§17.1).
+      conversationNotes: (() => {
+        const value = String(form.get("conversationNotes") ?? "").trim();
+        return value.length > 0 ? value : null;
+      })(),
       consentStatus: form.get("consent") === "on" ? "confirmed" : "pending",
     };
-
-    // Same validator the route handler runs, so the user sees every problem
-    // before a round trip — the server still re-validates.
-    const local = validatePersonInput(payload);
-    if (!local.values) {
-      setErrors(local.errors);
-      return;
-    }
 
     setSubmitting(true);
     setErrors({});
     setFormError(null);
+    setSaved(false);
 
-    // `navigating` rather than an unconditional `finally { setSubmitting(false) }`:
-    // on success we leave the button disabled while the route transition runs,
-    // so it cannot be clicked twice. Every other exit — including a thrown
-    // fetch, which is what left this button disabled forever before — must
-    // release it.
     let navigating = false;
     try {
-      const response = await fetch("/api/people", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const result = await submitPersonEdit(payload, { personId: person.id });
 
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };
-        if (body.errors) {
-          setErrors(body.errors);
+      if (!result.ok) {
+        if (result.networkError) {
+          setFormError(result.networkError);
+        } else if (Object.keys(result.errors).length > 0) {
+          setErrors(result.errors);
         } else {
-          setFormError("Could not create this profile. Please try again.");
+          setFormError("Could not save these changes. Please try again.");
         }
         return;
       }
 
-      // Guarded like the failure path: a 200 whose body is not the JSON we
-      // expect must not throw out of the handler.
-      const body = (await response.json().catch(() => null)) as { personId?: string } | null;
-      if (!body?.personId) {
-        setFormError("The profile may have been created, but the response could not be read. Reload this page to check.");
-        return;
-      }
-
+      // A clear success state, then a route back to the person page — see
+      // the Stage-C brief's own requirement that both exist rather than only
+      // one. The short pause is deliberate: a save that instantly redirects
+      // reads as if nothing happened.
+      setSaved(true);
       navigating = true;
-      router.push(`/people/${body.personId}`);
-    } catch {
-      setFormError("Could not reach the server. Check your connection and try again.");
+      router.push(`/people/${person.id}`);
+      router.refresh();
     } finally {
       if (!navigating) setSubmitting(false);
     }
@@ -110,31 +88,18 @@ export function PersonForm() {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-8">
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-subtle">Identity</h2>
-
-        <AvatarPicker />
-
-        <FormField label="First name" error={errors.firstName}>
-          {(field) => <input {...field} name="firstName" required maxLength={50} className={controlClasses} />}
-        </FormField>
-
-        <FormField label="Phone (E.164)" error={errors.phone}>
-          {(field) => (
-            <input
-              {...field}
-              name="phone"
-              type="tel"
-              required
-              placeholder="+33612345678"
-              className={`${controlClasses} font-mono`}
-            />
-          )}
-        </FormField>
+        <AvatarPicker defaultValue={person.avatarKey} />
 
         <FormField label="Language" error={errors.preferredLanguage}>
           {(field) => (
-            <select {...field} name="preferredLanguage" defaultValue="fr-FR" className={controlClasses}>
+            <select
+              {...field}
+              name="preferredLanguage"
+              defaultValue={person.preferredLanguage}
+              className={controlClasses}
+            >
               {PREFERRED_LANGUAGES.map((language) => (
                 <option key={language} value={language}>
                   {language}
@@ -143,22 +108,16 @@ export function PersonForm() {
             </select>
           )}
         </FormField>
-
-        <p className="rounded-kc border border-line bg-sunken p-4 text-sm text-muted">
-          The phone number is stored on the server only and masked wherever it is shown. An
-          environment-variable override can still redirect this profile&apos;s live number if one is
-          set.
-        </p>
       </section>
 
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-subtle">
           Check-in preferences
         </h2>
 
         <FormField label="Timezone" error={errors.timezone}>
           {(field) => (
-            <select {...field} name="timezone" defaultValue="Europe/Paris" className={controlClasses}>
+            <select {...field} name="timezone" defaultValue={person.timezone} className={controlClasses}>
               {COMMON_TIMEZONES.map((zone) => (
                 <option key={zone} value={zone}>
                   {zone}
@@ -170,7 +129,13 @@ export function PersonForm() {
 
         <FormField label="Preferred check-in time" error={errors.preferredCallTime}>
           {(field) => (
-            <input {...field} name="preferredCallTime" type="time" defaultValue="09:00" className={controlClasses} />
+            <input
+              {...field}
+              name="preferredCallTime"
+              type="time"
+              defaultValue={person.preferredCallTime}
+              className={controlClasses}
+            />
           )}
         </FormField>
 
@@ -202,10 +167,15 @@ export function PersonForm() {
         <FormField
           label="Schedule state"
           error={errors.scheduleState}
-          hint="Stored for a future scheduler — nothing calls automatically yet. Use Launch demo / Call now to check in."
+          hint="Stored for a future scheduler — nothing calls automatically yet. Use Launch demo / Call now to check in today."
         >
           {(field) => (
-            <select {...field} name="scheduleState" defaultValue="active" className={controlClasses}>
+            <select
+              {...field}
+              name="scheduleState"
+              defaultValue={person.scheduleState}
+              className={controlClasses}
+            >
               <option value="active">Active</option>
               <option value="paused">Paused</option>
               <option value="inactive">Inactive</option>
@@ -214,14 +184,19 @@ export function PersonForm() {
         </FormField>
       </section>
 
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-subtle">
           Conversation preferences
         </h2>
 
         <FormField label="Conversation profile" error={errors.conversationProfile}>
           {(field) => (
-            <select {...field} name="conversationProfile" defaultValue="standard" className={controlClasses}>
+            <select
+              {...field}
+              name="conversationProfile"
+              defaultValue={person.conversationProfile}
+              className={controlClasses}
+            >
               {CONVERSATION_PROFILES.map((profile) => (
                 <option key={profile} value={profile}>
                   {PROFILE_LABELS[profile] ?? profile}
@@ -237,7 +212,13 @@ export function PersonForm() {
           hint="Mentioned by the Companion Agent to open the conversation naturally."
         >
           {(field) => (
-            <input {...field} name="interests" placeholder="gardening, family" className={controlClasses} />
+            <input
+              {...field}
+              name="interests"
+              defaultValue={person.interests.join(", ")}
+              placeholder="gardening, family"
+              className={controlClasses}
+            />
           )}
         </FormField>
 
@@ -247,32 +228,47 @@ export function PersonForm() {
           hint="Ordinary habits or preferences only — never a phone number, a medical detail, or an emergency instruction. Up to 280 characters."
         >
           {(field) => (
-            <textarea {...field} name="conversationNotes" maxLength={280} rows={3} className={controlClasses} />
+            <textarea
+              {...field}
+              name="conversationNotes"
+              defaultValue={person.conversationNotes ?? ""}
+              maxLength={280}
+              rows={3}
+              className={controlClasses}
+            />
           )}
         </FormField>
       </section>
 
-      <section className="flex flex-col gap-5">
+      <section className="flex flex-col gap-4">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-subtle">Consent</h2>
-
         <label className="flex items-start gap-3 rounded-kc border border-line bg-sunken p-4 text-sm">
-          <input name="consent" type="checkbox" className="mt-1 accent-accent" />
+          <input
+            name="consent"
+            type="checkbox"
+            defaultChecked={person.consentStatus === "confirmed"}
+            className="mt-1 accent-accent"
+          />
           <span>
             <span className="font-medium">They have agreed to be called.</span>
             <span className="mt-1 block text-muted">
-              KinCall only calls people who have accepted automated calls, conversation analysis,
-              and sharing the necessary facts with their trusted circle. Without this, the profile
-              is saved but no check-in can be launched.
+              Without this, the profile is kept but no check-in can be launched.
             </span>
           </span>
         </label>
       </section>
 
       {formError ? <Notice tone="danger">{formError}</Notice> : null}
+      {saved ? <Notice tone="calm">Saved.</Notice> : null}
 
-      <Button type="submit" disabled={submitting}>
-        {submitting ? "Creating…" : "Create profile"}
-      </Button>
+      <div className="flex flex-wrap gap-3">
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Saving…" : "Save changes"}
+        </Button>
+        <ButtonLink href={`/people/${person.id}`} variant="secondary">
+          Cancel
+        </ButtonLink>
+      </div>
     </form>
   );
 }

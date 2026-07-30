@@ -1347,6 +1347,127 @@ duration metric were rejected outright rather than deferred.
 
 ---
 
+## DEC-015 — Editable, enriched profiles: preset avatars, timezone, and stored (not executed) schedule configuration
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+`VulnerablePerson` had exactly eight fields (`PRODUCT_SPECIFICATION.md` §16), and — beyond soft
+deletion — no update path existed at all: `Repository` had `createPerson` and `archivePerson`, but
+no way to change a single field of an existing profile without archiving and recreating it. Stage
+C's brief asks for the profile page to show a preset avatar, timezone, conversation notes, and a
+check-in schedule configuration, and for all of it to be editable. None of this is Stage D's
+scheduler — Stage D is what would eventually *read* the stored days/time/timezone/state to decide
+when to place a call; this phase only stores the configuration and displays it honestly.
+
+### Decision
+
+**1. Five additive columns on `vulnerable_people`** (`supabase/migrations/0010_person_profile.sql`):
+`timezone` (`not null default 'Europe/Paris'`), `avatar_key` (nullable), `conversation_notes`
+(nullable), `check_in_days` (`smallint[] not null default '{1,2,3,4,5,6,7}'`, constrained to ISO
+weekdays 1–7 via `<@ array[1..7]`), `schedule_state` (`not null default 'active'`, checked against
+`active`/`paused`/`inactive`). Every column is nullable or defaulted, so `0005_seed.sql` and
+`supabase/testing/9999_test_helpers.sql` — neither of which names these columns — remain valid
+unedited. No RPC function is added: `vulnerable_people` is not written by any `commit_transition*`
+function, and the new `updatePerson` method is a direct `UPDATE` via the service-role client, the
+same pattern `updateEvent` already uses. **Not applied remotely by this change.**
+
+**2. `Repository.updatePerson(personId, input)`**, on both drivers, added to the shared contract
+suite. `UpdatePersonInput` covers exactly `avatarKey`, `preferredLanguage`, `timezone`,
+`preferredCallTime`, `checkInDays`, `scheduleState`, `interests`, `conversationProfile`,
+`conversationNotes`, `consentStatus` — **not** `firstName` or `phone`, which the Stage C brief's own
+edit-field list never named, and which for `phone` in particular carries DEC-008's validation and
+masking rules a general-purpose patch would bypass. An absent key preserves the existing value; a
+nullable field (`avatarKey`, `conversationNotes`) must be sent explicitly as `null` to be cleared.
+
+**3. Preset avatars, never an upload.** `lib/avatars.ts` is the single source of truth for the
+eight keys (`sunrise`, `olive`, `terracotta`, `lavender`, `ocean`, `meadow`, `amber`, `rose`),
+imported by both the server-side validator and the UI registry so the two can never recognise
+different sets. Each is a flat, two-tone, abstract SVG mark — distinguished by shape as well as by
+colour, so meaning is never colour-only — carrying no information about age, gender, ethnicity or
+health, because an abstract shape has none to carry. `avatarKey` is `null` or an unrecognised value
+falls back to an initials display (`app/ui/avatars/avatar.tsx`) rather than an error or a broken-
+image icon; a stored value need never be re-validated to be safely rendered. Selection
+(`AvatarPicker`) is a native radio group, not a custom ARIA widget — keyboard operation and
+"selected" announcement come from the browser's own radio semantics, and it needs no client
+JavaScript.
+
+**4. `conversation_notes` is stored and validated, but deliberately NOT sent to CALL-E this
+phase.** The brief permits including it in the Companion prompt "only when… no medical diagnosis
+or emergency instruction" — a condition this validator cannot mechanically enforce. What it *can*
+enforce, and does, mirrors `interests` exactly: the same phone-digit rejection (`lib/validation/
+profile.ts`'s `containsPhoneLikeSequence`) and a 280-character limit. Claiming to also detect
+medical or diagnostic content would be a false promise no code here makes good on, so rather than
+silently wire an unenforceable guarantee into a live prompt, this phase stores the field, displays
+it on the person page, and leaves `prompts/companion-agent.ts` untouched. Wiring it into
+`buildCompanionTask` — the same way `interests` already is — is a small, well-scoped follow-up a
+future decision can take on explicitly, once (if) that boundary is deliberately accepted rather
+than assumed. `lib/calle/live-adapter.ts`'s request bodies are built field-by-field, never a spread
+of the whole `VulnerablePerson` object, so none of this phase's five new fields (timezone,
+avatarKey, conversationNotes, checkInDays, scheduleState) can reach CALL-E by accident either.
+
+**5. Schedule configuration is stored, not executed.** `checkInDays` and `scheduleState` exist so
+the interface can collect and display an intended schedule; nothing reads them to place a call.
+The person page's existing "Preferred check-in time" wording (corrected in DEC-014) is unchanged
+by this phase, and the new "Check-in days" / "Schedule state" fields are captioned the same way:
+configuration, not a computed occurrence. No cron, no scheduler, no unattended calling exists
+anywhere in this codebase after this change, same as before it.
+
+**6. Avatars reach the dashboard and history rows.** `ProfileCard` and the shared `ActivityRow`
+(dashboard "Recent activity", history's day-grouped list) both render the resolved avatar via one
+`Avatar` component, so a stale or archived person's avatar is either correctly resolved (DEC-009's
+guarantee, extended here) or cleanly falls back to initials — never broken. The history page's
+profile *filter* is a native `<select>`, which cannot render inline SVG per option; it lists names
+only, same as before this phase. That is a genuine HTML constraint, not an oversight.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted, and the validated cascade, retry bounds,
+consent rules, phone masking, `ATTENTION_UNRESOLVED` semantics and Stage-B KPI formulas are
+untouched: `git diff` on `lib/orchestration/*`, `lib/calle/*`, `prompts/*`, `lib/kpi/dashboard-
+kpis.ts` and `supabase/migrations/0001–0009` is empty. `VulnerablePerson` already had a `phone`
+field families could set per §16; this phase adds bookkeeping/preference fields alongside it, the
+same way DEC-004's `runId` and DEC-009's `archivedAt` were added without being product features in
+their own right. Avatars, timezone and schedule configuration are presentation and preference data,
+not a new workflow — the one thing that could have made this a workflow change (an actual
+scheduler) is explicitly not built here.
+
+### Consequences
+
+- `VulnerablePerson` gained five required fields (`timezone`, `avatarKey`, `conversationNotes`,
+  `checkInDays`, `scheduleState`); `CreatePersonInput` makes all five optional with defaults
+  identical to migration 0010's own column defaults, applied identically by both repository
+  drivers — so every pre-existing fixture, test, and caller that predates this decision keeps
+  compiling and keeps behaving the same way with no changes beyond adding the new fields where a
+  full `VulnerablePerson` literal (not a `CreatePersonInput`) is constructed directly.
+- `validatePersonInput` gained the same five fields; `validateUpdatePersonInput` is new, and —
+  unlike the create validator — treats every field as present-or-absent (`"key" in body`) rather
+  than defaulting an absent one, so a partial PATCH never silently resets a field.
+- `PATCH /api/people/[id]` is new, alongside the existing `DELETE`.
+- `/people/[id]/edit` is new. The create form (`/people/new`) gained the same five fields, grouped
+  into Identity / Check-in preferences / Conversation preferences / Consent sections rather than
+  one long list.
+- The person page now shows the avatar, language, timezone, consent state, interests, conversation
+  profile, conversation notes (when present), check-in days, schedule state, and a person-specific
+  KPI panel using the exact same `computeCheckInKpis` function the dashboard's KPI strip calls, over
+  that person's own full event history rather than a period-bounded window.
+- Test count grows from 539 to (reported in the final verification below): repository-contract
+  coverage for `updatePerson` on both drivers, validation tests for every new field's rejection
+  cases, avatar registry/fallback/keyboard-selection tests, and profile create/edit route tests
+  covering success, validation failure, and a thrown `fetch`.
+
+### Approval
+
+Project owner approval: approved for exactly this scope — editable enriched profiles and preset
+avatars — with Stage D (schedule execution), Stage E (contact availability), Stage F (intervention
+display) and Stage G (fake SMS) explicitly out of scope and not begun, migration 0010 not applied
+remotely, and `conversation_notes` deliberately withheld from the CALL-E prompt pending a future,
+explicit decision to wire it in.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

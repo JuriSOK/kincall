@@ -14,6 +14,11 @@ function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
     interests: ["gardening"],
     consentStatus: "confirmed",
     archivedAt: null,
+    timezone: "Europe/Paris",
+    avatarKey: null,
+    conversationNotes: null,
+    checkInDays: [1, 2, 3, 4, 5, 6, 7],
+    scheduleState: "active",
     ...overrides,
   };
 }

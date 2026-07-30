@@ -144,11 +144,41 @@ No recurring scheduling, and nothing deployed yet.
 | `/` | Public marketing landing page — no repository access, no Nav. `Get started` leads to `/dashboard`. |
 | `/dashboard` | The operational home: unresolved cases first, configuration gaps, a count-based KPI strip, every profile, and recent activity grouped by day. |
 | `/history` | A monthly calendar (three neutral outcome categories, no medical-severity colour scale) plus a filterable, day-grouped list of every check-in. |
-| `/people/new`, `/people/[id]`, `/people/[id]/contacts`, `/events/[id]` | Unchanged from earlier phases, now sharing one Nav under `app/(app)/layout.tsx`. |
+| `/people/new` | Create a profile — avatar, identity, check-in preferences, conversation preferences, consent. |
+| `/people/[id]` | The profile page: avatar, language, timezone, masked phone state, consent, interests, conversation preferences and notes, check-in time/days/schedule state, trusted-circle summary, a person-specific KPI panel, and event history. |
+| `/people/[id]/edit` | Edit the profile fields above (not first name or phone — see "Profiles" below). |
+| `/people/[id]/contacts`, `/events/[id]` | Unchanged from earlier phases. |
 
-`/dashboard` and `/history` are read-only: launching a check-in, editing a
-profile, or reordering a trusted circle all still happen on the existing
-per-person pages.
+All of the above share one Nav under `app/(app)/layout.tsx`. `/dashboard` and
+`/history` are read-only: launching a check-in, editing a profile, or
+reordering a trusted circle all still happen on the per-person pages.
+
+### Profiles: enriched, editable, never a schedule that runs
+
+A profile (`vulnerable_people`) now carries, beyond the original identity and
+contact fields: a **preset avatar** (eight abstract, non-photographic marks —
+`lib/avatars.ts` is the canonical key list; never an uploaded image or a URL),
+a **timezone**, **conversation notes** (validated like `interests` — no phone
+number, 280 characters), and a **check-in schedule configuration** (days of
+the week, plus an `active`/`paused`/`inactive` state).
+
+**None of this schedule configuration is executed.** `checkInDays` and
+`scheduleState` are stored and displayed so the interface can collect an
+intended schedule; nothing reads them to place a call automatically. The only
+way a check-in happens is `Call now` / `Launch demo`, exactly as before. A
+future phase would add the scheduler that actually reads this configuration —
+see `docs/DECISION_LOG.md` DEC-015.
+
+`conversation_notes` is stored and shown on the profile page, but is **not**
+sent to CALL-E in this phase — the validator can mechanically guarantee "no
+phone number" (the same check `interests` already gets), but not "no medical
+content", so nothing here claims that guarantee to the Companion Agent. See
+DEC-015 for the reasoning and what a future decision adding it would need to
+weigh.
+
+Editing (`/people/[id]/edit`) covers every field above except first name and
+phone — phone in particular keeps DEC-008's own validation and masking rules,
+which a general-purpose edit would bypass.
 
 ### KPIs are count-based only
 
@@ -217,11 +247,19 @@ psql "$DATABASE_URL" -f supabase/migrations/0006_reorder.sql         # cascade r
 psql "$DATABASE_URL" -f supabase/migrations/0007_archive_entities.sql # soft deletion
 psql "$DATABASE_URL" -f supabase/migrations/0008_call_attempts.sql   # bounded retries
 psql "$DATABASE_URL" -f supabase/migrations/0009_drop_event_priority.sql
+psql "$DATABASE_URL" -f supabase/migrations/0010_person_profile.sql  # avatar, timezone, schedule config
 ```
 
 There is no `0003`: the number was skipped during Phase 5 and the gap is left as
 it is, since renumbering an applied migration would break every project already
 carrying it.
+
+**`0010_person_profile.sql` is not yet applied to the linked remote project** —
+`npx supabase migration list` will show it as the one pending migration until a
+project owner applies it. It is additive and backward-compatible (every new
+column is nullable or defaulted), reviewed for dependents before being written,
+and safe to apply whenever that's decided; this repository does not apply it on
+its own.
 
 Then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (neither prefixed
 `NEXT_PUBLIC_` — the service-role key bypasses Row Level Security and must

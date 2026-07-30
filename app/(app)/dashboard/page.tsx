@@ -66,25 +66,31 @@ export default async function DashboardPage({
   const callEventsByEvent = groupCallEventsByEvent(callEvents);
   const kpis = computeCheckInKpis(recentEvents, callEventsByEvent);
 
-  // Names for every event in the window, including a person not in the
-  // active `people` list (archived) — DEC-009 requires an archived person's
-  // history to keep resolving correctly, cross-person reads included.
-  const nameById = new Map(people.map((person) => [person.id, person.firstName]));
+  // Name + avatar for every event in the window, including a person not in
+  // the active `people` list (archived) — DEC-009 requires an archived
+  // person's history to keep resolving correctly, cross-person reads
+  // included. Avatar rendering falls back to initials regardless, so a
+  // missing/unresolvable entry never breaks anything below.
+  const personById = new Map(
+    people.map((person) => [person.id, { firstName: person.firstName, avatarKey: person.avatarKey }])
+  );
   const missingPersonIds = [...new Set(recentEvents.map((event) => event.personId))].filter(
-    (id) => !nameById.has(id)
+    (id) => !personById.has(id)
   );
   const archivedPeople = await Promise.all(missingPersonIds.map((id) => repository.getPerson(id)));
   for (const archived of archivedPeople) {
-    if (archived) nameById.set(archived.id, archived.firstName);
+    if (archived) personById.set(archived.id, { firstName: archived.firstName, avatarKey: archived.avatarKey });
   }
 
-  const views = recentEvents.map((event) =>
-    buildHistoryEventView(
+  const views = recentEvents.map((event) => {
+    const resolved = personById.get(event.personId);
+    return buildHistoryEventView(
       event,
-      nameById.get(event.personId) ?? "Unknown profile",
-      callEventsByEvent.get(event.id) ?? []
-    )
-  );
+      resolved?.firstName ?? "Unknown profile",
+      callEventsByEvent.get(event.id) ?? [],
+      resolved?.avatarKey ?? null
+    );
+  });
   const { unresolved: unresolvedViews, rest: otherViews } = partitionUnresolvedEvents(views);
   const recentActivityGroups = groupByDay(otherViews.slice(0, RECENT_ACTIVITY_DISPLAY_LIMIT));
 
@@ -215,6 +221,7 @@ export default async function DashboardPage({
                   key={person.id}
                   personId={person.id}
                   personName={person.firstName}
+                  avatarKey={person.avatarKey}
                   statusLabel={status.label}
                   statusTone={STATUS_TONE[status.tone]}
                   latestResultSummary={

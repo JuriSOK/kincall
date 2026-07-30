@@ -1,12 +1,14 @@
 import type { AgentType } from "../calle/adapter";
 import type { EventStatus, OrchestrationDecision } from "../orchestration/states";
 import { resolveConfiguredPhone } from "./seed";
+import type { UpdatePersonInput } from "./repository";
 import type {
   CallEventRecord,
   CallEventStatus,
   ConsentStatus,
   EventOperationRecord,
   EventRecord,
+  ScheduleState,
   TimelineEntry,
   TrustedContact,
   VulnerablePerson,
@@ -33,6 +35,12 @@ export interface PersonRow {
   interests: string[] | null;
   consent_status: string;
   archived_at: string | null;
+  // Stage C (DEC-015) — migration 0010_person_profile.sql.
+  timezone: string;
+  avatar_key: string | null;
+  conversation_notes: string | null;
+  check_in_days: number[] | null;
+  schedule_state: string;
 }
 
 export function toPerson(row: PersonRow): VulnerablePerson {
@@ -48,7 +56,30 @@ export function toPerson(row: PersonRow): VulnerablePerson {
     interests: row.interests ?? [],
     consentStatus: row.consent_status as ConsentStatus,
     archivedAt: iso(row.archived_at),
+    timezone: row.timezone,
+    avatarKey: row.avatar_key,
+    conversationNotes: row.conversation_notes,
+    checkInDays: row.check_in_days ?? [1, 2, 3, 4, 5, 6, 7],
+    scheduleState: row.schedule_state as ScheduleState,
   };
+}
+
+// Only the columns updatePerson is allowed to touch — see UpdatePersonInput
+// in repository.ts for exactly which fields those are and why (`firstName`
+// and `phone` are deliberately absent from both).
+export function fromPersonPatch(patch: UpdatePersonInput): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if ("avatarKey" in patch) row.avatar_key = patch.avatarKey;
+  if ("preferredLanguage" in patch) row.preferred_language = patch.preferredLanguage;
+  if ("timezone" in patch) row.timezone = patch.timezone;
+  if ("preferredCallTime" in patch) row.preferred_call_time = patch.preferredCallTime;
+  if ("checkInDays" in patch) row.check_in_days = patch.checkInDays;
+  if ("scheduleState" in patch) row.schedule_state = patch.scheduleState;
+  if ("interests" in patch) row.interests = patch.interests;
+  if ("conversationProfile" in patch) row.conversation_profile = patch.conversationProfile;
+  if ("conversationNotes" in patch) row.conversation_notes = patch.conversationNotes;
+  if ("consentStatus" in patch) row.consent_status = patch.consentStatus;
+  return row;
 }
 
 export interface ContactRow {

@@ -49,6 +49,7 @@ function view(overrides: Partial<HistoryEventView> = {}): HistoryEventView {
     eventId: "event_001",
     personId: "person_marie",
     personName: "Marie",
+    avatarKey: null,
     createdAt: "2026-07-30T09:00:00.000Z",
     dayKey: "2026-07-30",
     status: "CASE_CLOSED",

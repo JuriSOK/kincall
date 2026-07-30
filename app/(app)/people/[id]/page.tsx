@@ -5,13 +5,22 @@ import { getRepository } from "@/lib/database/store";
 import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
+import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
 import { formatDateTime } from "@/lib/presentation/format-date";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
 import { SafetyNotice } from "@/app/(app)/events/[id]/safety-notice";
+import { Avatar } from "@/app/ui/avatars/avatar";
 import { ButtonLink } from "@/app/ui/button";
-import { Badge, Card, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { KpiCard } from "@/app/ui/kpi-card";
+import { Badge, Card, DetailRow, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { formatCheckInDays, SCHEDULE_STATE_LABEL } from "../profile-form-constants";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
+
+// How many rows the "Calls and decisions" list itself shows — the KPI
+// section below reads from the person's FULL event history, not just this
+// slice, so a person with a long history still gets an accurate answer rate.
+const EVENT_HISTORY_DISPLAY_LIMIT = 20;
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -27,8 +36,14 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   // unfiltered getTrustedContacts instead.
   const [trustedCircle, events] = await Promise.all([
     repository.getActiveTrustedContacts(person.id),
-    repository.listEvents(person.id, 20),
+    repository.listEvents(person.id),
   ]);
+
+  // Person-specific Stage-B KPI: the same computeCheckInKpis the dashboard
+  // uses, over this person's own (unbounded) event history, so the two can
+  // never silently disagree about what "normal" or "a cascade" means.
+  const callEvents = await repository.listCallEventsForEvents(events.map((event) => event.id));
+  const kpis = computeCheckInKpis(events, groupCallEventsByEvent(callEvents));
 
   // Fake-mode demo scenarios (DEC-011). Undefined in live mode, which is what
   // keeps the selector out of the interface entirely rather than merely disabled.
@@ -49,28 +64,55 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         <PageHeader
           title={person.firstName}
           actions={
-            <DeletePersonButton
-              personId={person.id}
-              personName={person.firstName}
-              mode="redirect-dashboard"
-            />
+            <>
+              <ButtonLink href={`/people/${person.id}/edit`} size="sm">
+                Edit profile
+              </ButtonLink>
+              <DeletePersonButton
+                personId={person.id}
+                personName={person.firstName}
+                mode="redirect-dashboard"
+              />
+            </>
           }
         />
 
         <div className="flex flex-wrap items-center gap-3">
-          <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
-          {/* "Preferred", not "Next": no schedule has been computed yet (Stage
-              D). Claiming a computed next occurrence here would be a fact this
-              page cannot back up. */}
-          <span className="text-sm text-muted">
-            Preferred check-in time: daily at {person.preferredCallTime}
-          </span>
-          <span className="font-mono text-sm text-subtle">{maskPhone(person.phone)}</span>
+          <Avatar avatarKey={person.avatarKey} name={person.firstName} size="lg" />
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
+            <Badge tone={person.consentStatus === "confirmed" ? "calm" : "attention"}>
+              Consent: {person.consentStatus}
+            </Badge>
+            <span className="font-mono text-sm text-subtle">{maskPhone(person.phone)}</span>
+          </div>
         </div>
       </div>
 
       <SafetyNotice />
       <CallReadinessNotice readiness={readiness} subject={person.firstName} />
+
+      <Card title="Profile">
+        <dl className="flex flex-col divide-y divide-line">
+          <DetailRow label="Language">{person.preferredLanguage}</DetailRow>
+          <DetailRow label="Timezone">{person.timezone}</DetailRow>
+          <DetailRow label="Conversation profile">{person.conversationProfile}</DetailRow>
+          <DetailRow label="Interests">
+            {person.interests.length > 0 ? person.interests.join(", ") : "None entered"}
+          </DetailRow>
+          {person.conversationNotes ? (
+            <DetailRow label="Conversation notes">{person.conversationNotes}</DetailRow>
+          ) : null}
+          {/* "Preferred", not "Next": no schedule has been computed yet
+              (Stage D). Claiming a computed next occurrence here would be a
+              fact this page cannot back up. */}
+          <DetailRow label="Preferred check-in time">daily at {person.preferredCallTime}</DetailRow>
+          <DetailRow label="Check-in days">{formatCheckInDays(person.checkInDays)}</DetailRow>
+          <DetailRow label="Schedule state">
+            {SCHEDULE_STATE_LABEL[person.scheduleState] ?? person.scheduleState}
+          </DetailRow>
+        </dl>
+      </Card>
 
       <Card
         title="Trusted circle"
@@ -122,6 +164,43 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         )}
       </Card>
 
+      <Card
+        title="Activity"
+        description="Operational activity only — not a health assessment."
+      >
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <KpiCard label="Check-ins" value={String(kpis.totalCheckIns)} />
+          <KpiCard
+            label="Normal"
+            value={
+              kpis.normalCheckIns.percentage === null
+                ? "Not enough data"
+                : `${kpis.normalCheckIns.count} (${kpis.normalCheckIns.percentage}%)`
+            }
+            sampleSize={kpis.normalCheckIns.total}
+          />
+          <KpiCard
+            label="Reached the circle"
+            value={
+              kpis.cascadesTriggered.percentage === null
+                ? "Not enough data"
+                : `${kpis.cascadesTriggered.count} (${kpis.cascadesTriggered.percentage}%)`
+            }
+            sampleSize={kpis.cascadesTriggered.total}
+          />
+          <KpiCard label="Unresolved" value={String(kpis.attentionUnresolvedCount)} />
+          <KpiCard
+            label="Answered"
+            value={
+              kpis.personReached.percentage === null
+                ? "Not enough data"
+                : `${kpis.personReached.count} (${kpis.personReached.percentage}%)`
+            }
+            sampleSize={kpis.personReached.total}
+          />
+        </div>
+      </Card>
+
       <Card title="Calls and decisions">
         {events.length === 0 ? (
           <EmptyState title="No check-in has run yet">
@@ -129,7 +208,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </EmptyState>
         ) : (
           <ol className="flex flex-col gap-2">
-            {events.map((event) => {
+            {events.slice(0, EVENT_HISTORY_DISPLAY_LIMIT).map((event) => {
               const eventStatus = describePersonStatus(event);
               return (
                 <li key={event.id}>

@@ -8,8 +8,8 @@ export default function NewPersonPage() {
   return (
     <PageShell width="narrow">
       <div className="flex flex-col gap-4">
-        <Link href="/" className="w-fit text-sm text-muted hover:text-accent">
-          ← Profiles
+        <Link href="/dashboard" className="w-fit text-sm text-muted hover:text-accent">
+          ← Dashboard
         </Link>
         <PageHeader
           title="Add a loved one"

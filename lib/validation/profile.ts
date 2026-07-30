@@ -1,5 +1,7 @@
 import { isE164, isReservedFictionPhone } from "../phone";
-import type { ConsentStatus } from "../database/types";
+import { AVATAR_KEYS, isAvatarKey, type AvatarKey } from "../avatars";
+import type { ConsentStatus, ScheduleState } from "../database/types";
+import type { UpdatePersonInput } from "../database/repository";
 
 // Pure, framework-free validation shared by the route handlers and the client
 // forms, so the server never trusts what the browser sent. Returns field-keyed
@@ -29,7 +31,28 @@ export type PreferredLanguage = (typeof PREFERRED_LANGUAGES)[number];
 
 export const CONSENT_STATUSES: ConsentStatus[] = ["pending", "confirmed", "declined"];
 
+// Stored configuration only (Stage C, DEC-015) — nothing currently executes a
+// schedule based on this value; Stage D would be what reads it.
+export const SCHEDULE_STATES: ScheduleState[] = ["active", "paused", "inactive"];
+
+// ISO weekdays: 1 (Monday) through 7 (Sunday), matching migration 0010's own
+// `check_in_days <@ array[1..7]` constraint — kept as one literal set here so
+// the two can never silently disagree about what a valid day is.
+const ISO_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
+
 const CALL_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// The standard way to validate an IANA timezone identifier without a fixed
+// list to keep in sync: the constructor throws RangeError for anything the
+// runtime's ICU data does not recognise as a real zone.
+function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // A run of digits long enough to be a phone number, ignoring the spaces,
 // dots, dashes and parentheses people write them with.
@@ -112,6 +135,77 @@ function oneOf<T extends string>(
   return raw as T;
 }
 
+// Empty/absent means "use the initials fallback" (app/ui/avatars/avatar.tsx),
+// which is a valid, deliberate choice — not an error. An unrecognised key IS
+// an error: reaching AVATAR_KEYS is the only way a stored value can ever
+// resolve to a real graphic (lib/avatars.ts is the single source of truth
+// both this validator and the UI registry import).
+function avatarKeyField(raw: unknown, field: string, errors: FieldErrors): AvatarKey | null | undefined {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw !== "string" || !isAvatarKey(raw)) {
+    errors[field] = `Must be one of: ${AVATAR_KEYS.join(", ")}.`;
+    return undefined;
+  }
+  return raw;
+}
+
+function timezoneField(raw: unknown, field: string, errors: FieldErrors): string | undefined {
+  if (typeof raw !== "string" || raw.trim().length === 0 || !isValidTimezone(raw.trim())) {
+    errors[field] = "Must be a valid IANA timezone identifier, for example Europe/Paris.";
+    return undefined;
+  }
+  return raw.trim();
+}
+
+// Ordinary conversation preferences/habits only (DEC-015) — empty/absent is
+// valid (means "none entered"). The one mechanical guarantee this validator
+// CAN make is the same one already applied to `interests`: no phone-like
+// digit run. It cannot and does not claim to detect medical or diagnostic
+// content — see docs/DECISION_LOG.md DEC-015 for why that boundary is drawn
+// here rather than pretended away.
+function conversationNotesField(
+  raw: unknown,
+  field: string,
+  errors: FieldErrors
+): string | null | undefined {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string") {
+    errors[field] = "Must be text.";
+    return undefined;
+  }
+  const value = raw.trim();
+  if (value.length === 0) return null;
+  if (value.length > 280) {
+    errors[field] = "Must be 280 characters or fewer.";
+    return undefined;
+  }
+  if (containsPhoneLikeSequence(value)) {
+    errors[field] =
+      "Remove the phone number. Live numbers are configured through server environment variables, never stored here.";
+    return undefined;
+  }
+  return value;
+}
+
+// At least one day, each an ISO weekday (1=Monday..7=Sunday), no duplicates —
+// matching migration 0010's own `check_in_days <@ array[1..7]` constraint.
+function checkInDaysField(raw: unknown, field: string, errors: FieldErrors): number[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    errors[field] = "Select at least one day.";
+    return undefined;
+  }
+  const days = raw.map((entry) => (typeof entry === "string" ? Number(entry) : entry));
+  if (days.some((day) => typeof day !== "number" || !ISO_WEEKDAYS.includes(day as 1))) {
+    errors[field] = "Each day must be a weekday number from 1 (Monday) to 7 (Sunday).";
+    return undefined;
+  }
+  if (new Set(days).size !== days.length) {
+    errors[field] = "The same day appears more than once.";
+    return undefined;
+  }
+  return [...days].sort((a, b) => a - b);
+}
+
 export interface PersonInput {
   firstName: string;
   phone: string;
@@ -120,6 +214,14 @@ export interface PersonInput {
   preferredCallTime: string;
   interests: string[];
   consentStatus: ConsentStatus;
+  // Stage C (DEC-015). Each has a default applied when the field is entirely
+  // absent from the submitted body, so a caller that predates these fields
+  // (an old form render, a stale client) still creates a valid profile.
+  timezone: string;
+  avatarKey: string | null;
+  conversationNotes: string | null;
+  checkInDays: number[];
+  scheduleState: ScheduleState;
 }
 
 // DEC-008: a validated, real E.164 number is required and stored directly —
@@ -160,6 +262,25 @@ export function validatePersonInput(raw: unknown): ValidationResult<PersonInput>
     errors
   );
 
+  const timezone =
+    body.timezone === undefined
+      ? "Europe/Paris"
+      : timezoneField(body.timezone, "timezone", errors);
+  const avatarKey = avatarKeyField(body.avatarKey, "avatarKey", errors);
+  const conversationNotes = conversationNotesField(
+    body.conversationNotes,
+    "conversationNotes",
+    errors
+  );
+  const checkInDays =
+    body.checkInDays === undefined
+      ? ([1, 2, 3, 4, 5, 6, 7] as number[])
+      : checkInDaysField(body.checkInDays, "checkInDays", errors);
+  const scheduleState =
+    body.scheduleState === undefined
+      ? "active"
+      : oneOf(body.scheduleState, "scheduleState", SCHEDULE_STATES, errors);
+
   if (
     Object.keys(errors).length > 0 ||
     !firstName ||
@@ -168,7 +289,12 @@ export function validatePersonInput(raw: unknown): ValidationResult<PersonInput>
     !conversationProfile ||
     !preferredCallTime ||
     !interests ||
-    !consentStatus
+    !consentStatus ||
+    timezone === undefined ||
+    avatarKey === undefined ||
+    conversationNotes === undefined ||
+    !checkInDays ||
+    !scheduleState
   ) {
     return { errors };
   }
@@ -178,6 +304,11 @@ export function validatePersonInput(raw: unknown): ValidationResult<PersonInput>
     values: {
       firstName,
       phone: phoneNumber,
+      timezone,
+      avatarKey,
+      conversationNotes,
+      checkInDays,
+      scheduleState,
       preferredLanguage,
       conversationProfile,
       preferredCallTime,
@@ -185,6 +316,71 @@ export function validatePersonInput(raw: unknown): ValidationResult<PersonInput>
       consentStatus,
     },
   };
+}
+
+// Stage C's edit route (§3, §5 of the brief): a PARTIAL patch, so — unlike
+// validatePersonInput above — an absent key means "leave this field exactly
+// as it is", not "apply a default". Every field is therefore validated only
+// when its key is actually present in the submitted body (`"key" in body`,
+// not merely `!== undefined`, so an explicit `null` on a nullable field —
+// avatarKey, conversationNotes — is still recognised as present and is
+// applied, e.g. to deliberately clear a note).
+//
+// Deliberately excludes firstName and phone — see UpdatePersonInput's own
+// comment in lib/database/repository.ts for why.
+export function validateUpdatePersonInput(raw: unknown): ValidationResult<UpdatePersonInput> {
+  const errors: FieldErrors = {};
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const values: UpdatePersonInput = {};
+
+  if ("preferredLanguage" in body) {
+    const value = oneOf(body.preferredLanguage, "preferredLanguage", PREFERRED_LANGUAGES, errors);
+    if (value !== undefined) values.preferredLanguage = value;
+  }
+  if ("conversationProfile" in body) {
+    const value = oneOf(body.conversationProfile, "conversationProfile", CONVERSATION_PROFILES, errors);
+    if (value !== undefined) values.conversationProfile = value;
+  }
+  if ("preferredCallTime" in body) {
+    if (typeof body.preferredCallTime !== "string" || !CALL_TIME_PATTERN.test(body.preferredCallTime)) {
+      errors.preferredCallTime = "Must be a 24-hour time, for example 09:00.";
+    } else {
+      values.preferredCallTime = body.preferredCallTime;
+    }
+  }
+  if ("interests" in body) {
+    const value = validateInterests(body.interests, errors);
+    if (value !== undefined) values.interests = value;
+  }
+  if ("consentStatus" in body) {
+    const value = oneOf(body.consentStatus, "consentStatus", CONSENT_STATUSES, errors);
+    if (value !== undefined) values.consentStatus = value;
+  }
+  if ("timezone" in body) {
+    const value = timezoneField(body.timezone, "timezone", errors);
+    if (value !== undefined) values.timezone = value;
+  }
+  if ("avatarKey" in body) {
+    const value = avatarKeyField(body.avatarKey, "avatarKey", errors);
+    if (value !== undefined) values.avatarKey = value;
+  }
+  if ("conversationNotes" in body) {
+    const value = conversationNotesField(body.conversationNotes, "conversationNotes", errors);
+    if (value !== undefined) values.conversationNotes = value;
+  }
+  if ("checkInDays" in body) {
+    const value = checkInDaysField(body.checkInDays, "checkInDays", errors);
+    if (value !== undefined) values.checkInDays = value;
+  }
+  if ("scheduleState" in body) {
+    const value = oneOf(body.scheduleState, "scheduleState", SCHEDULE_STATES, errors);
+    if (value !== undefined) values.scheduleState = value;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+  return { errors, values };
 }
 
 function validateInterests(raw: unknown, errors: FieldErrors): string[] | undefined {

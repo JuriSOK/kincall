@@ -18,10 +18,12 @@ import type {
   CreatePersonInput,
   CreateTrustedContactInput,
   Repository,
+  UpdatePersonInput,
 } from "./repository";
 import {
   fromCallEventPatch,
   fromEventPatch,
+  fromPersonPatch,
   toCallEvent,
   toContact,
   toEvent,
@@ -141,9 +143,30 @@ export class SupabaseRepository implements Repository {
         preferred_call_time: input.preferredCallTime,
         interests: input.interests,
         consent_status: input.consentStatus,
+        // Defaulted identically to InMemoryRepository and to migration 0010's
+        // own column defaults (DEC-015), rather than left for the database
+        // default to apply — so both drivers return the exact same row
+        // whether or not a caller supplied these optional fields.
+        timezone: input.timezone ?? "Europe/Paris",
+        avatar_key: input.avatarKey ?? null,
+        conversation_notes: input.conversationNotes ?? null,
+        check_in_days: input.checkInDays ?? [1, 2, 3, 4, 5, 6, 7],
+        schedule_state: input.scheduleState ?? "active",
       })
     );
     return toPerson(row);
+  }
+
+  async updatePerson(personId: string, input: UpdatePersonInput): Promise<VulnerablePerson> {
+    const { data, error } = await this.client
+      .from("vulnerable_people")
+      .update(fromPersonPatch(input))
+      .eq("id", personId)
+      .select()
+      .maybeSingle();
+    if (error) fail("updatePerson", error);
+    if (!data) throw new UnknownRecordError("person", personId);
+    return toPerson(data as PersonRow);
   }
 
   async createTrustedContact(

@@ -66,22 +66,28 @@ export default async function HistoryPage({
     else callEventsByEvent.set(call.eventId, [call]);
   }
 
-  const nameById = new Map(people.map((person) => [person.id, person.firstName]));
+  // Name + avatar for every event, including a person not in the active
+  // `people` list (archived) — see the dashboard page's identical comment.
+  const personById = new Map(
+    people.map((person) => [person.id, { firstName: person.firstName, avatarKey: person.avatarKey }])
+  );
   const missingPersonIds = [...new Set(events.map((event) => event.personId))].filter(
-    (id) => !nameById.has(id)
+    (id) => !personById.has(id)
   );
   const archivedPeople = await Promise.all(missingPersonIds.map((id) => repository.getPerson(id)));
   for (const archived of archivedPeople) {
-    if (archived) nameById.set(archived.id, archived.firstName);
+    if (archived) personById.set(archived.id, { firstName: archived.firstName, avatarKey: archived.avatarKey });
   }
 
-  const allViews = events.map((event) =>
-    buildHistoryEventView(
+  const allViews = events.map((event) => {
+    const resolved = personById.get(event.personId);
+    return buildHistoryEventView(
       event,
-      nameById.get(event.personId) ?? "Unknown profile",
-      callEventsByEvent.get(event.id) ?? []
-    )
-  );
+      resolved?.firstName ?? "Unknown profile",
+      callEventsByEvent.get(event.id) ?? [],
+      resolved?.avatarKey ?? null
+    );
+  });
 
   // The calendar sees every fetched event (superset is harmless — it filters
   // to its own month internally); the detailed list is narrowed to the

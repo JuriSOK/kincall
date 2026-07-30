@@ -31,6 +31,10 @@ export interface HistoryEventView {
   eventId: string;
   personId: string;
   personName: string;
+  // Null when nobody selected one, or when the person could not be resolved
+  // at all (an id with no matching row — see the callers' own fallback name
+  // "Unknown profile"). Avatar rendering always falls back to initials.
+  avatarKey: string | null;
   createdAt: string;
   dayKey: string;
   // Carried for partitioning/sorting only (e.g. lib/dashboard/partition-
@@ -51,7 +55,8 @@ export interface HistoryEventView {
 export function buildHistoryEventView(
   event: EventRecord,
   personName: string,
-  callEvents: CallEventRecord[]
+  callEvents: CallEventRecord[],
+  avatarKey: string | null = null
 ): HistoryEventView {
   const status = describePersonStatus(event);
   const companionCalls = callEvents.filter((call) => call.agentType === "companion");
@@ -65,6 +70,7 @@ export function buildHistoryEventView(
     eventId: event.id,
     personId: event.personId,
     personName,
+    avatarKey,
     createdAt: event.createdAt,
     dayKey: formatDayKey(event.createdAt),
     status: event.status,

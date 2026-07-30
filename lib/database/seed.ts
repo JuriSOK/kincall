@@ -48,6 +48,12 @@ export function seedRepository(repository: InMemoryRepository): void {
     interests: ["gardening", "family"],
     consentStatus: "confirmed",
     archivedAt: null,
+    // Stage C (DEC-015) — matches migration 0010's column defaults exactly.
+    timezone: "Europe/Paris",
+    avatarKey: "sunrise",
+    conversationNotes: null,
+    checkInDays: [1, 2, 3, 4, 5, 6, 7],
+    scheduleState: "active",
   });
 
   repository.seedContact({
