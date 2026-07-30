@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   submitContactForm,
   type ResettableForm,
-} from "@/app/people/[id]/contacts/contact-form-submit";
+} from "@/app/(app)/people/[id]/contacts/contact-form-submit";
 
 function fakeForm(): ResettableForm & { reset: ReturnType<typeof vi.fn> } {
   return { reset: vi.fn() };

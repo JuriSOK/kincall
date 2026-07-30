@@ -1,0 +1,235 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { isFamilyStructuredResult, readCompanionResult } from "@/lib/calle/schemas";
+import { getRepository } from "@/lib/database/store";
+import { MAX_COMPANION_ATTEMPTS } from "@/lib/orchestration/decide-companion-action";
+import { describePersonStatus } from "@/lib/orchestration/person-status";
+import {
+  describeAction,
+  describeAttentionOutcome,
+  describeAttentionReason,
+  describeConfidence,
+  describeFamilyAttempt,
+  describeFamilyCascade,
+  describeOwnership,
+  describeWorkflowStep,
+  findConfirmation,
+} from "@/lib/presentation/event-summary";
+import { formatTime } from "@/lib/presentation/format-date";
+import { STATUS_TONE } from "@/lib/presentation/status-tone";
+import { Badge, Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { EventPollIndicator } from "./event-poll-indicator";
+import { SafetyNotice } from "./safety-notice";
+
+export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const repository = getRepository();
+  const event = await repository.getEvent(id);
+
+  if (!event) {
+    notFound();
+  }
+
+  const [person, timeline, callEvents, contacts] = await Promise.all([
+    repository.getPerson(event.personId),
+    repository.listTimeline(event.id),
+    repository.listCallEvents(event.id),
+    // Unfiltered on purpose (DEC-009): a contact archived after the fact must
+    // still resolve to a name for the calls that were actually placed.
+    repository.getTrustedContacts(event.personId),
+  ]);
+
+  const confirmation = findConfirmation(callEvents, contacts);
+  const companionCalls = callEvents.filter((call) => call.agentType === "companion");
+  const familyCalls = callEvents.filter((call) => call.agentType === "family");
+
+  // The LAST companion call: after a bounded retry there are two, and the
+  // decision came from the most recent one. readCompanionResult accepts the
+  // pre-DEC-011 shape too, so historical events still render.
+  const attention = readCompanionResult(
+    companionCalls[companionCalls.length - 1]?.structuredResult
+  );
+
+  const actionDescription = confirmation
+    ? describeFamilyCascade(callEvents, contacts, confirmation)
+    : describeAction(event);
+
+  // Contacts the cascade never called at all. Reported separately from the
+  // timeline's own per-skip entries, which record the reason at the time.
+  const calledContactIds = new Set(familyCalls.map((call) => call.contactId));
+  const neverCalled = contacts.filter(
+    (contact) => !calledContactIds.has(contact.id) && contact.archivedAt === null
+  );
+
+  const status = describePersonStatus(event);
+
+  return (
+    <PageShell width="narrow">
+      <div className="flex flex-col gap-4">
+        <Link
+          href={`/people/${event.personId}`}
+          className="w-fit text-sm text-muted hover:text-accent"
+        >
+          ← {person?.firstName ?? "Back"}
+        </Link>
+        <PageHeader title={`Check-in ${event.id}`} />
+        <div className="flex flex-wrap items-center gap-3">
+          {/* The outcome badge carries the one tone that distinguishes
+              ATTENTION_UNRESOLVED from every other state (DEC-011). */}
+          <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
+          <span className="flex items-center gap-2 text-sm text-muted">
+            {describeWorkflowStep(event.status)}
+            <EventPollIndicator eventId={event.id} status={event.status} />
+          </span>
+        </div>
+      </div>
+
+      <SafetyNotice />
+
+      {/* Summary first: this is what a family member actually came to read. The
+          per-call detail below is the evidence for it. */}
+      <Card title="Summary">
+        <dl className="flex flex-col gap-3 text-sm">
+          <div>
+            <dt className="font-medium">What happened?</dt>
+            <dd className="text-muted">
+              {companionCalls[companionCalls.length - 1]?.summary ?? "No summary available yet."}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium">What did KinCall do?</dt>
+            <dd className="text-muted">{actionDescription}</dd>
+          </div>
+          <div>
+            <dt className="font-medium">Who is taking care of it?</dt>
+            <dd className="text-muted">
+              {confirmation ? confirmation.result.summary : describeOwnership(event)}
+            </dd>
+          </div>
+        </dl>
+      </Card>
+
+      {attention ? (
+        <Card title="What the check-in found">
+          <div className="flex flex-col gap-3 text-sm">
+            {describeAttentionOutcome(event) ? (
+              <div>
+                <p className="font-medium">Attention</p>
+                <p className="text-muted">{describeAttentionOutcome(event)}</p>
+                {/* §9.4's Limite critique: a binary operational outcome, never a
+                    medical or severity judgement. KinCall does not diagnose. */}
+                <p className="mt-1 text-xs text-subtle">
+                  This is an operational outcome — whether KinCall closed the check-in or contacted
+                  the trusted circle — not a medical assessment or a severity level.
+                </p>
+              </div>
+            ) : null}
+            {attention.attentionReasons.length > 0 ? (
+              <div>
+                <p className="font-medium">Why</p>
+                <ul className="list-inside list-disc text-muted">
+                  {attention.attentionReasons.map((reason) => (
+                    <li key={reason}>{describeAttentionReason(reason)}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div>
+              <p className="font-medium">What was said</p>
+              <p className="text-muted">{attention.neutralSummary || "No summary available."}</p>
+            </div>
+            <div>
+              <p className="font-medium">Reporting confidence</p>
+              <p className="text-muted">{describeConfidence(attention.confidence)}</p>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      <Card
+        title={`Check-in calls to ${person?.firstName ?? "the person"}`}
+        description={
+          companionCalls.length === 0
+            ? "No check-in call has been placed yet."
+            : `${companionCalls.length} of at most ${MAX_COMPANION_ATTEMPTS} attempts placed.`
+        }
+      >
+        <ol className="flex flex-col gap-1 text-sm text-muted">
+          {companionCalls.map((call) => {
+            const result = readCompanionResult(call.structuredResult);
+            return (
+              <li key={call.id}>
+                Attempt {call.attemptNumber}:{" "}
+                {call.resultProcessedAt === null
+                  ? "in progress"
+                  : result === null
+                    ? "result could not be read"
+                    : result.personReached === "yes"
+                      ? "spoke with them"
+                      : result.personReached === "no"
+                        ? "did not reach them"
+                        : "could not confirm who answered"}
+              </li>
+            );
+          })}
+        </ol>
+      </Card>
+
+      {familyCalls.length > 0 || neverCalled.length > 0 ? (
+        <Card title="Trusted-circle calls">
+          <div className="flex flex-col gap-3 text-sm">
+            {familyCalls.length > 0 ? (
+              <ol className="flex flex-col gap-2">
+                {familyCalls.map((call) => {
+                  const line = describeFamilyAttempt(call, contacts);
+                  return (
+                    <li
+                      key={call.id}
+                      className="flex flex-col rounded-kc border border-line bg-sunken px-3 py-2"
+                    >
+                      <span className="font-medium">
+                        {line.name} — {line.attempt}
+                      </span>
+                      <span className="text-muted">{line.outcome}</span>
+                      <span className="text-xs text-subtle">Voicemail: {line.voicemail}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : (
+              <p className="text-muted">No trusted contact has been called.</p>
+            )}
+
+            {neverCalled.length > 0 ? (
+              <div>
+                <p className="font-medium">Not called</p>
+                <ul className="list-inside list-disc text-muted">
+                  {neverCalled.map((contact) => (
+                    <li key={contact.id}>{contact.firstName}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs text-subtle">
+                  The timeline below records why each of these was skipped, where one was skipped.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
+
+      <Card title="Timeline">
+        <ol className="flex flex-col">
+          {timeline.map((entry) => (
+            <li
+              key={entry.id}
+              className="flex gap-3 border-l-2 border-l-line py-1.5 pl-3 text-sm"
+            >
+              <span className="font-mono text-xs text-subtle">{formatTime(entry.createdAt)}</span>
+              <span>{entry.message}</span>
+            </li>
+          ))}
+        </ol>
+      </Card>
+    </PageShell>
+  );
+}

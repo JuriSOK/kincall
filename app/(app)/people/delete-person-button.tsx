@@ -6,10 +6,10 @@ interface Props {
   personId: string;
   personName: string;
   // "refresh": stay on the current page and re-fetch the (now shorter) list —
-  // used on the home page. "redirect-home": used on the person's own detail
-  // page, where refreshing the same page after deleting yourself makes no
-  // sense; go to "/" instead.
-  mode: "refresh" | "redirect-home";
+  // used on the dashboard's profile list. "redirect-dashboard": used on the
+  // person's own detail page, where refreshing the same page after deleting
+  // yourself makes no sense; go to /dashboard instead.
+  mode: "refresh" | "redirect-dashboard";
 }
 
 // Soft deletion (optional interface administration, not core orchestration —

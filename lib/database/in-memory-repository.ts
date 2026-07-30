@@ -233,6 +233,25 @@ export class InMemoryRepository implements Repository {
     return limit === undefined ? events : events.slice(0, limit);
   }
 
+  async listRecentEvents({
+    since,
+    limit,
+  }: {
+    since: string;
+    limit: number;
+  }): Promise<EventRecord[]> {
+    // Unfiltered by person on purpose — this is the cross-person read the
+    // dashboard and history page need. archivedAt on the PERSON is
+    // deliberately not checked here: an archived person's past events must
+    // stay visible in history (DEC-009's "historical events remain fully
+    // readable" applies just as much to a cross-person list as to a
+    // single-person one).
+    return [...this.store.events.values()]
+      .filter((event) => event.createdAt >= since)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .slice(0, limit);
+  }
+
   async createEvent(personId: string): Promise<EventRecord> {
     this.store.sequences.event += 1;
     const id = `event_${String(this.store.sequences.event).padStart(3, "0")}`;
@@ -305,6 +324,16 @@ export class InMemoryRepository implements Repository {
 
   async listCallEvents(eventId: string): Promise<CallEventRecord[]> {
     return [...this.store.callEvents.values()].filter((call) => call.eventId === eventId);
+  }
+
+  async listCallEventsForEvents(eventIds: string[]): Promise<CallEventRecord[]> {
+    if (eventIds.length === 0) return [];
+    const idSet = new Set(eventIds);
+    // Same ordering guarantee as listCallEvents (insertion order, via the
+    // Map's own iteration order) — grouping the flat result by eventId at the
+    // call site reproduces exactly what N calls to listCallEvents would have
+    // returned, in one pass instead of N.
+    return [...this.store.callEvents.values()].filter((call) => idSet.has(call.eventId));
   }
 
   async findCallEventByIdempotencyKey(key: string): Promise<CallEventRecord | undefined> {

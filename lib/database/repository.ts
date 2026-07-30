@@ -120,6 +120,12 @@ export interface Repository {
 
   createEvent(personId: string): Promise<EventRecord>;
   listEvents(personId: string, limit?: number): Promise<EventRecord[]>; // newest first
+  // Cross-person, for the dashboard and history page (Stage B). Bounded by
+  // BOTH an explicit time window and a row limit — there is deliberately no
+  // unbounded "all events" read. Newest first, with the same id tie-break as
+  // listEvents, so paging/ordering is identical between the per-person and
+  // cross-person reads. `since` is inclusive.
+  listRecentEvents(range: { since: string; limit: number }): Promise<EventRecord[]>;
   getEvent(eventId: string): Promise<EventRecord | undefined>;
   updateEvent(eventId: string, patch: Partial<EventRecord>): Promise<EventRecord>;
 
@@ -132,6 +138,11 @@ export interface Repository {
 
   getCallEvent(callEventId: string): Promise<CallEventRecord | undefined>;
   listCallEvents(eventId: string): Promise<CallEventRecord[]>; // insertion order
+  // Batched form of listCallEvents for the dashboard/history/KPI reads (Stage
+  // B), so displaying N events' call history costs one query instead of N.
+  // Insertion order overall, same as listCallEvents; group by eventId at the
+  // call site. Returns [] for an empty eventIds array without querying.
+  listCallEventsForEvents(eventIds: string[]): Promise<CallEventRecord[]>;
   findCallEventByIdempotencyKey(key: string): Promise<CallEventRecord | undefined>;
   updateCallEvent(callEventId: string, patch: Partial<CallEventRecord>): Promise<CallEventRecord>;
 

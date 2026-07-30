@@ -137,6 +137,58 @@ drivers are implemented and interchangeable.
 
 No recurring scheduling, and nothing deployed yet.
 
+## Interface
+
+| Route | What it is |
+|---|---|
+| `/` | Public marketing landing page — no repository access, no Nav. `Get started` leads to `/dashboard`. |
+| `/dashboard` | The operational home: unresolved cases first, configuration gaps, a count-based KPI strip, every profile, and recent activity grouped by day. |
+| `/history` | A monthly calendar (three neutral outcome categories, no medical-severity colour scale) plus a filterable, day-grouped list of every check-in. |
+| `/people/new`, `/people/[id]`, `/people/[id]/contacts`, `/events/[id]` | Unchanged from earlier phases, now sharing one Nav under `app/(app)/layout.tsx`. |
+
+`/dashboard` and `/history` are read-only: launching a check-in, editing a
+profile, or reordering a trusted circle all still happen on the existing
+per-person pages.
+
+### KPIs are count-based only
+
+The dashboard's KPI strip (7/30/90-day period, in the URL as `?period=`) shows
+only what persisted data can actually support: check-in counts, the share that
+closed normally, the share that reached the trusted circle, the unresolved
+count, the person-answered rate, and the mean number of Family attempts before
+a confirmation. Every rate shows its own sample size and reads "Not enough
+data" rather than a fabricated 0% when nothing qualifies.
+
+Deliberately **not** shown, in any form:
+
+- **Any duration or response-time metric.** Fake-mode events run their whole
+  cascade synchronously in one request, so a "time to confirmation" would
+  read ~0 ms for every fake-mode event — a real number attached to a
+  meaningless measurement, not an honest "no data".
+- **False-positive rate or unnecessary-escalation rate.** Both would require
+  knowing whether attention was *actually* warranted, which nothing in this
+  product ever learns. See `docs/DECISION_LOG.md` DEC-014.
+
+### One fixed display timezone, for now
+
+Every date and time shown anywhere (`/dashboard`, `/history`, the person and
+event pages) uses `Europe/Paris`, explicitly — never the server's own
+timezone (which depends on which region a serverless function happens to run
+in) and never the visitor's browser timezone. No person has a persisted
+timezone yet; when one exists (a later phase), it should be used in place of
+this fixed fallback. See `lib/presentation/format-date.ts`.
+
+## Before a public deployment
+
+Every mutating route (`POST /api/people`, `POST .../contacts`, both
+`DELETE`s, the contact-reorder route, and — in live mode — `POST
+/api/events/start`) is currently unauthenticated. That is acceptable for local
+development and a supervised demo, but **a public URL needs a write-protection
+gate — a shared token, or real authentication — before any mutating route is
+reachable by an arbitrary visitor.** `app/(app)/layout.tsx` is the one place
+such a check (or full authentication) belongs; nothing about the routes or
+data model needs to change to add it later.
+
 ## Persistence
 
 `KINCALL_PERSISTENCE=memory` (the default) keeps everything in-process. It

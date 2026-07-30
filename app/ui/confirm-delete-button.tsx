@@ -18,10 +18,12 @@ export interface ConfirmDeleteButtonProps {
   fallbackError: string;
   /**
    * "refresh": stay put and re-fetch the now-shorter list.
-   * "redirect-home": used on a person's own page, where refreshing a page whose
-   * subject was just archived makes no sense.
+   * "redirect-dashboard": used on a person's own page, where refreshing a page
+   * whose subject was just archived makes no sense — sent to /dashboard,
+   * which is where the profile list lives (Stage B; "/" is now the marketing
+   * landing page and is not a sensible landing spot after deleting a profile).
    */
-  onSuccess: "refresh" | "redirect-home";
+  onSuccess: "refresh" | "redirect-dashboard";
 }
 
 /**
@@ -75,9 +77,9 @@ export function ConfirmDeleteButton({
         return;
       }
 
-      if (onSuccess === "redirect-home") {
+      if (onSuccess === "redirect-dashboard") {
         navigating = true;
-        router.push("/");
+        router.push("/dashboard");
         return;
       }
       router.refresh();

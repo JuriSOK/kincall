@@ -5,7 +5,7 @@ import {
   describeFamilyCascade,
   describeOwnership,
   findConfirmation,
-} from "@/app/events/[id]/page";
+} from "@/lib/presentation/event-summary";
 import type { FamilyStructuredResult } from "@/lib/calle/schemas";
 import { toEvent, type EventRow } from "@/lib/database/row-mappers";
 import type { CallEventRecord, EventRecord, TrustedContact } from "@/lib/database/types";

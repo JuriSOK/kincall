@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isWaitingStatus, startPolling, WAITING_STATUSES } from "@/app/events/[id]/event-poller";
+import { isWaitingStatus, startPolling, WAITING_STATUSES } from "@/app/(app)/events/[id]/event-poller";
 import type { EventStatus } from "@/lib/orchestration/states";
 
 function jsonResponse(body: unknown, ok = true): Response {

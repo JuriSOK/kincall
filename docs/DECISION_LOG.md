@@ -1184,6 +1184,169 @@ KinCall holds.
 
 ---
 
+## DEC-014 — Landing page, dashboard, history, and count-based KPIs
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+DEC-013 made the existing five pages resilient and gave them a shared design system, but the
+product still had no cross-person view at all: there was no dashboard, no history/calendar, no
+KPI of any kind, and `/` was simultaneously the marketing pitch and the operational profile list.
+This phase adds those, without touching the validated cascade.
+
+Two things this phase does are genuine extensions beyond `PRODUCT_SPECIFICATION.md`'s frozen MVP
+feature list, flagged per `CLAUDE.md`'s change-control rule rather than absorbed silently:
+
+**1. A cross-person KPI dashboard.** §18 lists "taux d'appels répondus", "temps moyen avant
+confirmation d'un proche" and similar metrics explicitly under **"Indicateurs produit futurs"** —
+future, not MVP. Approved here as a deliberate, bounded extension: **count-based metrics only**,
+with every duration metric rejected outright (see below).
+
+**2. Splitting the "page d'accueil" into two pages.** §14.1 describes one page holding both the
+product's presentation and the profile list. `/` is now a marketing-only landing page and
+`/dashboard` is the operational home; every element §14.1 requires is still present, on
+`/dashboard`, not lost.
+
+### Decision
+
+**1. Route groups, not new URLs for existing pages.** `app/(marketing)/page.tsx` → `/`;
+`app/(app)/layout.tsx` wraps `/dashboard`, `/history`, and the existing `/people/*` and
+`/events/*` pages (moved under `app/(app)/` with `git mv`, so their history is preserved and no
+URL changed). A route group's parenthesised segment never appears in the URL — this is the
+mechanism, not a workaround. `app/(app)/layout.tsx` is documented as the one place a future
+authentication check would go; none is added now.
+
+**2. `DeletePersonButton`'s `redirect-home` mode is renamed `redirect-dashboard`** and now pushes
+to `/dashboard`. `/` is no longer a sensible place to land after deleting a profile, since it no
+longer shows the profile list at all.
+
+**3. Presentation helpers move out of route files.** `describeAction`, `describeAttentionOutcome`,
+`describeAttentionReason`, `describeConfidence`, `describeFamilyAttempt`, `describeFamilyCascade`,
+`describeOwnership`, `describeWorkflowStep`, `findConfirmation` and the `Confirmation` type move
+from `app/(app)/events/[id]/page.tsx` into `lib/presentation/event-summary.ts`, unchanged in
+behaviour. `tests/event-summary.test.ts` and `tests/archive.test.ts` now import from the library
+module instead of a Next.js route file — the dashboard and history page needed these same
+functions, and importing from a `page.tsx` is fragile (it pulls in the whole route module) and
+was only ever true by accident. The event page itself is now purely presentational glue over this
+module; `STATUS_TONE` (previously duplicated identically on the person and event pages) is
+likewise centralised in `lib/presentation/status-tone.ts`.
+
+**4. Two additive repository methods, on both drivers**: `listRecentEvents({ since, limit })`
+(cross-person, bounded by both a time window and a row limit — there is deliberately no unbounded
+"all events" read) and `listCallEventsForEvents(eventIds)` (a batched form of `listCallEvents`, so
+displaying N events' call history costs one query rather than N). Both are covered by the shared
+`tests/repository-contract.ts` suite, including that an archived person's historical events remain
+visible through the cross-person read (DEC-009's guarantee extends to it) and that batched call
+events preserve the same per-event order `listCallEvents` already guarantees.
+
+**5. Count-based KPIs only** (`lib/kpi/dashboard-kpis.ts`): total check-ins, normal check-ins
+(rate), cascades triggered (rate), attention-unresolved count, person-reached (rate, over usable
+completed Companion results only), and mean Family attempts before confirmation. Every rate carries
+its own sample size and reads `null` rather than a fabricated `0%` when the denominator is zero —
+never a divide-by-zero, never a silently invented number.
+
+**Rejected outright, not merely deferred:**
+
+- **Every duration or response-time metric** ("average time before a trusted contact confirmed",
+  "average number of attempts" as a *time*-based figure). Fake-mode events run their entire
+  cascade synchronously inside one request (`lib/orchestration/engine.ts`'s `startDemoEvent`), so
+  any such duration measures ~0 ms for every fake-mode event today — a number that is technically
+  computable but operationally meaningless, and visually indistinguishable from a genuinely fast
+  real confirmation. Showing it would be a fabricated metric wearing the clothes of a real one, not
+  an honestly-labelled "not enough data" state.
+- **False-positive rate and unnecessary-escalation rate**, both present in §18's own
+  "indicateurs produit futurs" list. Both require ground truth about whether attention was
+  *actually* warranted — a judgement KinCall never receives from anyone and never makes itself
+  (§7.5, §17.6). No version of this phase implements either, in any form.
+
+**6. A history page filters by outcome *category*, not raw `EventStatus`.** §9's three neutral
+categories — "normal check-in", "trusted circle contacted", "attention unresolved" — are the
+product's own binary-decision vocabulary (DEC-011), and are what
+`lib/presentation/history-view.ts`'s `categorizeEventOutcome` computes and what the history page's
+filter and calendar both key on. Raw internal statuses like `CALLING_TRUSTED_CONTACT` or
+`CONTACT_DID_NOT_ANSWER` are transient/internal and were never a sensible axis to filter completed
+history by. `HistoryEventView` still carries the raw `status` for internal partitioning use (e.g.
+the dashboard's "needs attention now" section, which must key on the literal
+`ATTENTION_UNRESOLVED` value) — the rule this respects is DEC-011's "no raw enum value is ever
+*rendered*", not a ban on holding one internally.
+
+**7. One fixed display timezone, `Europe/Paris`, everywhere.** No person has a persisted timezone
+yet — that is explicitly Stage D's job, not this one's — so `lib/presentation/format-date.ts`
+fixes one zone for every date and time shown anywhere in the interface, deliberately **neither**
+the server process's timezone (which on Vercel is whichever region the function runs in, making
+output depend on infrastructure rather than the product) **nor** the visitor's browser timezone
+(which would make the same URL render differently for two people, and would mismatch between
+server-rendered and client-hydrated output). Every formatter passes `timeZone` explicitly, so
+output is identical regardless of the ambient process timezone — verified in
+`tests/format-date.test.ts` by flipping `process.env.TZ` mid-test and asserting no change, and by
+asserting the correct, *different* UTC offsets for a summer and a winter instant. Marked with a
+`STAGE D TODO` in the module itself: once a person's timezone is persisted, a caller that knows
+whose event it is should pass that timezone instead of relying on this fallback.
+
+**8. The person page's "Next check-in: daily at {time}" wording is corrected** to "Preferred
+check-in time: daily at {time}" (`app/(app)/people/[id]/page.tsx`, and the same honest phrasing in
+`app/ui/profile-card.tsx`). No occurrence has ever been computed anywhere in this codebase — the
+field is a bare `"HH:MM"` string with no persisted timezone or day-of-week (Stage D's job) — so the
+former wording asserted a fact the product could not back up. This is a wording correction, not new
+scope: nothing about scheduling is implemented in this phase.
+
+**9. Public-demo write safety is a known, documented gap, not fixed here.** Every mutating route
+(`POST /api/people`, `POST .../contacts`, both `DELETE`s, the reorder route, and — in live mode
+only — `POST /api/events/start`) remains unauthenticated, exactly as before this phase; nothing new
+and unsafe was added (the two new routes, `/dashboard` and `/history`, are read-only). README now
+states explicitly that a shared write-token gate (or real authentication) is required before any
+public deployment, per `CLAUDE.md`'s "no authentication unless a concrete current requirement
+proves it necessary" — Stage B's own requirements do not.
+
+### Product-scope check
+
+No product feature is removed or reinterpreted, and the validated cascade is untouched:
+`git diff` on `lib/orchestration/engine.ts`, `decide-companion-action.ts`, `states.ts`,
+`transitions.ts`, `lib/database/{in-memory,supabase}-repository.ts`'s existing methods, `lib/calle/*`,
+`prompts/*` and `supabase/migrations/*` is empty (the two new repository methods are additive
+interface members, not changes to existing ones). All five fake scenarios produce their existing
+timelines and terminal statuses, confirmed by launching two of them manually against the linked
+Supabase project and inspecting the result. No migration was added or needed — every new read is
+built from already-persisted columns.
+
+The two scope extensions (the KPI dashboard, and splitting `/` into two pages) are recorded above
+specifically because they are extensions, not because they are believed to be problems; §13.2's
+"planification récurrente" is not touched by this phase at all (no scheduler, no cron, no
+unattended calling — `Call now`/launching a demo remains the only trigger).
+
+### Consequences
+
+- Test count grows from 479 to 539: repository-contract coverage for the two new methods (running
+  against `InMemoryRepository`; the Supabase-backed contract suite exists but is skipped without a
+  dedicated test project, per DEC-013's already-recorded gap), `tests/kpi.test.ts` (period parsing,
+  zero-denominator handling, every formula), `tests/dashboard.test.ts` (configuration-gap
+  detection, day-grouping order, unresolved-first partitioning), `tests/history.test.ts` (outcome
+  categorisation, view-building, filtering, calendar-day marking, month-key arithmetic), and
+  `tests/format-date.test.ts` (timezone-fixedness, both DST offsets, day-key boundary crossing).
+- `app/(app)/people/delete-person-button.tsx` and `app/ui/confirm-delete-button.tsx`'s
+  `onSuccess` union changes from `"refresh" | "redirect-home"` to `"refresh" |
+  "redirect-dashboard"` — an internal prop rename with one call site, not a behaviour change beyond
+  the redirect target described above.
+- The build now produces 15 routes (previously 5 pages + API routes): `/`, `/dashboard`,
+  `/history`, plus the pre-existing `/people/new`, `/people/[id]`, `/people/[id]/contacts`,
+  `/events/[id]`, `/_not-found`, and the unchanged API routes.
+- Manual verification against the linked Supabase project (the same one DEC-013 and earlier
+  sessions verified fake-mode persistence against) added two new, ordinary, non-destructive
+  fake-mode events — no migration, reset, or live call occurred.
+
+### Approval
+
+Project owner approval: approved for exactly the scope above — landing page, dashboard, history,
+and count-based KPIs — with Stage C (profile enrichment), Stage D (scheduling), Stage E (contact
+availability), Stage F (intervention display) and Stage G (fake SMS) explicitly out of scope for
+this phase and not begun. The two scope extensions (KPI dashboard, `/` split from `/dashboard`)
+were approved together with this phase; false-positive/unnecessary-escalation rates and every
+duration metric were rejected outright rather than deferred.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

@@ -11,7 +11,7 @@ import { FakeCalleAdapter } from "@/lib/calle/fake-adapter";
 import { ContactHasActiveCallError } from "@/lib/database/errors";
 import { InMemoryRepository } from "@/lib/database/in-memory-repository";
 import { seedRepository } from "@/lib/database/seed";
-import { describeFamilyCascade, findConfirmation } from "@/app/events/[id]/page";
+import { describeFamilyCascade, findConfirmation } from "@/lib/presentation/event-summary";
 import { startDemoEvent, type EngineDeps } from "@/lib/orchestration/engine";
 import { seedPendingFamilyCallIntent } from "./support/seed-calls";
 

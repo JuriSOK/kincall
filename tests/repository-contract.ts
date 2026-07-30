@@ -645,6 +645,120 @@ export function repositoryContract(name: string, harness: ContractHarness): void
       });
     });
 
+    // Stage B: the cross-person, bounded read the dashboard and history page
+    // need. Held to the same ordering contract as listEvents rather than a
+    // separate one, so the two reads never disagree about "newest first".
+    describe("listRecentEvents", () => {
+      it("includes events across every person, not just one", async () => {
+        const since = new Date().toISOString();
+        const marie = await repository.createEvent("person_marie");
+
+        const sophie = await repository.createPerson({
+          firstName: "Sophie",
+          phone: "+33698765432",
+          preferredLanguage: "fr-FR",
+          conversationProfile: "standard",
+          preferredCallTime: "09:00",
+          interests: [],
+          consentStatus: "confirmed",
+        });
+        const sophieEvent = await repository.createEvent(sophie.id);
+
+        const recent = await repository.listRecentEvents({ since, limit: 10 });
+        expect(recent.map((event) => event.id)).toEqual(
+          expect.arrayContaining([marie.id, sophieEvent.id])
+        );
+      });
+
+      it("orders newest first, tie-breaking on id like listEvents", async () => {
+        const since = new Date().toISOString();
+        const first = await repository.createEvent("person_marie");
+        const second = await repository.createEvent("person_marie");
+
+        const recent = await repository.listRecentEvents({ since, limit: 10 });
+        const ids = recent.map((event) => event.id);
+        expect(ids.indexOf(second.id)).toBeLessThan(ids.indexOf(first.id));
+      });
+
+      it("excludes events created before the requested window", async () => {
+        await repository.createEvent("person_marie");
+        // A `since` strictly after every event created above: nothing in this
+        // test can have been created "since" a moment that hasn't happened yet.
+        const sinceTheFuture = new Date(Date.now() + 60_000).toISOString();
+
+        expect(await repository.listRecentEvents({ since: sinceTheFuture, limit: 10 })).toEqual([]);
+      });
+
+      it("honours the limit", async () => {
+        const since = new Date().toISOString();
+        await repository.createEvent("person_marie");
+        await repository.createEvent("person_marie");
+        await repository.createEvent("person_marie");
+
+        expect(await repository.listRecentEvents({ since, limit: 2 })).toHaveLength(2);
+      });
+
+      it("keeps an archived person's past events visible (DEC-009)", async () => {
+        const since = new Date().toISOString();
+        const event = await repository.createEvent("person_marie");
+        // archivePerson refuses while any event is non-terminal, so close it
+        // first — the point under test is archival, not this precondition.
+        await repository.updateEvent(event.id, { status: "CASE_CLOSED", closedAt: since });
+        await repository.archivePerson("person_marie");
+
+        const recent = await repository.listRecentEvents({ since, limit: 10 });
+        expect(recent.map((e) => e.id)).toContain(event.id);
+      });
+    });
+
+    // Stage B: the batched form of listCallEvents the dashboard/history/KPI
+    // reads use, so displaying N events' call history is one query, not N.
+    describe("listCallEventsForEvents", () => {
+      it("returns [] for an empty request without touching the store", async () => {
+        expect(await repository.listCallEventsForEvents([])).toEqual([]);
+      });
+
+      it("returns call events for exactly the requested events, nobody else's", async () => {
+        const { event: eventA, callEvent: callA } = await seedIntent({
+          idempotencyKey: "batch_a_companion_attempt_1",
+        });
+        const { callEvent: callB } = await seedIntent({
+          idempotencyKey: "batch_b_companion_attempt_1",
+        });
+
+        const result = await repository.listCallEventsForEvents([eventA.id]);
+        expect(result.map((call) => call.id)).toEqual([callA.id]);
+        expect(result.map((call) => call.id)).not.toContain(callB.id);
+      });
+
+      it("preserves the same per-event order as listCallEvents", async () => {
+        const { event, callEvent: companionCall } = await seedIntent({
+          idempotencyKey: "order_companion_attempt_1",
+        });
+        // A second call on the SAME event, so this event alone has more than
+        // one call event to order.
+        const family = await repository.commitTransitionWithCallIntent({
+          eventId: event.id,
+          operationKey: "run:cascade:FAMILY_CALL_STARTED",
+          transitionEvent: "FAMILY_CALL_STARTED",
+          expectedFromStatus: "CALLING_PERSON",
+          status: "CALLING_TRUSTED_CONTACT",
+          messages: ["Calling Julie"],
+          intent: {
+            agentType: "family",
+            contactId: "contact_julie",
+            attemptNumber: 1,
+            idempotencyKey: `${event.runId}_contact_julie_attempt_1`,
+          },
+        });
+
+        const viaBatch = await repository.listCallEventsForEvents([event.id]);
+        const viaSingle = await repository.listCallEvents(event.id);
+        expect(viaBatch.map((c) => c.id)).toEqual(viaSingle.map((c) => c.id));
+        expect(viaBatch.map((c) => c.id)).toEqual([companionCall.id, family.callEvent!.id]);
+      });
+    });
+
     describe("soft deletion (DEC-009) — listPeople / getActiveTrustedContacts", () => {
       it("listPeople excludes an archived person, but getPerson still resolves them", async () => {
         await repository.archivePerson("person_marie");

@@ -234,6 +234,27 @@ export class SupabaseRepository implements Repository {
     return (data as EventRow[]).map(toEvent);
   }
 
+  async listRecentEvents({
+    since,
+    limit,
+  }: {
+    since: string;
+    limit: number;
+  }): Promise<EventRecord[]> {
+    // Unfiltered by person (the cross-person read the dashboard/history page
+    // need). archivedAt on the PERSON is deliberately not checked here — an
+    // archived person's past events must stay visible in history (DEC-009).
+    const { data, error } = await this.client
+      .from("events")
+      .select("*")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(limit);
+    if (error) fail("listRecentEvents", error);
+    return (data as EventRow[]).map(toEvent);
+  }
+
   async createEvent(personId: string): Promise<EventRecord> {
     // id and run_id come from column defaults: a durable sequence and
     // gen_random_uuid(), so neither can repeat after a restart (DEC-004).
@@ -311,6 +332,22 @@ export class SupabaseRepository implements Repository {
       .eq("event_id", eventId)
       .order("seq", { ascending: true });
     if (error) fail("listCallEvents", error);
+    return (data as CallEventRow[]).map(toCallEvent);
+  }
+
+  async listCallEventsForEvents(eventIds: string[]): Promise<CallEventRecord[]> {
+    // No query for an empty list: `.in("event_id", [])` is a valid PostgREST
+    // filter, but there's no reason to round-trip for a result that must be [].
+    if (eventIds.length === 0) return [];
+    // Ordered by the monotonic seq (as listCallEvents is per-event), which
+    // determines both the global order AND the order within each event once
+    // grouped by eventId at the call site.
+    const { data, error } = await this.client
+      .from("call_events")
+      .select("*")
+      .in("event_id", eventIds)
+      .order("seq", { ascending: true });
+    if (error) fail("listCallEventsForEvents", error);
     return (data as CallEventRow[]).map(toCallEvent);
   }
 

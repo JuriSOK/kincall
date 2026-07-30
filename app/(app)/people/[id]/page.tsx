@@ -3,24 +3,15 @@ import { notFound } from "next/navigation";
 import { listDemoScenarios } from "@/lib/calle/demo-scenarios";
 import { getRepository } from "@/lib/database/store";
 import { maskPhone } from "@/lib/phone";
-import type { CallReadiness, StatusTone } from "@/lib/orchestration/person-status";
+import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
-import { SafetyNotice } from "@/app/events/[id]/safety-notice";
+import { formatDateTime } from "@/lib/presentation/format-date";
+import { STATUS_TONE } from "@/lib/presentation/status-tone";
+import { SafetyNotice } from "@/app/(app)/events/[id]/safety-notice";
 import { ButtonLink } from "@/app/ui/button";
 import { Badge, Card, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
-import type { Tone } from "@/app/ui/tone";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
-
-// describePersonStatus's operational tone, mapped onto the design system's.
-// "unknown" (in progress, nothing recorded yet) is a neutral state, not a
-// reassuring or a worrying one.
-const STATUS_TONE: Record<StatusTone, Tone> = {
-  calm: "calm",
-  attention: "attention",
-  unresolved: "unresolved",
-  unknown: "neutral",
-};
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,7 +23,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   }
 
   // Active-only (DEC-009): an archived contact must disappear from this
-  // display. Historical resolution (app/events/[id]/page.tsx) uses the
+  // display. Historical resolution (app/(app)/events/[id]/page.tsx) uses the
   // unfiltered getTrustedContacts instead.
   const [trustedCircle, events] = await Promise.all([
     repository.getActiveTrustedContacts(person.id),
@@ -51,8 +42,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   return (
     <PageShell width="narrow">
       <div className="flex flex-col gap-4">
-        <Link href="/" className="w-fit text-sm text-muted hover:text-accent">
-          ← Profiles
+        <Link href="/dashboard" className="w-fit text-sm text-muted hover:text-accent">
+          ← Dashboard
         </Link>
 
         <PageHeader
@@ -61,15 +52,18 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             <DeletePersonButton
               personId={person.id}
               personName={person.firstName}
-              mode="redirect-home"
+              mode="redirect-dashboard"
             />
           }
         />
 
         <div className="flex flex-wrap items-center gap-3">
           <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
+          {/* "Preferred", not "Next": no schedule has been computed yet (Stage
+              D). Claiming a computed next occurrence here would be a fact this
+              page cannot back up. */}
           <span className="text-sm text-muted">
-            Next check-in: daily at {person.preferredCallTime}
+            Preferred check-in time: daily at {person.preferredCallTime}
           </span>
           <span className="font-mono text-sm text-subtle">{maskPhone(person.phone)}</span>
         </div>
@@ -144,10 +138,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                     className="flex flex-wrap items-baseline justify-between gap-2 rounded-kc border border-line bg-sunken px-4 py-3 transition-colors hover:border-line-strong"
                   >
                     <span className="font-mono text-xs text-subtle">
-                      {new Date(event.createdAt).toLocaleString([], {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
+                      {formatDateTime(event.createdAt)}
                     </span>
                     <span className="flex flex-wrap items-center gap-2 text-sm">
                       <Badge tone={STATUS_TONE[eventStatus.tone]}>{eventStatus.label}</Badge>
