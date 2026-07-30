@@ -46,6 +46,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
         intent: {
           agentType: "companion",
           contactId: null,
+          attemptNumber: 1,
           idempotencyKey: overrides.idempotencyKey ?? `${event.runId}_companion_attempt_1`,
         },
       });
@@ -109,7 +110,6 @@ export function repositoryContract(name: string, harness: ContractHarness): void
 
         const event = await repository.createEvent("person_marie");
         expect(event.closedAt).toBeNull();
-        expect(event.priority).toBeNull();
         expect(event.decision).toBeNull();
         expect(event.currentContactPriority).toBeNull();
       });
@@ -148,6 +148,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
           intent: {
             agentType: "companion",
             contactId: null,
+            attemptNumber: 1,
             idempotencyKey: callEvent.idempotencyKey,
           },
         });
@@ -173,6 +174,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
           intent: {
             agentType: "companion",
             contactId: null,
+            attemptNumber: 1,
             idempotencyKey: `${event.runId}_companion_attempt_1`,
           },
         });
@@ -198,6 +200,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
             intent: {
               agentType: "companion",
               contactId: null,
+              attemptNumber: 1,
               idempotencyKey: "a_completely_different_key",
             },
           })
@@ -238,6 +241,7 @@ export function repositoryContract(name: string, harness: ContractHarness): void
             intent: {
               agentType: "companion",
               contactId: null,
+              attemptNumber: 1,
               idempotencyKey: `${event.runId}_companion_attempt_2`,
             },
           })
@@ -381,13 +385,17 @@ export function repositoryContract(name: string, harness: ContractHarness): void
           transitionEvent: "COMPANION_CALL_STARTED",
           expectedFromStatus: "SCHEDULED",
           status: "CALLING_PERSON",
-          patch: { priority: "high", decision: "CONTACT_TRUSTED_PERSON", decisionReason: "why" },
+          patch: {
+            decision: "CONTACT_TRUSTED_PERSON",
+            decisionReason: "why",
+            currentContactPriority: 1,
+          },
           messages: ["first", "second"],
         });
 
         expect(result.applied).toBe(true);
         expect(result.event.status).toBe("CALLING_PERSON");
-        expect(result.event.priority).toBe("high");
+        expect(result.event.currentContactPriority).toBe(1);
         expect(result.event.decision).toBe("CONTACT_TRUSTED_PERSON");
         expect(result.event.decisionReason).toBe("why");
         expect((await repository.listTimeline(event.id)).map((e) => e.message)).toEqual([

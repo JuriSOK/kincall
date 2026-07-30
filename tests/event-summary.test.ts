@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   describeAction,
+  describeAttentionOutcome,
   describeFamilyCascade,
   describeOwnership,
   findConfirmation,
 } from "@/app/events/[id]/page";
 import type { FamilyStructuredResult } from "@/lib/calle/schemas";
+import { toEvent, type EventRow } from "@/lib/database/row-mappers";
 import type { CallEventRecord, EventRecord, TrustedContact } from "@/lib/database/types";
 
-const REASSURING_ACTION = "KinCall reviewed the check-in and found nothing unusual.";
+const REASSURING_ACTION = "KinCall reviewed the check-in and found no attention signal.";
 const REASSURING_OWNERSHIP = "No intervention required.";
 
 function event(overrides: Partial<EventRecord> = {}): EventRecord {
@@ -17,7 +19,6 @@ function event(overrides: Partial<EventRecord> = {}): EventRecord {
     runId: "00000000-0000-0000-0000-000000000000",
     personId: "person_marie",
     status: "SCHEDULED",
-    priority: null,
     currentContactPriority: null,
     decision: null,
     decisionReason: null,
@@ -80,16 +81,29 @@ describe("event summary — after a decision exists", () => {
     expect(describeOwnership(e)).not.toBe(REASSURING_OWNERSHIP);
   });
 
-  it("says the person was not reached and a retry is owed", () => {
+  it("says the person was not reached and KinCall is trying again", () => {
+    // DEC-011: the retry is autonomous now, so this no longer says a retry is
+    // "owed" — nothing is waiting on a human to place it.
     const e = event({ status: "PERSON_DID_NOT_ANSWER", decision: "RETRY_CHECK_IN" });
     expect(describeAction(e)).toContain("did not reach the person");
-    expect(describeAction(e)).toContain("retry is owed");
-    expect(describeOwnership(e)).toContain("retry is owed");
+    expect(describeAction(e)).toContain("trying again");
+    expect(describeOwnership(e)).toContain("trying again");
   });
 
-  it("says human review is required when reachability could not be confirmed", () => {
+  it("states the unresolved outcome plainly, with no suggestion KinCall is still working", () => {
+    const e = event({ status: "ATTENTION_UNRESOLVED", decision: "CONTACT_TRUSTED_PERSON" });
+    expect(describeAction(e)).toContain("Nobody was able to confirm");
+    expect(describeAction(e)).not.toBe(REASSURING_ACTION);
+    expect(describeOwnership(e)).toContain("Nobody");
+    expect(describeOwnership(e)).toContain("finished trying");
+    expect(describeOwnership(e)).not.toBe(REASSURING_OWNERSHIP);
+  });
+
+  it("still renders a historical human-review event rather than breaking on it", () => {
+    // DEC-011 stopped producing this status but must keep displaying the events
+    // that already have it.
     const e = event({ status: "HUMAN_REVIEW_REQUIRED", decision: "REQUEST_HUMAN_REVIEW" });
-    expect(describeAction(e)).toContain("could not confirm");
+    expect(describeAction(e)).toBe("Human review is required.");
     expect(describeOwnership(e)).toContain("human review");
   });
 
@@ -154,6 +168,7 @@ function familyCall(overrides: Partial<CallEventRecord> = {}): CallEventRecord {
     eventId: "event_001",
     agentType: "family",
     contactId: "contact_julie",
+    attemptNumber: 1,
     calleCallId: "fake_family_contact_julie_x",
     idempotencyKey: "key",
     status: "completed",
@@ -315,5 +330,91 @@ describe("event page summary — regression: cascade summary must identify the c
     // This is exactly the "Who is taking care of it?" rendering expression.
     expect(confirmation?.result.summary).toBe("Marc confirmed that he will visit Marie vers 18h00.");
     expect(confirmation?.result.summary).not.toContain("did not answer");
+  });
+});
+
+describe("describeAttentionOutcome — the binary operational outcome (DEC-011, \"Priority removed\")", () => {
+  it('shows "No attention needed" for a clearly normal closed check-in', () => {
+    const e = event({
+      status: "CASE_CLOSED",
+      decision: "LOG_AND_CLOSE",
+      closedAt: new Date().toISOString(),
+    });
+    expect(describeAttentionOutcome(e)).toBe("No attention needed");
+  });
+
+  it('shows "Trusted circle contacted" once the cascade has started', () => {
+    for (const status of [
+      "ATTENTION_REQUIRED",
+      "CALLING_TRUSTED_CONTACT",
+      "CONTACT_DID_NOT_ANSWER",
+      "CONTACT_DECLINED",
+      "CONTACT_CONFIRMED",
+      "CASE_CLOSED",
+    ] as const) {
+      const e = event({ status, decision: "CONTACT_TRUSTED_PERSON" });
+      expect(describeAttentionOutcome(e)).toBe("Trusted circle contacted");
+    }
+  });
+
+  it('shows "Attention unresolved" when every eligible contact has been exhausted', () => {
+    const e = event({ status: "ATTENTION_UNRESOLVED", decision: "CONTACT_TRUSTED_PERSON" });
+    expect(describeAttentionOutcome(e)).toBe("Attention unresolved");
+  });
+
+  it("shows nothing yet for an event with no decision, rather than guessing", () => {
+    const e = event({ status: "CALLING_PERSON", decision: null });
+    expect(describeAttentionOutcome(e)).toBeNull();
+  });
+
+  // events.priority was removed entirely (DEC-012). There is no longer a
+  // `priority` property on EventRecord to pass in, which is itself the
+  // strongest possible guarantee that no rendering path can depend on it —
+  // enforced by the compiler, not by a runtime assertion.
+});
+
+describe("historical rows survive the events.priority column removal (DEC-012)", () => {
+  // Before migration 0009 runs remotely, a raw database row can still carry a
+  // `priority` column value the application has not written since DEC-011's
+  // revision, and — mid-deployment, or against a database this migration has
+  // not reached yet — could still contain one. `toEvent` must map such a row
+  // exactly as it maps one that never had the column, and every rendering
+  // helper downstream must keep working from that mapped result.
+  it("toEvent ignores a legacy priority column instead of choking on it", () => {
+    const legacyRow = {
+      id: "event_001",
+      run_id: "00000000-0000-0000-0000-000000000000",
+      person_id: "person_marie",
+      status: "CASE_CLOSED",
+      // Not part of EventRow any more — simulates a not-yet-migrated row.
+      priority: "medium",
+      current_contact_priority: null,
+      decision: "LOG_AND_CLOSE",
+      decision_reason: "No attention signal detected.",
+      created_at: new Date().toISOString(),
+      closed_at: new Date().toISOString(),
+    };
+
+    const mapped = toEvent(legacyRow as EventRow);
+
+    expect(mapped).not.toHaveProperty("priority");
+    expect(mapped.status).toBe("CASE_CLOSED");
+    expect(mapped.decision).toBe("LOG_AND_CLOSE");
+
+    // And every rendering helper on the mapped result works exactly as it
+    // would for a row that never had the column at all.
+    expect(() => describeAction(mapped)).not.toThrow();
+    expect(() => describeOwnership(mapped)).not.toThrow();
+    expect(() => describeAttentionOutcome(mapped)).not.toThrow();
+    expect(describeAction(mapped)).toBe(describeAction(event({ ...mapped })));
+  });
+
+  it("still renders a historical HUMAN_REVIEW_REQUIRED event without throwing", () => {
+    // DEC-011 stopped producing this status; a historical row can still have
+    // it, with or without a legacy priority value on the underlying row.
+    const e = event({ status: "HUMAN_REVIEW_REQUIRED", decision: "REQUEST_HUMAN_REVIEW" });
+    expect(() => describeAction(e)).not.toThrow();
+    expect(() => describeOwnership(e)).not.toThrow();
+    expect(() => describeAttentionOutcome(e)).not.toThrow();
   });
 });

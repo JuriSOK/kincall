@@ -38,6 +38,7 @@ describe("FakeCalleAdapter", () => {
       eventId: "event_001",
       person: person(),
       idempotencyKey: "event_001_companion_attempt_1",
+      attemptNumber: 1,
     });
     const result = await adapter.getCallResult(reference.callId);
 
@@ -47,7 +48,8 @@ describe("FakeCalleAdapter", () => {
       person_reached: "yes",
       fall_mentioned: "yes",
       mobility_difficulty: "yes",
-      recommended_attention_level: "high",
+      attention_required: "yes",
+      attention_reasons: ["fall", "mobility_difficulty"],
     });
   });
 
@@ -59,6 +61,8 @@ describe("FakeCalleAdapter", () => {
       contact: contact(),
       idempotencyKey: "event_001_contact_julie_attempt_1",
       informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
     const result = await adapter.getCallResult(reference.callId);
 
@@ -73,6 +77,8 @@ describe("FakeCalleAdapter", () => {
       contact: contact({ id: "contact_marc", firstName: "Marc", relationship: "son", priority: 2 }),
       idempotencyKey: "event_001_contact_marc_attempt_1",
       informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
     const result = await adapter.getCallResult(reference.callId);
 
@@ -83,12 +89,13 @@ describe("FakeCalleAdapter", () => {
     });
   });
 
-  it("throws for an unknown subject id", async () => {
+  it("throws for a companion call to a person no scenario is written about", async () => {
     const adapter = new FakeCalleAdapter();
     const reference = await adapter.startCompanionCall({
       eventId: "event_001",
       person: person({ id: "person_unknown" }),
       idempotencyKey: "key",
+      attemptNumber: 1,
     });
     await expect(adapter.getCallResult(reference.callId)).rejects.toThrow(/no canned scenario/);
   });

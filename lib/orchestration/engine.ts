@@ -4,6 +4,7 @@ import {
   isCompanionStructuredResult,
   isFamilyStructuredResult,
   normalizeCompanionResult,
+  readCompanionResult,
 } from "../calle/schemas";
 import {
   assertIntentMatches,
@@ -21,12 +22,12 @@ import { phoneEnvVarFor } from "../database/seed";
 import { getRepository } from "../database/store";
 import { describeUnusablePhone } from "../phone";
 import type { CallEventRecord, EventRecord, TrustedContact } from "../database/types";
-import { nextContactAfter } from "./cascade-order";
 import { decideCompanionAction } from "./decide-companion-action";
 import { handleFamilyResult } from "./handle-family-result";
-import { operationKey, type CascadeStage } from "./operation-keys";
-import type { TransitionEvent } from "./states";
+import { attemptDiscriminator, operationKey } from "./operation-keys";
+import { isTerminalEventStatus, type TransitionEvent } from "./states";
 import { nextStatus } from "./transitions";
+import { classifyVoicemail, describeVoicemailOutcome } from "./voicemail";
 
 export interface EngineDeps {
   repository: Repository;
@@ -123,22 +124,57 @@ async function applyTransitionWithCallIntent(
 // not actually establish.
 async function collectInformationToShare(deps: EngineDeps, eventId: string): Promise<string[]> {
   const calls = await deps.repository.listCallEvents(eventId);
-  const result = calls.find((call) => call.agentType === "companion")?.structuredResult;
-  if (!isCompanionStructuredResult(result)) return [];
+  // The LAST companion call, not the first: after a bounded retry there are two,
+  // and what a relative is told must come from the attempt that actually
+  // produced the decision (DEC-011).
+  const companionCalls = calls.filter((call) => call.agentType === "companion");
+  const latest = companionCalls[companionCalls.length - 1]?.structuredResult;
+
+  // readCompanionResult, not the strict guard: an event that started before
+  // DEC-011 still has a v1 result stored, and a relative must still be told the
+  // right facts about it.
+  const result = readCompanionResult(latest);
+  if (!result) {
+    // A result KinCall cannot read at all. It says nothing rather than
+    // guessing — but the call still happens, because the cascade was triggered
+    // precisely because this could not be validated.
+    return ["could not be checked in on successfully"];
+  }
 
   const facts: Array<[boolean, string]> = [
-    [result.fall_mentioned === "yes", "mentioned a fall"],
-    [result.mobility_difficulty === "yes", "described difficulty moving around"],
-    [result.person_requests_help === "yes", "asked for help"],
+    [result.personReached === "no", "could not be reached for their check-in"],
+    [result.explicitHelpRequested === "yes", "asked for help"],
+    [result.fallMentioned === "yes", "mentioned a fall"],
+    [result.mobilityDifficulty === "yes", "described difficulty moving around"],
+    [result.painOrInjuryMentioned === "yes", "mentioned pain or an injury"],
+    [result.unusualConfusion === "yes", "seemed more confused than usual"],
+    [result.distressExpressed === "yes", "expressed distress"],
+    [result.conversationEndedNormally === "no", "ended the check-in call unexpectedly"],
+    [result.otherAttentionSignal === "yes", "described another unusual situation"],
     [
-      result.person_does_not_want_to_disturb_family === "yes",
+      result.doesNotWantToDisturbFamily === "yes",
       "said they did not want to disturb their family",
     ],
-    [result.conversation_shorter_than_usual === "yes", "spoke more briefly than usual"],
-    [result.unusual_confusion === "yes", "seemed more confused than usual"],
   ];
 
   return facts.filter(([present]) => present).map(([, fact]) => fact);
+}
+
+// Whether this contact may be called at all, and why not.
+//
+// DEC-007's consent rule is unchanged and still absolute: no call is placed to
+// anyone whose consent is not confirmed, in ANY mode, because §17.1 makes that a
+// property of the person and not of whether the dialling is real. What DEC-011
+// changed is only what happens NEXT — the cascade skips them and calls the next
+// eligible contact, instead of the whole event stopping.
+function contactBlockedReason(contact: TrustedContact): string | null {
+  if (contact.consentStatus !== "confirmed") {
+    return `${contact.firstName} has not confirmed consent to be called (§17.1)`;
+  }
+  // Only live mode needs a dialable number; fake mode never dials.
+  return getCalleMode() === "live"
+    ? describeUnusablePhone(contact.phone, phoneEnvVarFor(contact.id))
+    : null;
 }
 
 // Places the CALL-E call for an ALREADY-PERSISTED intent, then attaches the
@@ -184,6 +220,7 @@ export async function placeCallForIntent(
             eventId: event.id,
             person,
             idempotencyKey: callEvent.idempotencyKey,
+            attemptNumber: callEvent.attemptNumber,
           })
         : await deps.calleAdapter.startFamilyCall({
             eventId: event.id,
@@ -191,6 +228,15 @@ export async function placeCallForIntent(
             contact: contact!,
             idempotencyKey: callEvent.idempotencyKey,
             informationToShare: await collectInformationToShare(deps, event.id),
+            attemptNumber: callEvent.attemptNumber,
+            // A voicemail is only ever attempted on the FINAL attempt to this
+            // contact, and only when the integration can genuinely leave and
+            // confirm one (DEC-011). Both conditions, decided here rather than
+            // by the agent, so an unsupported integration never produces a
+            // message KinCall would then have to describe as "left".
+            mayLeaveVoicemail:
+              deps.calleAdapter.capabilities.voicemail &&
+              callEvent.attemptNumber >= MAX_CONTACT_ATTEMPTS,
           });
     callId = reference.callId;
   } catch (error) {
@@ -236,6 +282,187 @@ interface CascadeStep {
   nextCallEventId: string | null;
 }
 
+// The two transitions that bracket one outbound check-in call. Keyed on the
+// event's runId plus the attempt number: the runId because it is stable across a
+// restart (DEC-004), and the attempt because attempt 2 must not collide with
+// attempt 1's already-applied operation and silently no-op (DEC-011).
+function companionStartKey(
+  runId: string,
+  transitionEvent: TransitionEvent,
+  attemptNumber: number
+): string {
+  return operationKey(
+    runId,
+    "start",
+    transitionEvent,
+    attemptDiscriminator("companion", attemptNumber)
+  );
+}
+
+// Places the bounded second check-in call to the vulnerable person.
+//
+// DEC-003 left RETRY_CHECK_IN meaning "a retry is owed", waiting for a human to
+// act. DEC-011 makes it autonomous. It cannot loop: the attempt number is
+// persisted, decideCompanionAction refuses to ask for an attempt beyond
+// MAX_COMPANION_ATTEMPTS, and the (event, companion, attempt) uniqueness rule
+// would reject a duplicate intent even if it did.
+async function startCompanionRetry(
+  deps: EngineDeps,
+  event: EventRecord,
+  options: { attemptNumber: number; personName: string }
+): Promise<CascadeStep> {
+  const current = (await deps.repository.getEvent(event.id)) ?? event;
+  if (isTerminalEventStatus(current.status)) {
+    return { event: current, nextCallEventId: null };
+  }
+
+  const key = (transitionEvent: TransitionEvent) =>
+    companionStartKey(current.runId, transitionEvent, options.attemptNumber);
+
+  const result = await applyTransitionWithCallIntent(
+    deps,
+    current,
+    "COMPANION_CALL_STARTED",
+    key("COMPANION_CALL_STARTED"),
+    {
+      messages: [
+        `Calling ${options.personName} again (attempt ${options.attemptNumber})`,
+      ],
+      intent: {
+        agentType: "companion",
+        contactId: null,
+        attemptNumber: options.attemptNumber,
+        idempotencyKey: `${current.runId}_companion_attempt_${options.attemptNumber}`,
+      },
+    }
+  );
+
+  if (result.conflict) {
+    return {
+      event: (await deps.repository.getEvent(current.id)) ?? current,
+      nextCallEventId: null,
+    };
+  }
+
+  const callEvent = result.callEvent!;
+  if (callEvent.resultProcessedAt !== null) {
+    return { event: result.event, nextCallEventId: null };
+  }
+
+  try {
+    await placeCallForIntent(deps, callEvent);
+  } catch (error) {
+    if (!(error instanceof CallStartFailedError)) throw error;
+    // The retry could not even be placed, so nobody has spoken to the person on
+    // either attempt. Go to the trusted circle rather than stalling with a
+    // half-started call (DEC-011).
+    const detail = error.cause instanceof Error ? error.cause.message : "unknown error";
+    const escalated = await applyTransition(
+      deps,
+      result.event,
+      "COMPANION_RESULT_ATTENTION",
+      key("COMPANION_RESULT_ATTENTION"),
+      {
+        patch: {
+          decision: "CONTACT_TRUSTED_PERSON",
+          decisionReason: `The person could not be called back (${detail}).`,
+        },
+        messages: [`Could not call ${options.personName} back — ${detail}`],
+      }
+    );
+    const step = await startNextFamilyCall(deps, escalated.event, {
+      trigger: callEvent.id,
+      previous: null,
+    });
+    return { event: step.event, nextCallEventId: step.nextCallEventId };
+  }
+
+  const inProgress = await applyTransition(
+    deps,
+    result.event,
+    "COMPANION_CONVERSATION_STARTED",
+    key("COMPANION_CONVERSATION_STARTED")
+  );
+
+  return { event: inProgress.event, nextCallEventId: callEvent.id };
+}
+
+// Exactly one retry per trusted contact (DEC-011). Bounded for the same reason
+// the person's retry is: an unanswered contact must lead to the NEXT contact, not
+// to an endless redial of the same one.
+export const MAX_CONTACT_ATTEMPTS = 2;
+
+// What just happened to the contact whose result triggered this cascade step.
+// `retryable` is what distinguishes "call them once more" from "move on": a
+// contact who declined has given a definitive answer, so calling them again
+// would be both useless and intrusive.
+interface PreviousCascadeStep {
+  contactId: string;
+  attemptNumber: number;
+  retryable: boolean;
+}
+
+interface CascadeTarget {
+  contact: TrustedContact;
+  attemptNumber: number;
+}
+
+interface TargetSelection {
+  target: CascadeTarget | null;
+  // Contacts passed over without being called, with the reason, so the timeline
+  // can say so rather than silently omitting them.
+  skipped: Array<{ contact: TrustedContact; reason: string }>;
+}
+
+// Chooses the next call the cascade should place, deterministically and from
+// durable facts only, so a replaying worker reaches the identical decision.
+//
+// The order is: retry the same contact if that attempt is still owed, otherwise
+// walk forward through the circle by priority succession.
+//
+// Deliberately NOT "whoever has no call_events row yet". That reads the answer
+// out of which rows happen to exist, so a replay — where the next contact's row
+// was already written before the crash — would skip past them and dial the
+// contact *after* the intended one. Julie's step must intend Marc on the first
+// run and on every replay, or a stale worker ends up calling Nicole while a live
+// call to Marc is in flight.
+export function selectCascadeTarget(
+  contacts: TrustedContact[],
+  previous: PreviousCascadeStep | null
+): TargetSelection {
+  const skipped: TargetSelection["skipped"] = [];
+
+  // A retry of the same contact, if one is still owed and they are still
+  // eligible. `contacts` is the ACTIVE circle, so a contact archived mid-cascade
+  // has already disappeared from it and falls through to the walk below.
+  if (previous && previous.retryable && previous.attemptNumber < MAX_CONTACT_ATTEMPTS) {
+    const same = contacts.find((candidate) => candidate.id === previous.contactId);
+    if (same && contactBlockedReason(same) === null) {
+      return { target: { contact: same, attemptNumber: previous.attemptNumber + 1 }, skipped };
+    }
+  }
+
+  const startIndex =
+    previous === null
+      ? 0
+      : contacts.findIndex((candidate) => candidate.id === previous.contactId) + 1;
+  // findIndex returned -1 (the previous contact was archived mid-cascade, so it
+  // is no longer in this list): there is no defensible successor to resume from,
+  // and guessing one could call somebody KinCall never selected.
+  if (previous !== null && startIndex === 0) return { target: null, skipped };
+
+  for (let index = startIndex; index < contacts.length; index += 1) {
+    const candidate = contacts[index];
+    const blocked = contactBlockedReason(candidate);
+    if (blocked === null) {
+      return { target: { contact: candidate, attemptNumber: 1 }, skipped };
+    }
+    skipped.push({ contact: candidate, reason: blocked });
+  }
+
+  return { target: null, skipped };
+}
+
 // Starts the next trusted-contact call, or ends the cascade when nobody is
 // left. One step per inbound event: in fake mode processFamilyResult finds a
 // terminal result immediately and recurses, so the whole cascade still
@@ -244,59 +471,59 @@ interface CascadeStep {
 async function startNextFamilyCall(
   deps: EngineDeps,
   event: EventRecord,
-  options: { trigger: string; previousContactId: string | null }
+  options: { trigger: string; previous: PreviousCascadeStep | null }
 ): Promise<CascadeStep> {
-  const key = (transitionEvent: TransitionEvent) =>
-    operationKey(options.trigger, "advance", transitionEvent);
-
   const current = (await deps.repository.getEvent(event.id)) ?? event;
 
   // Another worker already finished this event. Stop immediately — never call
-  // one more person on top of a closed or escalated case.
-  if (current.status === "CASE_CLOSED" || current.status === "HUMAN_REVIEW_REQUIRED") {
+  // one more person on top of an already-finished case.
+  if (isTerminalEventStatus(current.status)) {
     return { event: current, nextCallEventId: null };
   }
 
-  // Chosen by priority succession from the contact whose result triggered this
-  // step, NOT by "who has not been called yet" — the latter reads the answer
-  // out of which rows exist, so a replay would skip the intended contact.
   // Active-only (DEC-009): an archived contact must never be selected for a
   // new cascade step.
   const contacts = await deps.repository.getActiveTrustedContacts(current.personId);
-  const intended = nextContactAfter(contacts, options.previousContactId);
+  const { target, skipped } = selectCascadeTarget(contacts, options.previous);
 
-  if (!intended) {
-    const outcome = await applyTransition(deps, current, "NO_CONTACTS_REMAINING", key("NO_CONTACTS_REMAINING"), {
-      messages: ["Human review required — no contacts remaining"],
-    });
-    return { event: outcome.event, nextCallEventId: null };
-  }
+  // Recorded on whichever transition actually applies, so these entries are
+  // written exactly once and can never be orphaned by a replay (DEC-006). A skip
+  // is not a transition of its own: nothing about the event changed, and nobody
+  // was called.
+  const skipMessages = skipped.map(
+    ({ contact, reason }) => `Skipped ${contact.firstName} without calling — ${reason}`
+  );
 
-  // Pre-flight, BEFORE any transition: a contact that cannot lawfully or
-  // technically be called must not leave the event parked at
-  // CALLING_TRUSTED_CONTACT with no call in flight, and must not write a
-  // "Calling X" entry for a call that never happens.
-  //
-  // DEC-007: consent is checked in EVERY mode, unlike the phone check. §17.1
-  // requires that people called have agreed to receive automated calls, and
-  // that is a property of the person, not of whether the dialling is real.
-  const cannotCall =
-    intended.consentStatus !== "confirmed"
-      ? `${intended.firstName} has not confirmed consent to be called (§17.1)`
-      : getCalleMode() === "live"
-        ? describeUnusablePhone(intended.phone, phoneEnvVarFor(intended.id))
-        : null;
-
-  if (cannotCall) {
+  if (!target) {
+    // Terminal and autonomous: KinCall could not rule out a need for attention
+    // and has run out of people it may call. It does not wait for a human, and
+    // it does not contact an emergency service (DEC-011).
     const outcome = await applyTransition(
       deps,
       current,
-      "FAMILY_CALL_NOT_POSSIBLE",
-      key("FAMILY_CALL_NOT_POSSIBLE"),
-      { messages: [`Human review required — cannot call ${intended.firstName}: ${cannotCall}`] }
+      "NO_CONTACTS_REMAINING",
+      operationKey(options.trigger, "advance", "NO_CONTACTS_REMAINING"),
+      {
+        messages: [
+          ...skipMessages,
+          "No trusted contact could be reached — attention unresolved",
+        ],
+      }
     );
     return { event: outcome.event, nextCallEventId: null };
   }
+
+  const { contact: intended, attemptNumber } = target;
+  // Distinguishes "call Julie again" from "call Marc" — both are
+  // <trigger>:advance:FAMILY_CALL_STARTED without it, and the second would
+  // silently no-op against the first (see operation-keys.ts).
+  const key = (transitionEvent: TransitionEvent) =>
+    operationKey(
+      options.trigger,
+      "advance",
+      transitionEvent,
+      attemptDiscriminator(intended.id, attemptNumber)
+    );
 
   // Transition and intent in ONE transaction. Derived from runId, not id (DEC-004).
   const result = await applyTransitionWithCallIntent(
@@ -305,13 +532,19 @@ async function startNextFamilyCall(
     "FAMILY_CALL_STARTED",
     key("FAMILY_CALL_STARTED"),
     {
-      messages: [`Calling ${intended.firstName}`],
-      // Denormalized for display only — the cascade reads nextContactAfter().
+      messages: [
+        ...skipMessages,
+        attemptNumber === 1
+          ? `Calling ${intended.firstName}`
+          : `Calling ${intended.firstName} again (attempt ${attemptNumber})`,
+      ],
+      // Denormalized for display only — the cascade reads selectCascadeTarget().
       patch: { currentContactPriority: intended.priority },
       intent: {
         agentType: "family",
         contactId: intended.id,
-        idempotencyKey: `${current.runId}_${intended.id}_attempt_1`,
+        attemptNumber,
+        idempotencyKey: `${current.runId}_${intended.id}_attempt_${attemptNumber}`,
       },
     }
   );
@@ -348,13 +581,18 @@ async function startNextFamilyCall(
       result.event,
       "FAMILY_RESULT_MALFORMED",
       key("FAMILY_RESULT_MALFORMED"),
-      {
-        messages: [
-          `Human review required — could not start the call to ${intended.firstName} (${detail})`,
-        ],
-      }
+      { messages: [`Could not start the call to ${intended.firstName} — ${detail}`] }
     );
-    return { event: failed.event, nextCallEventId: null };
+
+    // DEC-011: a technical failure gets the same bounded retry policy as an
+    // unanswered call, and then the cascade continues. Terminating here would
+    // let one broken number strand the vulnerable person. Bounded twice over —
+    // by MAX_CONTACT_ATTEMPTS per contact and by the finite circle — so this
+    // recursion always reaches either a placed call or ATTENTION_UNRESOLVED.
+    return startNextFamilyCall(deps, failed.event, {
+      trigger: options.trigger,
+      previous: { contactId: intended.id, attemptNumber, retryable: true },
+    });
   }
 
   return { event: result.event, nextCallEventId: callEvent.id };
@@ -415,7 +653,11 @@ export async function processCompanionResult(
         deps,
         current,
         "COMPANION_CONVERSATION_STARTED",
-        operationKey(current.runId, "start", "COMPANION_CONVERSATION_STARTED")
+        companionStartKey(
+          current.runId,
+          "COMPANION_CONVERSATION_STARTED",
+          callEvent.attemptNumber
+        )
       );
       if (resumed.conflict) {
         return supersede(
@@ -437,86 +679,25 @@ export async function processCompanionResult(
     }
     current = ended.event;
 
-    if (rawResult.status === "failed" || rawResult.status === "canceled") {
-      const detail = rawResult.failureMessage ?? rawResult.failureCode ?? `call ${rawResult.status}`;
-      const failed = await applyTransition(
-        deps,
-        current,
-        "COMPANION_RESULT_MALFORMED",
-        key("COMPANION_RESULT_MALFORMED"),
-        { messages: [`Human review required — companion call did not complete (${detail})`] }
-      );
-      if (failed.conflict) return supersede(deps, event, callEventId, lease, completedOutcome());
-      await deps.repository.finalizeCallEventResult(callEventId, lease.token, completedOutcome());
-      return failed.event;
-    }
-
-    if (!isCompanionStructuredResult(rawResult.structuredResult)) {
-      const malformed = await applyTransition(
-        deps,
-        current,
-        "COMPANION_RESULT_MALFORMED",
-        key("COMPANION_RESULT_MALFORMED"),
-        { messages: ["Human review required — malformed companion result"] }
-      );
-      if (malformed.conflict) return supersede(deps, event, callEventId, lease, completedOutcome());
-      await deps.repository.finalizeCallEventResult(callEventId, lease.token, completedOutcome());
-      return malformed.event;
-    }
-
-    const structuredResult = rawResult.structuredResult;
-    const outcome = completedOutcome(structuredResult.conversation_summary, structuredResult);
-    // Written before the cascade starts, because collectInformationToShare
-    // reads this row to decide what a family member may be told. Idempotent:
-    // a replay writes the same values.
-    await deps.repository.updateCallEvent(callEventId, {
-      summary: structuredResult.conversation_summary,
-      structuredResult,
-    });
-
-    const normalized = normalizeCompanionResult(structuredResult);
-    const { decision, priority, reason } = decideCompanionAction(normalized);
-    const patch = { decision, priority, decisionReason: reason };
     const personName = (await deps.repository.getPerson(current.personId))?.firstName ?? "the person";
 
-    // DEC-003: the case stays open — closedAt is never set on these two paths.
-    // KinCall must not assert that someone it never spoke to is safe (§7.5).
-    if (decision === "RETRY_CHECK_IN") {
-      const retry = await applyTransition(
-        deps,
-        current,
-        "COMPANION_PERSON_NO_ANSWER",
-        key("COMPANION_PERSON_NO_ANSWER"),
-        { patch, messages: [`${personName} was not reached — no check-in conversation took place`] }
-      );
-      if (retry.conflict) return supersede(deps, event, callEventId, lease, outcome);
-      await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
-      return retry.event;
-    }
-
-    if (decision === "REQUEST_HUMAN_REVIEW") {
-      const uncertain = await applyTransition(
-        deps,
-        current,
-        "COMPANION_RESULT_UNCERTAIN",
-        key("COMPANION_RESULT_UNCERTAIN"),
-        {
-          patch,
-          messages: [`Human review required — unable to confirm the check-in reached ${personName}`],
-        }
-      );
-      if (uncertain.conflict) return supersede(deps, event, callEventId, lease, outcome);
-      await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
-      return uncertain.event;
-    }
-
-    if (decision === "CONTACT_TRUSTED_PERSON") {
+    // Starts the trusted-circle cascade and drives it as far as this inbound
+    // event can take it. Shared by every path that reaches ATTENTION_REQUIRED —
+    // a validated concerning result, a call that never completed, and a result
+    // KinCall could not read — because DEC-011 gives all three the same
+    // destination: a person, not a wait for a human.
+    const escalate = async (
+      from: EventRecord,
+      patch: TransitionOptions["patch"],
+      message: string,
+      outcome: CallOutcome
+    ): Promise<EventRecord> => {
       const attention = await applyTransition(
         deps,
-        current,
+        from,
         "COMPANION_RESULT_ATTENTION",
         key("COMPANION_RESULT_ATTENTION"),
-        { patch, messages: ["Fall and mobility difficulty detected"] }
+        { patch, messages: [message] }
       );
       if (attention.conflict) return supersede(deps, event, callEventId, lease, outcome);
 
@@ -526,11 +707,131 @@ export async function processCompanionResult(
       // the next call's intent durably exists.
       const step = await startNextFamilyCall(deps, attention.event, {
         trigger: callEventId,
-        previousContactId: null,
+        previous: null,
       });
       await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
       if (!step.nextCallEventId) return step.event;
       return processFamilyResult(deps, step.event, step.nextCallEventId);
+    };
+
+    // ── A call that never produced a conversation ─────────────────────────────
+    // DEC-011: this used to stop at human review. A check-in that failed
+    // technically is not evidence that anyone is fine, so it now takes the same
+    // route as a concerning one. The COMPANION_RESULT_MALFORMED edge is kept for
+    // the audit trail; only its destination changed.
+    if (rawResult.status === "failed" || rawResult.status === "canceled") {
+      const detail = rawResult.failureMessage ?? rawResult.failureCode ?? `call ${rawResult.status}`;
+      const malformed = await applyTransition(
+        deps,
+        current,
+        "COMPANION_RESULT_MALFORMED",
+        key("COMPANION_RESULT_MALFORMED"),
+        {
+          patch: {
+            decision: "CONTACT_TRUSTED_PERSON",
+            decisionReason: `The check-in call did not complete (${detail}).`,
+          },
+          messages: [`Check-in call did not complete — ${detail}`],
+        }
+      );
+      if (malformed.conflict) return supersede(deps, event, callEventId, lease, completedOutcome());
+      const step = await startNextFamilyCall(deps, malformed.event, {
+        trigger: callEventId,
+        previous: null,
+      });
+      await deps.repository.finalizeCallEventResult(callEventId, lease.token, completedOutcome());
+      if (!step.nextCallEventId) return step.event;
+      return processFamilyResult(deps, step.event, step.nextCallEventId);
+    }
+
+    // ── A result KinCall cannot validate ─────────────────────────────────────
+    // Degrades to the attention cascade, never to a closure (DEC-011): an
+    // unreadable check-in is exactly when somebody should look in on the person.
+    if (!isCompanionStructuredResult(rawResult.structuredResult)) {
+      const unreadableOutcome = completedOutcome(null, rawResult.structuredResult);
+      const malformed = await applyTransition(
+        deps,
+        current,
+        "COMPANION_RESULT_MALFORMED",
+        key("COMPANION_RESULT_MALFORMED"),
+        {
+          patch: {
+            decision: "CONTACT_TRUSTED_PERSON",
+            decisionReason: "The check-in result could not be validated.",
+          },
+          messages: ["Check-in result could not be validated — contacting the trusted circle"],
+        }
+      );
+      if (malformed.conflict) {
+        return supersede(deps, event, callEventId, lease, unreadableOutcome);
+      }
+      const step = await startNextFamilyCall(deps, malformed.event, {
+        trigger: callEventId,
+        previous: null,
+      });
+      await deps.repository.finalizeCallEventResult(
+        callEventId,
+        lease.token,
+        unreadableOutcome
+      );
+      if (!step.nextCallEventId) return step.event;
+      return processFamilyResult(deps, step.event, step.nextCallEventId);
+    }
+
+    const structuredResult = rawResult.structuredResult;
+    const outcome = completedOutcome(structuredResult.neutral_summary, structuredResult);
+    // Written before the cascade starts, because collectInformationToShare
+    // reads this row to decide what a family member may be told. Idempotent:
+    // a replay writes the same values.
+    await deps.repository.updateCallEvent(callEventId, {
+      summary: structuredResult.neutral_summary,
+      structuredResult,
+    });
+
+    const normalized = normalizeCompanionResult(structuredResult);
+    // The attempt number comes from the persisted call event, never from a
+    // counter in memory, so a restart resumes at the correct attempt (DEC-011).
+    // No priority is assigned (DEC-011, "Priority removed"): the decision is
+    // binary, close or cascade, and `patch` therefore never touches `priority`
+    // — new events simply leave the column null.
+    const { decision, reason } = decideCompanionAction(normalized, {
+      attemptNumber: callEvent.attemptNumber,
+    });
+    const patch = { decision, decisionReason: reason };
+
+    // ── The bounded retry of the vulnerable person ────────────────────────────
+    // DEC-003 left RETRY_CHECK_IN meaning "a retry is owed", surfaced for a human
+    // to act on. DEC-011 makes it autonomous: KinCall places the second call
+    // itself. closedAt is still never set — KinCall must not assert that someone
+    // it never spoke to is safe (§7.5).
+    if (decision === "RETRY_CHECK_IN") {
+      const retry = await applyTransition(
+        deps,
+        current,
+        "COMPANION_PERSON_NO_ANSWER",
+        key("COMPANION_PERSON_NO_ANSWER"),
+        { patch, messages: [`${personName} was not reached (attempt ${callEvent.attemptNumber})`] }
+      );
+      if (retry.conflict) return supersede(deps, event, callEventId, lease, outcome);
+
+      // Same ordering rule as the family cascade: the next intent durably exists
+      // before this result is finalized, so a crash in between leaves the result
+      // reclaimable and the replay recovers that intent.
+      const step = await startCompanionRetry(deps, retry.event, {
+        attemptNumber: callEvent.attemptNumber + 1,
+        personName,
+      });
+      await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
+      if (!step.nextCallEventId) return step.event;
+      return processCompanionResult(deps, step.event, step.nextCallEventId);
+    }
+
+    if (decision === "CONTACT_TRUSTED_PERSON") {
+      // The decision's own reason is the timeline entry: it already names the
+      // stated signals in preserved-uncertainty wording ("The person mentioned
+      // a fall, difficulty moving around."), so nothing is asserted here that
+      // the check-in did not establish (§17.5).
+      return escalate(current, patch, reason, outcome);
     }
 
     const noAction = await applyTransition(
@@ -538,7 +839,7 @@ export async function processCompanionResult(
       current,
       "COMPANION_RESULT_NO_ACTION",
       key("COMPANION_RESULT_NO_ACTION"),
-      { patch, messages: ["No concerning signal detected"] }
+      { patch, messages: ["No attention signal detected"] }
     );
     if (noAction.conflict) return supersede(deps, event, callEventId, lease, outcome);
 
@@ -596,13 +897,24 @@ export async function processFamilyResult(
   // "any contacts remaining?" determination.
   const remaining = contacts.slice(contacts.findIndex((c) => c.id === contact.id) + 1);
 
-  const advance = async (current: EventRecord, outcome: CallOutcome): Promise<EventRecord> => {
+  // `retryable` decides whether this contact gets their second attempt or the
+  // cascade moves on: an unanswered or technically failed call is worth one more
+  // try, a definitive decline is not (DEC-011).
+  const advance = async (
+    current: EventRecord,
+    outcome: CallOutcome,
+    retryable: boolean
+  ): Promise<EventRecord> => {
     // The next call's intent durably exists before this result is finalized,
     // so a crash in between leaves this result reclaimable and the replay
     // recovers that intent rather than skipping to the contact after it.
     const step = await startNextFamilyCall(deps, current, {
       trigger: callEventId,
-      previousContactId: contact.id,
+      previous: {
+        contactId: contact.id,
+        attemptNumber: callEvent.attemptNumber,
+        retryable,
+      },
     });
     await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
     if (!step.nextCallEventId) return step.event;
@@ -619,20 +931,22 @@ export async function processFamilyResult(
         messages: [`Could not reach ${contact.firstName} — ${detail}`],
       });
       if (noAnswer.conflict) return supersede(deps, event, callEventId, lease, completedOutcome());
-      return advance(noAnswer.event, completedOutcome());
+      return advance(noAnswer.event, completedOutcome(), true);
     }
 
+    // DEC-011: an unusable answer is not an answer, and not a reason to stop the
+    // whole event. Treated exactly like an unanswered call, so this contact still
+    // gets their bounded retry and the cascade still reaches everybody after them.
     if (!isFamilyStructuredResult(rawResult.structuredResult)) {
       const malformed = await applyTransition(
         deps,
         event,
         "FAMILY_RESULT_MALFORMED",
         key("FAMILY_RESULT_MALFORMED"),
-        { messages: ["Human review required — malformed family result"] }
+        { messages: [`Could not read the result of the call to ${contact.firstName}`] }
       );
       if (malformed.conflict) return supersede(deps, event, callEventId, lease, completedOutcome());
-      await deps.repository.finalizeCallEventResult(callEventId, lease.token, completedOutcome());
-      return malformed.event;
+      return advance(malformed.event, completedOutcome(), true);
     }
 
     const structuredResult = rawResult.structuredResult;
@@ -646,13 +960,21 @@ export async function processFamilyResult(
         event,
         "FAMILY_RESULT_MALFORMED",
         key("FAMILY_RESULT_MALFORMED"),
-        { messages: ["Human review required — family result identified the wrong contact"] }
+        {
+          messages: [
+            `The result of the call to ${contact.firstName} identified a different contact — disregarded`,
+          ],
+        }
       );
       if (wrongContact.conflict) {
         return supersede(deps, event, callEventId, lease, completedOutcome());
       }
-      await deps.repository.finalizeCallEventResult(callEventId, lease.token, completedOutcome());
-      return wrongContact.event;
+      // The result is discarded, never acted on — but the cascade continues, so
+      // one confused result cannot leave the vulnerable person with nobody
+      // called (DEC-011). It is deliberately NOT retryable: whatever this call
+      // returned cannot be trusted to describe this contact at all, so the
+      // cascade moves on rather than redialling on the strength of it.
+      return advance(wrongContact.event, completedOutcome(), false);
     }
 
     const outcome = completedOutcome(structuredResult.summary, structuredResult);
@@ -695,14 +1017,25 @@ export async function processFamilyResult(
         messages: [`${contact.firstName} declined`],
       });
       if (declined.conflict) return supersede(deps, event, callEventId, lease, outcome);
-      return advance(declined.event, outcome);
+      // Not retryable: they answered and gave a definitive no. Calling them a
+      // second time would be useless and intrusive.
+      return advance(declined.event, outcome, false);
     }
 
     const noAnswer = await applyTransition(deps, event, "FAMILY_NO_ANSWER", key("FAMILY_NO_ANSWER"), {
-      messages: ["No answer"],
+      messages: [
+        `No answer from ${contact.firstName} (attempt ${callEvent.attemptNumber})`,
+        describeVoicemailOutcome(
+          classifyVoicemail(structuredResult, {
+            supported: deps.calleAdapter.capabilities.voicemail,
+            attemptNumber: callEvent.attemptNumber,
+            maxAttempts: MAX_CONTACT_ATTEMPTS,
+          })
+        ),
+      ],
     });
     if (noAnswer.conflict) return supersede(deps, event, callEventId, lease, outcome);
-    return advance(noAnswer.event, outcome);
+    return advance(noAnswer.event, outcome, true);
   } catch (error) {
     await deps.repository.releaseCallEventLease(callEventId, lease.token);
     throw error;
@@ -732,8 +1065,10 @@ export async function startDemoEvent(
   }
 
   const created = await deps.repository.createEvent(personId);
-  const key = (stage: CascadeStage, transitionEvent: TransitionEvent) =>
-    operationKey(created.runId, stage, transitionEvent);
+  // Attempt 1 explicitly: the same key scheme startCompanionRetry uses for
+  // attempt 2, so the two can never collide (DEC-011).
+  const key = (transitionEvent: TransitionEvent) =>
+    companionStartKey(created.runId, transitionEvent, 1);
 
   // Transition and Companion intent in one transaction, so the event can never
   // sit at CALLING_PERSON with no intent to drive. Key derived from runId, not
@@ -742,12 +1077,13 @@ export async function startDemoEvent(
     deps,
     created,
     "COMPANION_CALL_STARTED",
-    key("start", "COMPANION_CALL_STARTED"),
+    key("COMPANION_CALL_STARTED"),
     {
       messages: ["Check-in call started"],
       intent: {
         agentType: "companion",
         contactId: null,
+        attemptNumber: 1,
         idempotencyKey: `${created.runId}_companion_attempt_1`,
       },
     }
@@ -759,7 +1095,7 @@ export async function startDemoEvent(
     deps,
     started.event,
     "COMPANION_CONVERSATION_STARTED",
-    key("start", "COMPANION_CONVERSATION_STARTED")
+    key("COMPANION_CONVERSATION_STARTED")
   );
 
   // processCompanionResult starts the cascade itself when it reaches

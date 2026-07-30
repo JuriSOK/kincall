@@ -77,6 +77,26 @@ function regionFromLocale(locale: string): string | undefined {
 // (calle.openapi.yaml v0.2.0) via the platform fetch — no SDK dependency,
 // staying literal to CLAUDE.md's "CALL-E REST API" baseline.
 export class LiveCalleAdapter implements CalleAdapter {
+  // Voicemail support is NOT claimed, because CALL-E's own API contract does not
+  // provide it (DEC-011). Checked against calle.openapi.yaml v0.2.0:
+  //
+  //   * `CallStatus` is queued | in_progress | completed | failed | canceled,
+  //     and `AttemptStatus` adds only `dialing` — neither has a voicemail or
+  //     answering-machine state, so a voicemail is indistinguishable from a
+  //     no-answer at the platform level.
+  //   * There is no answering-machine-detection field anywhere in the schema.
+  //   * `failure_code` is an untyped free-form string with no documented
+  //     enumeration, so it cannot be relied on to mean "voicemail".
+  //   * Nothing in the API confirms that a message was recorded.
+  //
+  // The agent can still be *told* to leave a message if it hears a voicemail —
+  // and the Companion prompt does exactly that — but a model self-report is not
+  // a confirmation, and KinCall must never assert something it cannot establish
+  // (§7.5). So the engine records `voicemail_unavailable` in live mode and
+  // continues deterministically to the next contact. Flip this to true only when
+  // CALL-E genuinely documents a voicemail-confirmation mechanism.
+  readonly capabilities = { voicemail: false } as const;
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly webhookUrl: string | undefined;
@@ -152,7 +172,13 @@ export class LiveCalleAdapter implements CalleAdapter {
     }
 
     const body: Record<string, unknown> = {
-      task: buildFamilyTask(input.person, input.contact, input.informationToShare),
+      task: buildFamilyTask(input.person, input.contact, input.informationToShare, {
+        // Always false here in practice: `capabilities.voicemail` is false, so
+        // the orchestrator never sets this. Passed through rather than
+        // hardcoded so the decision stays in one place.
+        mayLeaveVoicemail: input.mayLeaveVoicemail,
+        attemptNumber: input.attemptNumber,
+      }),
       recipients: [recipient],
       result_schema: buildFamilyResultSchema(input.contact.id),
       metadata: {

@@ -27,10 +27,7 @@ export interface CommitTransitionInput {
   // Computed by nextStatus() in TypeScript — no state machine logic in SQL.
   status: EventStatus;
   patch?: Partial<
-    Pick<
-      EventRecord,
-      "priority" | "decision" | "decisionReason" | "currentContactPriority" | "closedAt"
-    >
+    Pick<EventRecord, "decision" | "decisionReason" | "currentContactPriority" | "closedAt">
   >;
   // 0..n timeline entries written under this one operation, so a multi-line
   // step ("Marc answered" + "Visit confirmed — …") is atomic with its status.
@@ -49,6 +46,10 @@ export interface CommitTransitionResult {
 export interface CallIntentInput {
   agentType: AgentType;
   contactId: string | null;
+  // 1 for the first attempt to this subject, 2 for the bounded retry (DEC-011).
+  // Part of the intent's identity: an intent recorded for attempt 1 can never
+  // be adopted by a caller reasoning about attempt 2 (assertIntentMatches).
+  attemptNumber: number;
   idempotencyKey: string;
 }
 

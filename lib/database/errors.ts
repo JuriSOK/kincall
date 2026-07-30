@@ -127,13 +127,18 @@ export function assertIntentMatches(
     callEvent.eventId !== eventId ||
     callEvent.agentType !== expected.agentType ||
     callEvent.contactId !== expected.contactId ||
+    // DEC-011: the attempt number is part of the intent's identity. Without it,
+    // a replaying worker reasoning about attempt 2 could adopt attempt 1's
+    // intent and place a second call under the first attempt's key.
+    callEvent.attemptNumber !== expected.attemptNumber ||
     callEvent.idempotencyKey !== expected.idempotencyKey
   ) {
     throw new CallIntentIntegrityError(
       eventId,
       operationKey,
-      `recorded (${callEvent.agentType}, ${callEvent.contactId}, ${callEvent.idempotencyKey}) ` +
-        `but expected (${expected.agentType}, ${expected.contactId}, ${expected.idempotencyKey})`
+      `recorded (${callEvent.agentType}, ${callEvent.contactId}, attempt ${callEvent.attemptNumber}, ` +
+        `${callEvent.idempotencyKey}) but expected (${expected.agentType}, ${expected.contactId}, ` +
+        `attempt ${expected.attemptNumber}, ${expected.idempotencyKey})`
     );
   }
 }

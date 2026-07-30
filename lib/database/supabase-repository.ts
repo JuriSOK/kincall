@@ -481,6 +481,7 @@ export class SupabaseRepository implements Repository {
       p_patch: input.patch ?? {},
       p_agent_type: input.intent.agentType,
       p_contact_id: input.intent.contactId,
+      p_attempt_number: input.intent.attemptNumber,
       p_idempotency_key: input.intent.idempotencyKey,
     });
     if (error) {

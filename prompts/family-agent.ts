@@ -11,15 +11,43 @@ import type { TrustedContact, VulnerablePerson } from "@/lib/database/types";
 //
 // The contact's phone number is never written into the task text: it belongs in
 // the CALL-E request's `recipients[].phones` only (CLAUDE.md safety rules).
+// The exact wording a voicemail may contain, and nothing more (DEC-011, §17.3).
+// Deliberately says less than the live conversation does: a recording can be
+// heard by anyone in the household, replayed later, or kept indefinitely, so it
+// carries NO incident detail, NO health detail, no interpretation, not the
+// vulnerable person's name, and not any other trusted contact's identity —
+// "the next person in their trusted circle" names nobody.
+export const VOICEMAIL_MESSAGE =
+  "KinCall tried to reach you regarding a loved one. " +
+  "We will now try the next person in their trusted circle. " +
+  "Please consult KinCall for more information.";
+
+export interface FamilyCallAttemptOptions {
+  // 1 for the first call to this contact, 2 for the bounded retry.
+  attemptNumber: number;
+  // Set by the orchestrator only on the FINAL attempt AND only when the CALL-E
+  // integration genuinely supports voicemail (CalleAdapter.capabilities).
+  mayLeaveVoicemail: boolean;
+}
+
 export function buildFamilyTask(
   person: VulnerablePerson,
   contact: TrustedContact,
-  informationToShare: string[]
+  informationToShare: string[],
+  options: FamilyCallAttemptOptions = { attemptNumber: 1, mayLeaveVoicemail: false }
 ): string {
   const facts =
     informationToShare.length > 0
       ? informationToShare.map((fact) => `- ${fact}`).join("\n")
       : "- no specific detail was recorded";
+
+  // Two mutually exclusive instructions, never both: either leave the fixed
+  // message, or leave nothing at all. Never a paraphrase, and never the facts
+  // above — those are for a live conversation only.
+  const voicemailInstruction = options.mayLeaveVoicemail
+    ? `If you reach voicemail or an answering machine, leave exactly this message and nothing else: "${VOICEMAIL_MESSAGE}" ` +
+      "Do not mention a fall, an injury, health, or any detail of the situation, do not name the person you are calling about, and do not name anyone else in the trusted circle."
+    : "If you reach voicemail or an answering machine, do not leave any message at all and end the call — KinCall will try someone else.";
 
   return [
     `Call ${contact.firstName}, who is the ${contact.relationship} of ${person.firstName}, on behalf of KinCall.`,
@@ -33,6 +61,10 @@ export function buildFamilyTask(
     "Do not repeat the rest of the conversation, do not speculate about causes, do not give medical advice, and do not promise that anyone will intervene.",
     `Then ask clearly whether they are able to check on ${person.firstName} today, for example by visiting or by calling her.`,
     "If they can, find out what they intend to do and roughly at what time. If they cannot, ask whether you should contact the next person in the trusted circle.",
+    // KinCall reaches a trusted circle, never an emergency service, and must
+    // never let a relative believe otherwise (§9.4's Limite critique).
+    "You are not an emergency service and KinCall does not contact emergency services. If they ask, say so plainly and tell them to contact their local emergency number themselves if they believe it is needed.",
+    voicemailInstruction,
     "End the call politely as soon as you have a clear answer.",
   ].join(" ");
 }
@@ -54,6 +86,7 @@ export function buildFamilyResultSchema(contactId: string) {
       "estimated_time",
       "contact_next_person",
       "summary",
+      "voicemail_left",
     ],
     properties: {
       contact_id: {
@@ -104,6 +137,13 @@ export function buildFamilyResultSchema(contactId: string) {
         type: "string",
         description:
           "One or two neutral sentences describing what this contact said and what they agreed to do.",
+      },
+      voicemail_left: {
+        type: "string",
+        enum: ["yes", "no", "unknown"],
+        description:
+          "Use yes ONLY if you actually left the voicemail message you were instructed to leave. " +
+          "Use no if you left no message, including when the person answered. Use unknown if you cannot tell.",
       },
     },
   } as const;

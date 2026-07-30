@@ -15,12 +15,22 @@ import { RecordingCalleAdapter } from "./support/recording-adapter";
 
 const LEASE_SECONDS = 90;
 
+// The convergence target: whatever is killed and replayed, the event must end up
+// with exactly this timeline. DEC-011 lengthened it — Julie is now called twice
+// before Marc, because every contact gets one bounded retry, and the second
+// unanswered call leaves the fixed privacy-preserving voicemail. The property
+// under test is unchanged: every crash point converges on ONE history, with no
+// duplicated entry and no skipped contact.
 const EXPECTED_TIMELINE = [
   "Check-in call started",
   "Check-in call completed",
-  "Fall and mobility difficulty detected",
+  "The person mentioned a fall, difficulty moving around.",
   "Calling Julie",
-  "No answer",
+  "No answer from Julie (attempt 1)",
+  "No voicemail attempted — one more attempt is owed",
+  "Calling Julie again (attempt 2)",
+  "No answer from Julie (attempt 2)",
+  "Voicemail left",
   "Calling Marc",
   "Marc answered",
   "Visit confirmed — 17:30",
@@ -139,8 +149,10 @@ describe("crash recovery — call intent is persisted before CALL-E", () => {
   it("4. a Family call accepted before calle_call_id is persisted is recovered, and Nicole is never called", async () => {
     const w = world();
 
-    // The companion attach succeeds; Marc's family attach is the one that dies.
-    const crashed = w.open((r) => crashingRepository(r, { method: "attachCalleCallId", after: 2 }));
+    // The companion attach and both of Julie's succeed; Marc's is the one that
+    // dies. DEC-011 moved Marc from the 2nd attach to the 4th by adding Julie's
+    // bounded retry (companion, julie#1, julie#2, marc).
+    const crashed = w.open((r) => crashingRepository(r, { method: "attachCalleCallId", after: 3 }));
     await expect(startDemoEvent("person_marie", crashed)).rejects.toThrow(InjectedCrash);
 
     const inspect = w.open();
@@ -220,16 +232,20 @@ describe("crash recovery — a replay never calls the wrong person", () => {
     // Die immediately after Marc's intent is committed. Julie's result is
     // therefore still unfinalized while Marc's row already exists — the exact
     // window in which "who has not been called yet" would answer "Nicole".
+    // The 4th intent is Marc's, after companion, julie#1 and julie#2: it is
+    // committed, and the process then dies before the trigger is finalized.
     const crashed = w.open((r) =>
-      crashingAfterRepository(r, { method: "commitTransitionWithCallIntent", after: 2 })
+      crashingAfterRepository(r, { method: "commitTransitionWithCallIntent", after: 3 })
     );
     await expect(startDemoEvent("person_marie", crashed)).rejects.toThrow(InjectedCrash);
 
     const inspect = w.open();
     const event = (await inspect.repository.getEvent("event_001"))!;
-    const julie = (await inspect.repository.listCallEvents(event.id)).find(
+    // Julie's LAST attempt is the trigger whose result was never finalized.
+    const julieCalls = (await inspect.repository.listCallEvents(event.id)).filter(
       (call) => call.contactId === "contact_julie"
-    )!;
+    );
+    const julie = julieCalls[julieCalls.length - 1];
     const marc = (await inspect.repository.listCallEvents(event.id)).find(
       (call) => call.contactId === "contact_marc"
     )!;
@@ -265,6 +281,7 @@ describe("crash recovery — a replay never calls the wrong person", () => {
       intent: {
         agentType: "companion",
         contactId: null,
+        attemptNumber: 1,
         idempotencyKey: `${event.runId}_companion_attempt_1`,
       },
     });
@@ -382,7 +399,7 @@ describe("crash recovery — the full injection matrix", () => {
   ];
 
   it.each(killPoints)(
-    "converges on the same nine-entry timeline after a crash at $method #$after",
+    "converges on the same timeline after a crash at $method #$after",
     async ({ method, after }) => {
       const w = world();
 
@@ -394,34 +411,40 @@ describe("crash recovery — the full injection matrix", () => {
       expect((await deps.repository.getEvent("event_001"))!.status).toBe("CASE_CLOSED");
       expect(await timeline(deps, "event_001")).toEqual(EXPECTED_TIMELINE);
       // No duplicate outbound call, whichever point the crash happened at.
-      expect([...w.adapter.distinctCallIds]).toHaveLength(3);
+      // One companion call + two to Julie (the bounded retry) + one to Marc.
+      // The count is what proves no crash produced a DUPLICATE outbound call;
+      // DEC-011 raised it from 3 to 4 by adding the per-contact retry.
+      expect([...w.adapter.distinctCallIds]).toHaveLength(4);
       expect(w.adapter.contactsCalled()).not.toContain("contact_nicole");
     }
   );
 
-  // DEC-005: when CALL-E REFUSES to place the call, nobody is being rung, so
-  // escalating to human review is the right move — one bad number must not
-  // strand the vulnerable person mid-cascade with no visible state.
-  it("routes a CALL-E refusal into human review without stranding the event", async () => {
+  // DEC-005 escalated a CALL-E refusal to human review, because nobody is being
+  // rung and the event must not stall invisibly. DEC-011 keeps the "must not
+  // stall" half and drops the human dependency: the refusal gets the same bounded
+  // retry as a no-answer, then the cascade moves on, then the event ends visibly
+  // unresolved. One bad number still cannot strand the vulnerable person.
+  it("retries and continues past a CALL-E refusal, ending visibly unresolved", async () => {
     const w = world();
     const deps = w.open();
-    // Julie's call is refused outright.
+    // EVERY family call is refused outright, so the cascade runs out of people.
     deps.calleAdapter.startFamilyCall = async () => {
       throw new Error("network unreachable");
     };
 
     const event = await startDemoEvent("person_marie", deps);
 
-    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
-    expect(await timeline(deps, event.id)).toContain(
-      "Human review required — could not start the call to Julie (network unreachable)"
-    );
-    // No "Calling Nicole", and no intent for her either.
+    expect(event.status).toBe("ATTENTION_UNRESOLVED");
+    expect(event.status).not.toBe("HUMAN_REVIEW_REQUIRED");
+    const messages = await timeline(deps, event.id);
+    expect(messages).toContain("Could not start the call to Julie — network unreachable");
+    expect(messages).toContain("No trusted contact could be reached — attention unresolved");
+    // Everyone was genuinely attempted rather than the cascade stopping at Julie.
     expect(
       (await deps.repository.listCallEvents(event.id)).some(
         (call) => call.contactId === "contact_nicole"
       )
-    ).toBe(false);
+    ).toBe(true);
   });
 
   // The mirror image: CALL-E ACCEPTED the call, and only the recording failed.

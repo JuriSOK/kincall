@@ -51,9 +51,14 @@ describe("POST /api/events/[id]/poll", () => {
       // COMPANION_CALL_STARTED transition rather than forcing the status.
       "Check-in call started",
       "Check-in call completed",
-      "Fall and mobility difficulty detected",
+      "The person mentioned a fall, difficulty moving around.",
       "Calling Julie",
-      "No answer",
+      // DEC-011: Julie gets one bounded retry before the cascade moves to Marc.
+      "No answer from Julie (attempt 1)",
+      "No voicemail attempted — one more attempt is owed",
+      "Calling Julie again (attempt 2)",
+      "No answer from Julie (attempt 2)",
+      "Voicemail left",
       "Calling Marc",
       "Marc answered",
       "Visit confirmed — 17:30",

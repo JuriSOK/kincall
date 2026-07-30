@@ -69,6 +69,8 @@ describe("LiveCalleAdapter.startFamilyCall", () => {
       contact: contact(),
       idempotencyKey: "run_abc_contact_julie_attempt_1",
       informationToShare: ["mentioned a fall", "described difficulty moving around"],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
 
     expect(reference).toEqual({
@@ -112,6 +114,8 @@ describe("LiveCalleAdapter.startFamilyCall", () => {
       contact: contact({ id: "contact_marc", firstName: "Marc" }),
       idempotencyKey: "key",
       informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -129,6 +133,8 @@ describe("LiveCalleAdapter.startFamilyCall", () => {
       contact: contact(),
       idempotencyKey: "key",
       informationToShare: ["mentioned a fall"],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -147,6 +153,8 @@ describe("LiveCalleAdapter.startFamilyCall", () => {
       contact: contact({ phone: "+33 6 98 76 54 32" }),
       idempotencyKey: "key",
       informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
 
     const error = (await call.catch((thrown: unknown) => thrown)) as Error;
@@ -166,6 +174,8 @@ describe("LiveCalleAdapter.startFamilyCall", () => {
       contact: contact({ phone: RESERVED_FICTION_PHONES.julie }),
       idempotencyKey: "key",
       informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
     });
 
     const error = (await call.catch((thrown: unknown) => thrown)) as Error;

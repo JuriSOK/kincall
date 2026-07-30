@@ -146,11 +146,15 @@ describe("POST /api/webhooks/calle", () => {
 
     expect(response.status).toBe(200);
     expect((await repository.getCallEvent(callEvent.id))?.resultProcessedAt).not.toBeNull();
-    // Julie did not answer, so the webhook advances the cascade to Marc, who
-    // confirms — the case closes without a second inbound delivery.
+    // Julie did not answer, so the webhook drives her bounded retry and then the
+    // cascade to Marc, who confirms — all from one inbound delivery (DEC-011).
     expect((await repository.getEvent(event.id))?.status).toBe("CASE_CLOSED");
     expect((await repository.listTimeline(event.id)).map((entry) => entry.message)).toEqual([
-      "No answer",
+      "No answer from Julie (attempt 1)",
+      "No voicemail attempted — one more attempt is owed",
+      "Calling Julie again (attempt 2)",
+      "No answer from Julie (attempt 2)",
+      "Voicemail left",
       "Calling Marc",
       "Marc answered",
       "Visit confirmed — 17:30",

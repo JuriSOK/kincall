@@ -63,7 +63,7 @@ describe("consent — the vulnerable person", () => {
 });
 
 describe("consent — a trusted contact", () => {
-  it("is skipped via FAMILY_CALL_NOT_POSSIBLE and never dialled", async () => {
+  it("is never dialled, and the cascade continues to the next contact", async () => {
     const d = deps();
     // Julie has not consented; Marc and Nicole are untouched.
     const julie = (await d.repository.getTrustedContacts("person_marie"))[0];
@@ -71,16 +71,21 @@ describe("consent — a trusted contact", () => {
 
     const event = await startDemoEvent("person_marie", d);
 
-    // The cascade reaches Julie, cannot call her, and escalates rather than
-    // silently skipping to Marc — a person nobody consented to call must be a
-    // visible, actionable state.
-    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+    // DEC-007's rule is unchanged and absolute: Julie is NEVER dialled, in any
+    // mode. DEC-011 changed only what happens next — the cascade skips her and
+    // continues, rather than the whole event stopping, so an unconsented first
+    // contact can no longer strand the vulnerable person.
+    expect(d.adapter.contactsCalled()).not.toContain("contact_julie");
+    expect(d.adapter.contactsCalled()[0]).toBe("contact_marc");
+    expect(event.status).toBe("CASE_CLOSED");
+
     const messages = (await d.repository.listTimeline(event.id)).map((entry) => entry.message);
-    expect(
-      messages.some((message) => message.includes("cannot call Julie") && message.includes("§17.1"))
-    ).toBe(true);
+    // No misleading "Calling Julie" for a call that never happened, and the skip
+    // is recorded with its reason rather than passing silently.
     expect(messages).not.toContain("Calling Julie");
-    expect(d.adapter.contactsCalled()).toHaveLength(0);
+    expect(
+      messages.some((message) => message.includes("Skipped Julie") && message.includes("§17.1"))
+    ).toBe(true);
   });
 
   it("applies in fake mode too, where nothing is really dialled", async () => {
@@ -90,7 +95,24 @@ describe("consent — a trusted contact", () => {
     d.repository.seedContact({ ...julie, consentStatus: "declined" });
 
     const event = await startDemoEvent("person_marie", d);
-    expect(event.status).toBe("HUMAN_REVIEW_REQUIRED");
+
+    expect(d.adapter.contactsCalled()).not.toContain("contact_julie");
+    expect(event.status).toBe("CASE_CLOSED");
+  });
+
+  it("ends at ATTENTION_UNRESOLVED when nobody in the circle has consented", async () => {
+    const d = deps();
+    for (const contact of await d.repository.getTrustedContacts("person_marie")) {
+      d.repository.seedContact({ ...contact, consentStatus: "pending" });
+    }
+
+    const event = await startDemoEvent("person_marie", d);
+
+    // Not one call placed, and no false reassurance: the event ends visibly
+    // unresolved rather than closing or waiting for a human (DEC-011).
+    expect(d.adapter.contactsCalled()).toHaveLength(0);
+    expect(event.status).toBe("ATTENTION_UNRESOLVED");
+    expect(event.closedAt).toBeNull();
   });
 });
 

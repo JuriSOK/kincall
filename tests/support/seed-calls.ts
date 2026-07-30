@@ -35,6 +35,7 @@ export async function seedPendingCompanionCallIntent(
     intent: {
       agentType: "companion",
       contactId: null,
+      attemptNumber: 1,
       idempotencyKey: `${created.runId}_companion_attempt_1`,
     },
   });
@@ -81,6 +82,7 @@ export async function seedPendingFamilyCallIntent(
     intent: {
       agentType: "family",
       contactId,
+      attemptNumber: 1,
       idempotencyKey: `${attention.runId}_${contactId}_attempt_1`,
     },
   });

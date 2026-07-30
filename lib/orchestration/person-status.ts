@@ -36,8 +36,12 @@ export function describePersonStatus(event: EventRecord | undefined): PersonStat
     case "CONTACT_DECLINED":
     case "CONTACT_CONFIRMED":
       return { label: "Contacting the trusted circle", tone: "attention" };
+    // DEC-011: no new event reaches this. Retained for the historical ones that
+    // still carry it.
     case "HUMAN_REVIEW_REQUIRED":
       return { label: "Human review required", tone: "attention" };
+    case "ATTENTION_UNRESOLVED":
+      return { label: "Unresolved — nobody could be reached", tone: "attention" };
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
       return event.decision === "CONTACT_TRUSTED_PERSON"

@@ -10,7 +10,19 @@ export type EventStatus =
   | "CONTACT_DID_NOT_ANSWER"
   | "CONTACT_DECLINED"
   | "CONTACT_CONFIRMED"
+  // Retained for backward compatibility ONLY (DEC-011). No transition produces
+  // this any more: KinCall's workflow must never stall waiting for a human
+  // operator. Historical events stored with it must stay readable and
+  // displayable, so the value cannot be deleted — see ATTENTION_UNRESOLVED for
+  // what new events reach instead.
   | "HUMAN_REVIEW_REQUIRED"
+  // DEC-011. The autonomous terminal outcome: KinCall detected, or could not
+  // rule out, a need for attention, and no trusted contact accepted or could be
+  // reached. Distinct from CASE_CLOSED (somebody is taking care of it) and from
+  // HUMAN_REVIEW_REQUIRED (which meant "KinCall is waiting for a human"). This
+  // waits for nobody — it is a finished event with an unresolved outcome, kept
+  // visible so a human can act on their own initiative.
+  | "ATTENTION_UNRESOLVED"
   | "CASE_CLOSED";
 
 export type OrchestrationDecision =
@@ -19,17 +31,28 @@ export type OrchestrationDecision =
   | "RETRY_CHECK_IN"
   | "CONTACT_TRUSTED_PERSON"
   | "CONTACT_NEXT_TRUSTED_PERSON"
+  // No longer produced by decideCompanionAction (DEC-011): the workflow has no
+  // operational human-review dependency. Retained so historical events whose
+  // `decision` column holds it still type-check and still render.
   | "REQUEST_HUMAN_REVIEW"
+  // Declared in PRODUCT_SPECIFICATION.md §9.2 but deliberately never produced:
+  // §9.4's configured-escalation procedures need escalation rules that do not
+  // exist in §16's data model (see DEC-010, DEC-011).
   | "ACTIVATE_CONFIGURED_ESCALATION";
 
-export type Priority = "low" | "medium" | "high";
-
-// DEC-009: a person cannot be archived while any of their events is still
-// open. "Open" means not yet at one of these two terminal statuses — matching
-// the check the engine and crash-recovery tests already use elsewhere
-// (e.g. startNextFamilyCall's "another worker already finished this event").
+// A finished event: nothing further will happen to it on its own. DEC-009 uses
+// this to refuse archiving someone mid-check-in, and the engine uses it to
+// refuse calling one more person on top of an already-finished event.
+//
+// ATTENTION_UNRESOLVED is terminal (DEC-011) — the autonomous cascade has run
+// out of eligible contacts, and nothing will resume it. HUMAN_REVIEW_REQUIRED
+// stays listed for the historical events that still carry it.
 export function isTerminalEventStatus(status: EventStatus): boolean {
-  return status === "CASE_CLOSED" || status === "HUMAN_REVIEW_REQUIRED";
+  return (
+    status === "CASE_CLOSED" ||
+    status === "ATTENTION_UNRESOLVED" ||
+    status === "HUMAN_REVIEW_REQUIRED"
+  );
 }
 
 export type TransitionEvent =
@@ -39,13 +62,23 @@ export type TransitionEvent =
   | "COMPANION_CALL_ENDED"
   | "COMPANION_RESULT_NO_ACTION"
   | "COMPANION_RESULT_ATTENTION"
+  // Still produced, but its destination changed in DEC-011: a companion result
+  // KinCall cannot validate now degrades to the attention cascade instead of to
+  // human review. The literal is kept so the operation ledger stays a faithful
+  // audit trail of *why* an event took that edge.
   | "COMPANION_RESULT_MALFORMED"
+  // No longer produced (DEC-011); retained for historical ledger rows.
   | "COMPANION_RESULT_UNCERTAIN"
   | "FAMILY_CALL_STARTED"
   | "FAMILY_NO_ANSWER"
   | "FAMILY_DECLINED"
   | "FAMILY_CONFIRMED"
+  // Same as COMPANION_RESULT_MALFORMED: still produced, now continues the
+  // cascade rather than ending the event.
   | "FAMILY_RESULT_MALFORMED"
+  // No longer produced (DEC-011): a contact who cannot lawfully or technically
+  // be called is now SKIPPED and the cascade continues, rather than the whole
+  // event stopping. Retained for historical ledger rows.
   | "FAMILY_CALL_NOT_POSSIBLE"
   | "NO_CONTACTS_REMAINING"
   | "CASE_CLOSED_EVENT";

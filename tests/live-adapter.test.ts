@@ -66,6 +66,7 @@ describe("LiveCalleAdapter", () => {
       eventId: "event_001",
       person: person(),
       idempotencyKey: "event_001_companion_attempt_1",
+      attemptNumber: 1,
     });
 
     expect(reference).toEqual({
@@ -116,6 +117,7 @@ describe("LiveCalleAdapter", () => {
       eventId: "event_001",
       person: person(),
       idempotencyKey: "key",
+      attemptNumber: 1,
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -137,6 +139,7 @@ describe("LiveCalleAdapter", () => {
       eventId: "event_001",
       person: person({ phone: "+33 6 12 34 56 78" }),
       idempotencyKey: "key",
+      attemptNumber: 1,
     });
 
     const error = (await call.catch((thrown: unknown) => thrown)) as Error;
@@ -165,6 +168,7 @@ describe("LiveCalleAdapter", () => {
       eventId: "event_001",
       person: person({ preferredLanguage: "fr" }),
       idempotencyKey: "key",
+      attemptNumber: 1,
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -245,6 +249,7 @@ describe("LiveCalleAdapter", () => {
       eventId: "event_001",
       person: person(),
       idempotencyKey: "key",
+      attemptNumber: 1,
     });
     await expect(call).rejects.toBeInstanceOf(CalleApiError);
     await expect(call).rejects.toMatchObject({ code: "invalid_phone", message: "Bad phone number." });
@@ -265,7 +270,12 @@ describe("LiveCalleAdapter", () => {
     });
 
     await expect(
-      adapter.startCompanionCall({ eventId: "event_001", person: person(), idempotencyKey: "key" })
+      adapter.startCompanionCall({
+        eventId: "event_001",
+        person: person(),
+        idempotencyKey: "key",
+        attemptNumber: 1,
+      })
     ).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -285,6 +295,7 @@ describe("LiveCalleAdapter", () => {
       eventId: "event_001",
       person: person({ phone: RESERVED_FICTION_PHONES.marie }),
       idempotencyKey: "key",
+      attemptNumber: 1,
     });
 
     const error = (await call.catch((thrown: unknown) => thrown)) as Error;

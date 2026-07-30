@@ -243,7 +243,6 @@ export class InMemoryRepository implements Repository {
       runId: randomUUID(),
       personId,
       status: "SCHEDULED",
-      priority: null,
       currentContactPriority: null,
       decision: null,
       decisionReason: null,
@@ -473,22 +472,40 @@ export class InMemoryRepository implements Repository {
     return { event: this.store.events.get(eventId)!, callEvent };
   }
 
+  // Mirrors migration 0008's uniqueness rules exactly (DEC-011). The bound is
+  // no longer "one call per subject" but "one call per subject per attempt": a
+  // retry is legitimate, a *duplicate of the same attempt* never is. The
+  // attempt number is supplied by the engine from a persisted count, so this
+  // cannot become an unbounded loop — see MAX_COMPANION_ATTEMPTS and
+  // MAX_CONTACT_ATTEMPTS.
   private assertIntentInvariants(eventId: string, intent: CallIntentInput): void {
     const siblings = [...this.store.callEvents.values()].filter((c) => c.eventId === eventId);
-    // Exactly one Companion intent per event.
-    if (intent.agentType === "companion" && siblings.some((c) => c.agentType === "companion")) {
+
+    // One Companion call per attempt per event (idx_call_events_one_companion_attempt).
+    if (
+      intent.agentType === "companion" &&
+      siblings.some(
+        (c) => c.agentType === "companion" && c.attemptNumber === intent.attemptNumber
+      )
+    ) {
       throw new CallIntentIntegrityError(
         eventId,
         intent.idempotencyKey,
-        "a companion call already exists for this event"
+        `companion attempt ${intent.attemptNumber} already exists for this event`
       );
     }
-    // One Family attempt per contact per event (DEC-005).
-    if (intent.contactId !== null && siblings.some((c) => c.contactId === intent.contactId)) {
+    // One Family call per contact per attempt per event
+    // (unique (event_id, contact_id, attempt_number)).
+    if (
+      intent.contactId !== null &&
+      siblings.some(
+        (c) => c.contactId === intent.contactId && c.attemptNumber === intent.attemptNumber
+      )
+    ) {
       throw new CallIntentIntegrityError(
         eventId,
         intent.idempotencyKey,
-        `a call to "${intent.contactId}" already exists for this event`
+        `attempt ${intent.attemptNumber} to "${intent.contactId}" already exists for this event`
       );
     }
   }
@@ -550,6 +567,7 @@ export class InMemoryRepository implements Repository {
         eventId: input.eventId,
         agentType: input.intent.agentType,
         contactId: input.intent.contactId,
+        attemptNumber: input.intent.attemptNumber,
         calleCallId: null,
         idempotencyKey: input.intent.idempotencyKey,
         status: "starting",

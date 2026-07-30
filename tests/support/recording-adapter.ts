@@ -6,7 +6,7 @@ import type {
   CompanionCallInput,
   FamilyCallInput,
 } from "@/lib/calle/adapter";
-import { FakeCalleAdapter } from "@/lib/calle/fake-adapter";
+import { FakeCalleAdapter, type FakeScenarioId } from "@/lib/calle/fake-adapter";
 
 // FakeCalleAdapter mints a fresh random call id on every start, so it does not
 // model CALL-E's Idempotency-Key contract: repeating a request under a key
@@ -22,8 +22,16 @@ export class RecordingCalleAdapter implements CalleAdapter {
   readonly startFamilyCallSpy = vi.fn();
   readonly distinctCallIds = new Set<string>();
 
-  private readonly inner = new FakeCalleAdapter();
+  private readonly inner: FakeCalleAdapter;
   private readonly byIdempotencyKey = new Map<string, string>();
+
+  constructor(options: { scenario?: FakeScenarioId } = {}) {
+    this.inner = new FakeCalleAdapter(options);
+  }
+
+  get capabilities() {
+    return this.inner.capabilities;
+  }
 
   private async remember(key: string, place: () => Promise<CallReference>): Promise<CallReference> {
     const existing = this.byIdempotencyKey.get(key);

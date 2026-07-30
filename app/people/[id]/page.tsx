@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { listDemoScenarios } from "@/lib/calle/demo-scenarios";
 import { getRepository } from "@/lib/database/store";
 import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
+import { SafetyNotice } from "@/app/events/[id]/safety-notice";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
 
@@ -29,6 +31,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
     repository.getActiveTrustedContacts(person.id),
     repository.listEvents(person.id, 20),
   ]);
+
+  // Fake-mode demo scenarios (DEC-011). Undefined in live mode, which is what
+  // keeps the selector out of the interface entirely rather than merely disabled.
+  const demoScenarios = listDemoScenarios();
 
   // §14.2's Status line, derived from the most recent event.
   const status = describePersonStatus(events[0]);
@@ -61,6 +67,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
 
+      <SafetyNotice />
       <CallReadinessNotice readiness={readiness} subject={person.firstName} />
 
       <section className="flex flex-col gap-3">
@@ -80,7 +87,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             <Link href={`/people/${person.id}/contacts`} className="underline">
               Add the first one
             </Link>{" "}
-            — without one, a concerning check-in can only go to human review.
+            — without one, KinCall has nobody to call when a check-in needs attention, and the
+            event can only end unresolved.
           </p>
         ) : (
           <ol className="flex flex-col gap-2">
@@ -146,6 +154,9 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         // (§17.1 / DEC-007), so the button explains itself rather than failing
         // after the click.
         blockedReason={readiness.kind === "consent_missing" ? readiness.message : undefined}
+        // Fake mode only (DEC-011): in live mode this is undefined, so no selector
+        // is rendered and no scenario is ever sent.
+        scenarios={demoScenarios}
       />
     </main>
   );

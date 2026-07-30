@@ -17,12 +17,20 @@ import { seedPendingCompanionCallIntent } from "./support/seed-calls";
 
 const LEASE_SECONDS = 90;
 
+// DEC-011 lengthened this: Julie is called twice before Marc (the bounded
+// per-contact retry), and the second unanswered call leaves the fixed voicemail.
+// The property under test is unchanged — every racing worker converges on ONE
+// history, with no duplicated entry.
 const EXPECTED_TIMELINE = [
   "Check-in call started",
   "Check-in call completed",
-  "Fall and mobility difficulty detected",
+  "The person mentioned a fall, difficulty moving around.",
   "Calling Julie",
-  "No answer",
+  "No answer from Julie (attempt 1)",
+  "No voicemail attempted — one more attempt is owed",
+  "Calling Julie again (attempt 2)",
+  "No answer from Julie (attempt 2)",
+  "Voicemail left",
   "Calling Marc",
   "Marc answered",
   "Visit confirmed — 17:30",
@@ -64,6 +72,7 @@ describe("concurrency — only one worker may process a result", () => {
     const stalled = w.open();
     stalled.calleAdapter = {
       ...new FakeCalleAdapter(),
+      capabilities: { voicemail: true },
       startCompanionCall: w.adapter.startCompanionCall.bind(w.adapter),
       startFamilyCall: w.adapter.startFamilyCall.bind(w.adapter),
       async getCallResult(callId: string): Promise<CallResult> {
@@ -91,9 +100,15 @@ describe("concurrency — only one worker may process a result", () => {
     const deps = w.open();
     expect((await deps.repository.getEvent(event.id))!.status).toBe("CASE_CLOSED");
     expect(await timeline(deps, event.id)).toEqual(EXPECTED_TIMELINE);
-    // Exactly one call per contact, and Nicole is untouched.
-    expect([...w.adapter.distinctCallIds]).toHaveLength(3);
-    expect(w.adapter.contactsCalled()).toEqual(["contact_julie", "contact_marc"]);
+    // One companion call + two to Julie (her bounded retry) + one to Marc: the
+    // count is what proves the race produced no DUPLICATE outbound call. Each
+    // attempt happens exactly once, and Nicole is untouched.
+    expect([...w.adapter.distinctCallIds]).toHaveLength(4);
+    expect(w.adapter.contactsCalled()).toEqual([
+      "contact_julie",
+      "contact_julie",
+      "contact_marc",
+    ]);
   });
 
   it("survives a webhook and a poll racing the same companion result", async () => {
@@ -174,6 +189,7 @@ describe("concurrency — one intent per operation key", () => {
       intent: {
         agentType: "companion" as const,
         contactId: null,
+        attemptNumber: 1,
         idempotencyKey: `${event.runId}_companion_attempt_1`,
       },
     };
@@ -205,6 +221,7 @@ describe("concurrency — one intent per operation key", () => {
       intent: {
         agentType: "family",
         contactId: "contact_julie",
+        attemptNumber: 1,
         idempotencyKey: `${event.runId}_contact_julie_attempt_1`,
       },
     });
@@ -220,6 +237,7 @@ describe("concurrency — one intent per operation key", () => {
         intent: {
           agentType: "family",
           contactId: "contact_nicole",
+          attemptNumber: 1,
           idempotencyKey: `${event.runId}_contact_nicole_attempt_1`,
         },
       })
@@ -276,6 +294,9 @@ describe("concurrency — the engine carries no state across a restart", () => {
     const stalled = w.open();
     stalled.calleAdapter = {
       ...stalled.calleAdapter,
+      // `capabilities` is a prototype getter, which an object spread does not
+      // copy — carried over explicitly so this stand-in is a complete adapter.
+      capabilities: stalled.calleAdapter.capabilities,
       startCompanionCall: w.adapter.startCompanionCall.bind(w.adapter),
       startFamilyCall: w.adapter.startFamilyCall.bind(w.adapter),
       async getCallResult(callId: string): Promise<CallResult> {

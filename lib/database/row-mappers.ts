@@ -1,5 +1,5 @@
 import type { AgentType } from "../calle/adapter";
-import type { EventStatus, OrchestrationDecision, Priority } from "../orchestration/states";
+import type { EventStatus, OrchestrationDecision } from "../orchestration/states";
 import { resolveConfiguredPhone } from "./seed";
 import type {
   CallEventRecord,
@@ -80,7 +80,7 @@ export interface EventRow {
   run_id: string;
   person_id: string;
   status: string;
-  priority: string | null;
+  // events.priority column removed entirely (DEC-012); no field here to match.
   current_contact_priority: number | null;
   decision: string | null;
   decision_reason: string | null;
@@ -94,7 +94,6 @@ export function toEvent(row: EventRow): EventRecord {
     runId: row.run_id,
     personId: row.person_id,
     status: row.status as EventStatus,
-    priority: row.priority as Priority | null,
     currentContactPriority: row.current_contact_priority,
     decision: row.decision as OrchestrationDecision | null,
     decisionReason: row.decision_reason,
@@ -108,7 +107,6 @@ export function toEvent(row: EventRow): EventRecord {
 export function fromEventPatch(patch: Partial<EventRecord>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   if ("status" in patch) row.status = patch.status;
-  if ("priority" in patch) row.priority = patch.priority;
   if ("currentContactPriority" in patch) row.current_contact_priority = patch.currentContactPriority;
   if ("decision" in patch) row.decision = patch.decision;
   if ("decisionReason" in patch) row.decision_reason = patch.decisionReason;
@@ -122,6 +120,7 @@ export interface CallEventRow {
   event_id: string;
   agent_type: string;
   contact_id: string | null;
+  attempt_number: number;
   calle_call_id: string | null;
   idempotency_key: string;
   status: string;
@@ -140,6 +139,10 @@ export function toCallEvent(row: CallEventRow): CallEventRecord {
     eventId: row.event_id,
     agentType: row.agent_type as AgentType,
     contactId: row.contact_id,
+    // Defaulted for rows written before 0008 added the column (DEC-011): every
+    // pre-existing call was, by the old one-call-per-contact constraint, the
+    // first and only attempt to its subject.
+    attemptNumber: row.attempt_number ?? 1,
     calleCallId: row.calle_call_id,
     idempotencyKey: row.idempotency_key,
     status: row.status as CallEventStatus,

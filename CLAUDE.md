@@ -79,7 +79,9 @@ KinCall code:
 - enforces idempotency;
 - updates event state and timeline;
 - stops after confirmed intervention;
-- routes uncertain cases to human review.
+- retries the person and each contact within a bounded policy;
+- treats every uncertain case as needing attention rather than as safe, and
+  reaches a real person rather than a review queue (DEC-011).
 
 Claude Code:
 
@@ -109,15 +111,25 @@ Every orchestration transition must be tested.
 
 Minimum scenarios:
 
-- no concerning signal → close;
+- no attention signal → close;
 - fall plus mobility difficulty → contact trusted person;
-- first contact does not answer → call next contact;
-- contact declines → call next contact;
+- any other stated signal (pain or injury, distress, unusual confusion, an
+  abnormal conversation ending, another unusual event) → contact trusted person;
+- explicit request for help → contact trusted person, even when the model
+  reported attention_required: no;
+- person not reached → one retry, then contact trusted person;
+- first contact does not answer → one retry, then call next contact;
+- contact declines → call next contact, with no retry of the decliner;
 - contact confirms → stop cascade and close;
-- no contacts remaining → human review;
+- unconsented or archived contact → skip without calling, then continue;
+- no contacts remaining → ATTENTION_UNRESOLVED (DEC-011: never human review);
 - duplicate webhook → no duplicate transition;
 - duplicate retry → no duplicate outbound call;
-- malformed structured result → human review.
+- bounded retries → never a third attempt to the same subject;
+- malformed structured result → attention cascade (DEC-011: never human review,
+  and never a close);
+- voicemail unsupported → record `voicemail_unavailable`, claim no message, and
+  continue.
 
 Use fake mode for the majority of development and automated tests.
 

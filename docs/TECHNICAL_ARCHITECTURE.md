@@ -70,7 +70,9 @@ The KinCall orchestrator is deterministic TypeScript code. It is responsible for
 - running the ordered contact cascade;
 - preventing duplicate calls;
 - stopping the cascade after a confirmed intervention;
-- sending uncertain cases to human review.
+- retrying the person and each contact within a bounded policy (DEC-011);
+- ending an event that nobody could be reached for at `ATTENTION_UNRESOLVED`,
+  without waiting for a human operator (DEC-011).
 
 A language model must never freely invent or select a phone number.
 
@@ -138,28 +140,60 @@ no
 unknown
 ```
 
-Example Companion result:
+Example Companion result. The shape is generic rather than fall-specific
+(DEC-011): `attention_required` is a binary *operational* judgement about whether
+somebody should check in, never a medical or severity assessment, and
+`attention_reasons` comes from a closed list of codes so a free-text reason
+cannot smuggle in a medical interpretation. See `lib/calle/schemas.ts` for the
+authoritative shape.
 
 ```json
 {
-  "conversation_summary": "Marie states that she fell yesterday and has difficulty walking.",
+  "neutral_summary": "Marie said she fell yesterday and is finding it hard to walk.",
+  "person_reached": "yes",
+  "explicit_help_requested": "no",
   "fall_mentioned": "yes",
   "mobility_difficulty": "yes",
+  "pain_or_injury_mentioned": "unknown",
+  "unusual_confusion": "no",
+  "distress_expressed": "no",
+  "conversation_ended_normally": "yes",
   "does_not_want_to_disturb_family": "yes",
-  "attention_level": "high"
+  "other_attention_signal": "no",
+  "attention_required": "yes",
+  "attention_reasons": ["fall", "mobility_difficulty"],
+  "confidence": "high"
 }
 ```
 
-Example deterministic rule:
+The deterministic rule order (DEC-011/DEC-011 revision; `lib/orchestration/decide-companion-action.ts`
+is authoritative). CALL-E may interpret the conversation, but it does not control
+the workflow — rules 1–3 override whatever `attention_required` the model reported.
+KinCall's operational decision is **binary** — close, or contact the trusted
+circle — with no priority tier: an earlier design assigned an `events.priority`
+column (high/medium/low), but high and medium never triggered different cascade
+behaviour, so the tier was removed before it shipped, and the column itself was
+later dropped entirely (docs/DECISION_LOG.md DEC-011 "Priority removed" and
+DEC-012):
 
-```ts
-if (
-  result.fall_mentioned === "yes" &&
-  result.mobility_difficulty === "yes"
-) {
-  return "CONTACT_TRUSTED_PERSON";
-}
+```text
+1. not reached, retry unused        -> RETRY_CHECK_IN
+2. not reached, retry used up       -> CONTACT_TRUSTED_PERSON
+3. explicit_help_requested === yes  -> CONTACT_TRUSTED_PERSON
+4. any stated concerning signal     -> CONTACT_TRUSTED_PERSON
+5. attention_required === yes       -> CONTACT_TRUSTED_PERSON
+6. attention_required === unknown   -> CONTACT_TRUSTED_PERSON (by precaution)
+7. reached AND ended normally AND
+   attention_required === no AND
+   no stated signal                 -> LOG_AND_CLOSE
 ```
+
+Rule 7 is the only closure path and requires positive evidence on every axis.
+Anything else — including a result that fails validation — reaches the trusted
+circle: ambiguity must never be reported as "nothing unusual" (§7.5). Explicit
+help and failure to reach the person remain deterministic cascade triggers
+regardless of the model's own report; this is an operational decision, not
+medical triage.
 
 ---
 
@@ -180,7 +214,13 @@ type EventStatus =
   | "CONTACT_DID_NOT_ANSWER"
   | "CONTACT_DECLINED"
   | "CONTACT_CONFIRMED"
+  // Retained for historical events only (DEC-011). No transition produces it:
+  // KinCall's workflow must never stall waiting for a human operator.
   | "HUMAN_REVIEW_REQUIRED"
+  // DEC-011. The autonomous terminal outcome: attention was detected or could
+  // not be ruled out, and no trusted contact accepted or could be reached.
+  // Waits for nobody; kept visible so a human can act on their own initiative.
+  | "ATTENTION_UNRESOLVED"
   | "CASE_CLOSED";
 ```
 
@@ -269,7 +309,6 @@ Minimum tables:
 - id
 - person_id
 - status
-- priority
 - current_contact_priority
 - decision
 - decision_reason
@@ -394,8 +433,10 @@ KinCall must:
 - identify itself as an automated assistant;
 - transmit only necessary information;
 - avoid medical diagnosis and advice;
-- never call real emergency services in the MVP;
-- require human review for uncertain critical situations;
+- never call real emergency services — in any mode, and with no code path that
+  could reach one;
+- treat every uncertain situation as needing attention rather than as safe, and
+  reach a real person rather than a review queue (DEC-011);
 - mask telephone numbers in public logs and documentation;
 - use fake or reserved numbers in examples.
 

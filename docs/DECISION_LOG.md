@@ -540,6 +540,505 @@ unchanged, and no CALL-E call is ever placed as part of deletion.
 
 ---
 
+## DEC-010 — `person_requests_help` and `unusual_confusion`: two collected Companion signals the decision rule never read
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+An audit of whether KinCall should gain an "Emergency feature" (requested separately from this
+change) surfaced a live defect rather than a case for a new feature. `prompts/companion-agent.ts`
+instructs the extraction model to set `person_requests_help: "yes"` only "if the person explicitly
+asked for help or for someone to be contacted." `lib/calle/schemas.ts` has validated and normalized
+this field since DEC-002 (`personRequestsHelp` on `NormalizedCompanionResult`). But
+`lib/orchestration/decide-companion-action.ts` never read it, and never read `unusualConfusion`
+either.
+
+Concretely: `person_reached: "yes", person_requests_help: "yes", fall_mentioned: "no",
+mobility_difficulty: "no"` fell through every branch to `LOG_AND_CLOSE` / `priority: "low"` /
+`reason: "No unusual signal detected."` — closing the event as `CASE_CLOSED` and stating on the
+dashboard "KinCall reviewed the check-in and found nothing unusual", to someone who had explicitly
+asked for help. This is the same class of defect DEC-003 fixed for an unanswered call: a signal
+`PRODUCT_SPECIFICATION.md` §9.1 requires collecting was collected, validated and normalized, and
+then read by nothing. §9.2's "Exemple de logique simplifiée" predates this rule and does not
+enumerate `person_requests_help`; it is illustrative, not exhaustive, and §9.1 already mandates
+collecting the field. Zero tests exercised `person_requests_help` or `unusual_confusion` as a
+non-`"no"` decision input before this change.
+
+### Decision
+
+1. `decideCompanionAction` gains two new branches, in this exact order:
+   - `personRequestsHelp === "yes"` → `CONTACT_TRUSTED_PERSON`, `priority: "high"`. Checked
+     immediately after the existing `personReached === "no"` guard and **before** the fall /
+     mobility-difficulty rules — an explicit request for help outranks an inferred one. `"yes"`
+     means the person explicitly asked, per the prompt's own instruction to the extraction model;
+     `"unknown"` is deliberately excluded from this branch and falls through to the ordinary rules
+     instead of escalating on a guess, so an ambiguous call never floods the trusted circle.
+   - `unusualConfusion === "yes"` → `REQUEST_HUMAN_REVIEW`, `priority: "medium"`. Placed after the
+     fall rules and before the existing `personReached === "unknown"` check. Confusion is an
+     *interpretation*, not a stated fact (§17.6), so it routes to human review rather than the
+     trusted-contact cascade — it must never escalate to the family on a guess.
+2. The full rule order is now: `personReached === "no"` → `personRequestsHelp === "yes"` →
+   (`fallMentioned === "yes" && mobilityDifficulty === "yes"`) → `fallMentioned === "yes"` alone →
+   `unusualConfusion === "yes"` → `personReached === "unknown"` → `LOG_AND_CLOSE`.
+3. No change to `collectInformationToShare` (`lib/orchestration/engine.ts`): it already mapped
+   `person_requests_help === "yes"` → `"asked for help"` in the Family Agent's `informationToShare`
+   regardless of which decision rule fired, so the family already hears the right thing, worded
+   with preserved uncertainty (§17.5), once the decision reaches them.
+4. `event.priority` — already persisted, already a valid enum value, previously displayed nowhere —
+   is now shown on the event page. A static, unconditional safety notice ("KinCall is not an
+   emergency service and does not contact emergency services...") is added to both the event page
+   and the person page. It does not vary with detected severity, decision or priority, so it can
+   never itself function as a severity signal.
+5. `ACTIVATE_CONFIGURED_ESCALATION` (declared in `lib/orchestration/states.ts`'s
+   `OrchestrationDecision` union) remains deliberately unproduced. §9.4's configured-escalation
+   procedures (professional carer, teleassistance, designated manager) require escalation rules
+   that do not exist in §16's data model; building them means new tables and new product scope,
+   which is out of bounds for a decision-rule correction. It stays a dead enum value, same as
+   `PERSON_DID_NOT_ANSWER` was pre-DEC-003, until a future decision explicitly takes it on.
+
+### Why this is not an emergency-service feature
+
+No code path added or touched by this change calls, offers to call, or routes toward any emergency
+service, in any mode. `CONTACT_TRUSTED_PERSON` is the same trusted-circle cascade the fall rules
+already used — same consent enforcement (DEC-007), same untrusted-`contact_id` handling (DEC-005),
+same stop-on-confirmation behaviour, same one-attempt-per-contact. This is a decision-rule
+correction that makes an already-collected, already-required signal reachable, not a new workflow,
+not a new state, and not broadened scope. `PRODUCT_SPECIFICATION.md` §13.3, §17.4 and §9.4's
+prohibition on real emergency-service calls, and `CLAUDE.md`'s equivalent rule, are untouched.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted, no product concept is renamed, no new
+workflow is introduced, and no out-of-scope feature moves into the MVP. `CONTACT_TRUSTED_PERSON` and
+`REQUEST_HUMAN_REVIEW` are both frozen §9.2 decisions, already implemented and already reachable
+from other rules; this change adds two more, already-specified inputs that reach them.
+`git diff lib/orchestration/states.ts lib/orchestration/transitions.ts` is empty: no new
+`EventStatus`, no new `TransitionEvent`. No migration: `priority` and `decision` are existing,
+already-valid columns and enum members.
+
+### Consequences
+
+- Six new unit tests on `decideCompanionAction` (`tests/state-machine.test.ts`) cover: help-only
+  signal escalates at high priority rather than closing; help request wins over the fall rules;
+  help request is not trusted when the person was not reached; `"unknown"` does not escalate;
+  unusual confusion requests human review rather than the cascade; help request wins over mere
+  confusion.
+- Five new engine-level tests (`tests/engine.test.ts`) cover: the full Julie→Marc cascade running
+  and closing at high priority on a help-only signal; the Family Agent receiving "asked for help" in
+  `informationToShare`; unusual confusion alone routing to human review with no family call placed;
+  an `"unknown"` help-request value not auto-escalating; and DEC-007 consent enforcement still
+  holding (an unconsented contact escalates the whole event to `HUMAN_REVIEW_REQUIRED` with zero
+  family calls placed, unaffected by the help-request trigger).
+- The existing Marie → Julie → Marc fall-and-mobility-difficulty scenario is unchanged: its
+  branch, priority and timeline wording are untouched by this change.
+- No database migration. No CALL-E prompt/schema field is added; both fields were already required
+  and normalized.
+
+### Approval
+
+Project owner approval: approved (explicitly requested as "the approved safety fix identified
+during the Emergency-feature audit... not a new Emergency feature... a correction to the existing
+Companion decision logic"), with the explicit constraints that no emergency-service calling, no new
+emergency state, no `ACTIVATE_CONFIGURED_ESCALATION` implementation and no database migration be
+introduced.
+
+---
+
+## DEC-011 — Autonomous attention detection, bounded retries, and `ATTENTION_UNRESOLVED`
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+KinCall's orchestration was fall-shaped and, at three points, human-shaped. The Companion result
+enumerated `fall_mentioned` / `mobility_difficulty` and little else, so a person describing pain, an
+injury, distress, or any other unusual event produced no signal the decision rule could act on.
+`recommended_attention_level` existed but was described to the model in fall terms
+("high when a fall and mobility difficulty are both present") and was read by nothing. And three
+paths ended at `HUMAN_REVIEW_REQUIRED` — a malformed result, a contact who could not lawfully be
+called, and an exhausted circle — each of which stopped the workflow until a person intervened.
+`RETRY_CHECK_IN` had the same shape: DEC-003 deliberately left it meaning "a retry is owed", with
+no code to place one.
+
+This is an approved **product evolution**, not a defect fix: the objective is that KinCall handles
+more situations than falls, estimates an operational level of attention, and runs to a terminal
+state on its own. It is recorded here in full because it changes frozen behaviour.
+
+### Decision
+
+**1. A generic operational attention model.** `CompanionStructuredResult` is widened to carry
+`explicit_help_requested`, `fall_mentioned`, `mobility_difficulty`, `pain_or_injury_mentioned`,
+`unusual_confusion`, `distress_expressed`, `conversation_ended_normally`, `other_attention_signal`,
+`does_not_want_to_disturb_family`, a `neutral_summary`, a `confidence`, a binary
+`attention_required` of `yes | no | unknown`, and `attention_reasons` from a **closed** list of
+reason codes. The closed list is deliberate: a free-text reason could smuggle in a medical
+interpretation.
+
+`attention_required` is explicitly **operational, not medical**: "should somebody check in", never
+"how serious is this". The prompt asks for short neutral clarification questions (whether something
+unusual happened, whether they can move around as usual, whether anyone is with them, whether they
+want their circle told) and forbids symptom questions, severity ratings and medical checklists.
+
+*(Revision, applied before this decision shipped — see "Priority removed" below: the field was
+initially a four-value `attention_level` of `none | attention | high | unknown`. It is documented
+here in its final, binary form.)*
+
+**2. The AI interprets; the state machine decides.** `decideCompanionAction` evaluates, in order:
+
+1. `personReached === "no"` and the retry not yet used → `RETRY_CHECK_IN`
+2. `personReached === "no"` after the bounded retry → `CONTACT_TRUSTED_PERSON`
+3. `explicitHelpRequested === "yes"` → `CONTACT_TRUSTED_PERSON`
+4. any explicitly stated signal (fall, mobility difficulty, pain or injury, unusual confusion,
+   distress, an abnormal ending, another unusual signal) → `CONTACT_TRUSTED_PERSON`
+5. `attentionRequired === "yes"` → `CONTACT_TRUSTED_PERSON`
+6. `attentionRequired === "unknown"` → `CONTACT_TRUSTED_PERSON` (by precaution)
+7. reached **and** ended normally **and** `attentionRequired === "no"` **and** no stated signal →
+   `LOG_AND_CLOSE`
+
+There is no priority tier anywhere in this order — see "Priority removed" below. Rules 2 and 3
+**override** the model's own report, because failing to reach someone and being explicitly asked
+for help are operational facts, not judgements. Rule 7 is the only closure path and requires
+positive evidence on every axis; everything else — including unknown reachability, an unconfirmed
+ending, and a result that fails validation — reaches the trusted circle. Ambiguity is never
+presented as "nothing unusual" (§7.5).
+
+**3. No operational human-review dependency.** No transition reaches `HUMAN_REVIEW_REQUIRED` any
+more. The three former paths now:
+
+- a malformed/failed Companion result → `COMPANION_RESULT_MALFORMED` → **`ATTENTION_REQUIRED`** and
+  the cascade runs (an unreadable check-in is exactly when someone should look in);
+- a malformed Family result → `FAMILY_RESULT_MALFORMED` → **`CONTACT_DID_NOT_ANSWER`**, so the
+  contact still gets their retry and everyone after them is still called;
+- an exhausted or entirely ineligible circle → `NO_CONTACTS_REMAINING` → **`ATTENTION_UNRESOLVED`**.
+
+A result naming the wrong contact is still never acted on (DEC-005 / CLAUDE.md: a model must never
+select who is called) — it is disregarded, and the cascade continues past it without redialling.
+
+**4. `ATTENTION_UNRESOLVED`.** A new terminal state, because no existing one expresses "KinCall
+detected, or could not rule out, a need for attention, and no trusted contact accepted or could be
+reached". `CASE_CLOSED` would assert somebody is handling it; `NO_ACTION_REQUIRED` would assert
+nothing was wrong; `HUMAN_REVIEW_REQUIRED` meant "KinCall is waiting". This one waits for nobody:
+it is a finished event with an unresolved outcome, kept visible so a human can act on their own
+initiative. `closedAt` is never set. `isTerminalEventStatus` includes it.
+
+**5. Bounded retries, persisted.** Exactly one retry of the vulnerable person
+(`MAX_COMPANION_ATTEMPTS = 2`) and exactly one per trusted contact (`MAX_CONTACT_ATTEMPTS = 2`). A
+contact who **answered and declined** is not retried — a definitive no needs no second call. A
+no-answer, a technical failure and an unreadable result all are. The attempt number is read from the
+persisted `call_events.attempt_number`, never from a counter in memory, so a restart resumes at the
+correct attempt; the uniqueness rules would reject a duplicate intent even if the engine asked for
+one. Idempotency keys are `<runId>_companion_attempt_<n>` and `<runId>_<contactId>_attempt_<n>`, and
+operation keys gained an attempt discriminator — without it, "call Julie again" and "call Marc" are
+the same key and the second would silently no-op.
+
+**6. Consent still absolute; the consequence changed.** DEC-007's rule is untouched: no call is
+placed to anyone whose consent is not `confirmed`, in **any** mode. What changed is what happens
+next — the cascade **skips** them, records the skip and its reason on the timeline, and calls the
+next eligible contact, instead of the whole event stopping. This reverses DEC-007's cascade
+behaviour, deliberately: stopping meant one unconsented first contact could leave a vulnerable
+person with nobody called at all. If every contact is skipped, the event still ends visibly, at
+`ATTENTION_UNRESOLVED`.
+
+**7. Voicemail: capability-gated, and NOT proven for CALL-E.** `CalleAdapter` gained
+`capabilities.voicemail`, true only if the integration can both leave a voicemail and confirm through
+a structured result that it did. `LiveCalleAdapter` declares **false**, verified against
+`calle.openapi.yaml` v0.2.0:
+
+- `CallStatus` is `queued | in_progress | completed | failed | canceled`, and `AttemptStatus` adds
+  only `dialing` — neither has a voicemail or answering-machine state, so a voicemail is
+  indistinguishable from a no-answer at the platform level;
+- there is no answering-machine-detection field anywhere in the schema;
+- `failure_code` is an untyped free-form string with no documented enumeration;
+- nothing in the API confirms a message was recorded.
+
+`FamilyStructuredResult.voicemail_left` is therefore a **model self-report**, and optional so
+historical results stay valid. KinCall concludes a voicemail was left only when the report says yes
+**and** the adapter declares support. Otherwise it records `voicemail_unavailable` verbatim, claims
+nothing, and continues to the next contact. A voicemail is only ever attempted on the final attempt
+to a contact, and the orchestrator — not the agent — decides. Its content is a single fixed string
+(`VOICEMAIL_MESSAGE`) with no incident detail, no health detail, no interpretation, not the
+vulnerable person's name, and not any other contact's identity; when voicemail is unsupported the
+agent is instructed to leave nothing at all rather than a paraphrase.
+
+**8. Interface.** The event page shows the binary operational outcome in plain language — "No
+attention needed", "Trusted circle contacted", or "Attention unresolved" (with an explicit "not a
+medical assessment" caveat) — the neutral summary, the detected attention reasons as labels, the
+current workflow step, per-attempt check-in and trusted-circle histories, the voicemail outcome,
+contacts never called, who accepted, and `ATTENTION_UNRESOLVED` as a visible terminal result. No raw
+enum value and no priority label is rendered where a plain-language outcome exists; every label
+switch is exhaustive with a `never` default. The unconditional safety notice (DEC-010) is unchanged.
+
+**9. Fake-mode demo scenarios.** Five selectable scenarios (`marie_baseline`, `explicit_help`,
+`other_incident`, `person_unreachable`, `all_contacts_unavailable`), each labelled as demo data. The
+selector renders **only** when `CALLE_MODE=fake`, and `/api/events/start` **ignores** the parameter
+in live mode rather than rejecting it, so live behaviour is byte-for-byte what it was before the
+selector existed. A companion call to any person other than the seeded demo person still throws
+rather than reporting Marie's script for someone else.
+
+### Priority removed — no distinguishable behaviour
+
+Applied as a revision before this decision shipped, once the priority tiers were reviewed against
+what the cascade actually did with them.
+
+The initial design carried a four-value `attention_level` (`none | attention | high | unknown`) and
+assigned a matching `event.priority` (`low | medium | high`) on every decision. On review, **`high`
+and `medium` triggered the identical trusted-circle cascade** — same contacts, same order, same
+retries, same stop-on-confirmation. Nothing in the engine ever branched on priority; it was a label
+attached to an outcome, not an input to one. Displaying it invited a reading of "high priority" as a
+materially different, more urgent situation, when no such distinction existed anywhere in the code —
+closer to false reassurance (or false alarm) than to precision, and in tension with §7.5's rule
+against asserting more than KinCall has established.
+
+**KinCall's operational decision is binary: close the check-in, or contact the trusted circle.**
+`attention_required` (`yes | no | unknown`) replaced `attention_level` in the Companion result (see
+clause 1); `decideCompanionAction` no longer computes or returns a priority (see clause 2); and
+`event.priority` is simply never set on a new event (see "Interface impact" below). Two rules remain
+deterministic cascade triggers regardless of this simplification — an explicit request for help, and
+failure to reach the person after the bounded retry — because those are operational facts the model
+cannot talk KinCall out of, not judgements a tier could grade. **This is not medical triage**:
+KinCall still makes no severity assessment in either direction: not before the simplification (it
+never asked "how bad is this"), and not after it (it does not ask "should this be graded" either).
+
+**Interface impact.** `event.priority` is a **pre-existing, already-nullable** column
+(`0001_init.sql`); no migration is added or altered for this simplification (see "Migration
+reviewed" below). New events simply never populate it — `decideCompanionAction`'s result carries no
+`priority` field, so the engine's patch object never includes the key, and the column keeps its
+column-default `NULL`. Historical rows that do carry a value (from this same session's earlier,
+unshipped `attention_level` design) are untouched and still render: the event page never reads
+`event.priority` for any decision or display, so a historical value neither breaks anything nor
+appears.
+
+### Backward compatibility
+
+- `HUMAN_REVIEW_REQUIRED` and `REQUEST_HUMAN_REVIEW` are **retained** in `EventStatus` /
+  `OrchestrationDecision`, and `COMPANION_RESULT_UNCERTAIN` / `FAMILY_CALL_NOT_POSSIBLE` in
+  `TransitionEvent`. Nothing produces them; historical events keep type-checking and rendering. No
+  enum value and no historical record is deleted to simplify code.
+- The pre-DEC-011 Companion shape is readable but never produced.
+  `isCompanionStructuredResult` validates the current shape **strictly** and rejects the legacy one
+  outright, so a fresh incomplete result degrades to the attention cascade rather than reading
+  uncollected signals as absent. `readCompanionResult` accepts either and is what every display path
+  uses. The legacy mapping is conservative: fields v1 never collected become `unknown`, not `no` — an
+  absence of evidence is not evidence of absence — and v1's fall-centric `low` maps to
+  `attentionRequired: "no"`, its `medium`/`high` both to `"yes"` (the same collapse applied going
+  forward — see "Priority removed" below).
+- `call_events.attempt_number` defaults to 1, which is what every pre-existing row was under the old
+  one-call-per-contact constraint.
+
+### The updated Marie timeline
+
+§12's demo now has thirteen entries rather than nine, because Julie gets her bounded retry and the
+second unanswered call leaves the voicemail. The outcome is unchanged — Marc confirms, the case
+closes, Nicole is never called:
+
+```text
+Check-in call started
+Check-in call completed
+The person mentioned a fall, difficulty moving around.
+Calling Julie
+No answer from Julie (attempt 1)
+No voicemail attempted — one more attempt is owed
+Calling Julie again (attempt 2)
+No answer from Julie (attempt 2)
+Voicemail left
+Calling Marc
+Marc answered
+Visit confirmed — 17:30
+Case closed
+```
+
+### Conflicts with the frozen specification
+
+Flagged explicitly rather than silently rewritten:
+
+1. **§15 enumerates thirteen event states; `ATTENTION_UNRESOLVED` is a fourteenth.** A genuine
+   addition to a frozen list. Justified because §15's states cannot express the autonomous dead end,
+   and the alternative — reusing `CASE_CLOSED` or `NO_ACTION_REQUIRED` — would assert something
+   false about a vulnerable person's situation, which §7.5 forbids.
+2. **§9.4 requires "une validation humaine … avant toute action critique", and §7.5 keeps the human
+   responsible.** Reconciled, not overridden: the actions KinCall takes autonomously are calls to a
+   consented trusted circle, which §9.3's own cascade already performs without human validation. The
+   critical actions §9.4 gates are emergency-service actions, and KinCall still performs none. The
+   human remains responsible and informed — `ATTENTION_UNRESOLVED` is a visible, actionable end
+   state — but the workflow no longer *blocks* on them.
+3. **§9.1's expected output is fall-centric.** DEC-002 already recorded that KinCall diverges from
+   §9.1's nested `signals[]` shape; this widens the same flat categorical result. §9.1's
+   `person_requests_help` survives as `explicit_help_requested`, and `does_not_want_to_disturb_family`
+   is retained rather than dropped.
+4. **§9.2's "Exemple de logique simplifiée" is superseded** by the seven-rule order above. It is
+   labelled an example, and its own no-answer clause ("si le nombre maximal de tentatives est
+   atteint : contacter le premier proche") is what rule 2 finally implements — DEC-003 deferred only
+   the bound.
+5. **DEC-007's cascade consequence is reversed** (clause 6 above). Its consent *rule* is untouched.
+6. **DEC-003's "`RETRY_CHECK_IN` means a retry is owed, not scheduled"** no longer holds: it is now
+   placed automatically. That note warned against mistaking it for automation later; this entry is
+   that later, made explicit.
+7. **DEC-010's `unusual_confusion` → `REQUEST_HUMAN_REVIEW` rule is superseded.** With no
+   operational human-review path, confusion reaches the trusted circle like any other stated signal.
+   DEC-010's other half — an explicit help request outranking the fall rules — is preserved as rule 3.
+
+No conflict with §13.3, §17.4, or `CLAUDE.md`'s emergency prohibition: nothing added here calls,
+offers to call, or routes toward any emergency service, in any mode, and
+`ACTIVATE_CONFIGURED_ESCALATION` remains deliberately unproduced (DEC-010).
+
+### Migration
+
+`0008_call_attempts.sql`. **Genuinely unavoidable**, and the only schema change: `unique (event_id,
+contact_id)` and `idx_call_events_one_companion` make a second call to the same subject structurally
+impossible, so no application logic can express a retry. It adds
+`attempt_number integer not null default 1`, replaces both uniqueness rules with per-attempt
+equivalents, and drop-and-recreates `commit_transition_with_call_intent` with a `p_attempt_number`
+parameter (a new parameter changes the signature), reapplying 0004's revoke/grant pair for the new
+signature. Additive and backward-compatible; the replacement rules are strictly weaker than the ones
+they drop, so no existing row can violate them. Attention signals, the neutral summary and the
+attention requirement need no schema change — they live in the existing `structured_result` jsonb —
+and `events.status` deliberately carries no CHECK constraint, so `ATTENTION_UNRESOLVED` needs none
+either. **Not applied remotely by this change.**
+
+**Migration reviewed after the priority simplification, above, and found unaffected.** The
+migration never touches `events.priority` or `events.decision` in any way beyond the generic
+`commit_transition_with_call_intent` patch mechanism both already had (the `case when p_patch ?
+'priority' then … else priority end` clause, unchanged from `0002_functions.sql`) — a mechanism
+that already tolerated a patch omitting `priority` entirely, which is exactly what the engine now
+always does. No column, constraint, or function signature needed any change for this
+simplification, and none was made.
+
+### Consequences
+
+- Every trusted contact is now called up to twice, so a cascade places up to 2n calls rather than n.
+  In live mode that doubles the worst-case call volume to a consenting circle.
+- A person who does not answer is called twice rather than once.
+- `LiveCalleAdapter.capabilities.voicemail` should be flipped to `true` only when CALL-E documents a
+  voicemail-confirmation mechanism — not when it merely appears to work.
+- No new event is ever assigned a priority; `event.priority` reads `NULL` for everything created
+  from this decision onward. A pre-existing historical value, if a test or a prior local run left
+  one, still renders unchanged (see "Priority removed" above).
+- Test count is 474, including `tests/autonomous-cascade.test.ts` (bounded retries, the voicemail
+  capability gate, restart points at each attempt, all five demo scenarios) and new coverage in
+  `tests/state-machine.test.ts` / `tests/event-summary.test.ts` for the binary decision and the
+  three plain-language operational outcomes.
+
+### Approval
+
+Project owner approval: approved as a deliberate product evolution, with the explicit requirements
+that KinCall remain autonomous with no operational human-review dependency, that the deterministic
+state machine control all actions, that voicemail capability not be invented, and that KinCall never
+diagnose, never assess medical severity, and never contact emergency services in any mode. The
+priority simplification above was requested and approved before this decision shipped, once review
+showed the tiers had no distinguishable effect on the cascade.
+
+---
+
+## DEC-012 — `events.priority` column removed entirely
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+DEC-011 ("Priority removed") had already stopped the application from ASSIGNING a priority to any
+new event, once review showed that "high" and "medium" always triggered the identical
+trusted-circle cascade — the column carried a label with no distinguishable operational effect.
+That change kept the `events.priority` column itself (nullable, pre-existing) purely so historical
+rows and the TypeScript type didn't need touching at the time.
+
+With the application now confirmed to never read or write it, and migration 0008 not yet applied
+remotely, this is the natural follow-through: remove the column, and its patch-handling logic, so
+nothing in the schema, the RPCs, or the domain types carries an unused field forward indefinitely.
+
+### Decision
+
+**1. `EventRecord` no longer has a `priority` field.** Removed from `lib/database/types.ts`, along
+with the now-unused `Priority` type (`lib/orchestration/states.ts`). Removed from
+`lib/database/row-mappers.ts` (`EventRow`, `toEvent`, `fromEventPatch`), from
+`CommitTransitionInput`'s patch `Pick` (`lib/database/repository.ts`), and from
+`InMemoryRepository.createEvent`'s literal (`lib/database/in-memory-repository.ts`). No UI ever
+displayed it after DEC-011; the informational comments explaining that omission were simplified to
+state the column no longer exists.
+
+**2. Migration 0008 edited before it shipped.** `0008_call_attempts.sql` is not yet applied
+remotely, so its recreation of `commit_transition_with_call_intent` (needed anyway, for the new
+`p_attempt_number` parameter) was edited in place to drop the `priority = case when p_patch ?
+'priority' …` line from that function's `UPDATE events SET …`. This is not an edit to an applied
+migration — it is a correction to a file that has never run against any database — and it means
+0008, once applied, creates a function that never references the column migration 0009 removes.
+
+**3. New migration: `0009_drop_event_priority.sql`.** Redefines `commit_transition` (`create or
+replace function`, identical signature to `0002_functions.sql`'s original — so every existing grant
+from `0004_security.sql` carries over untouched) with the same `priority` line removed, **then**
+`alter table public.events drop column priority;`. Dependency check performed before writing the
+drop: no view, trigger, or index in this schema references `events.priority` — its only
+dependents were the two `UPDATE … SET priority = …` clauses in `commit_transition` (0002) and
+`commit_transition_with_call_intent` (0008), both eliminated in this same change before the column
+is actually dropped. `DROP COLUMN` cascades to remove the column's own inline `CHECK (priority in
+('low','medium','high'))` constraint automatically; there is no separately named constraint or
+index on it.
+
+**4. `trusted_contacts.priority` is untouched.** A different column entirely — the trusted-circle
+cascade ordering field, checked `> 0`, unique per person, maintained by
+`reorder_trusted_contacts`/`archive_trusted_contact`/`create_trusted_contact`. Nothing about this
+decision changes it; `events.current_contact_priority` (a denormalized copy of a *contact's*
+priority number, for display of "whose turn it is") is likewise untouched — it is a different
+column from the one being removed and continues to work exactly as before.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted. `events.priority` was never a
+frozen-specification field — it was purely an internal artifact of DEC-011's original attention
+model, already superseded by that same decision's own revision before this cleanup. Removing an
+already-unused column changes no observable behaviour.
+
+### Historical data
+
+Before this migration is applied, the remote `events` table may contain rows with a non-null
+`priority` value, written before DEC-011's revision stopped assigning one. **Those values are
+permanently lost once `0009_drop_event_priority.sql` runs** — there is no replacement field and no
+export step, because nothing in the product reads that value today and the column has nowhere left
+to live once dropped. See the accompanying report for the exact row count captured immediately
+before this decision, obtained with a read-only `count`-only query that returned no event content,
+no phone numbers, and no other person-identifying data.
+
+Every other column on those rows — `id`, `status`, `decision`, `decision_reason`,
+`current_contact_priority`, `created_at`, `closed_at`, every `call_events` row, every
+`timeline_entries` row — is entirely unaffected. Historical events remain fully readable: the row
+mapper and `EventRecord` type no longer reference `priority` at all, so a row that no longer has the
+column maps identically to one that always lacked it.
+
+### Migrations reviewed together
+
+**0008 and 0009 are safe to apply in that order, in the same session or separately.** 0008 adds
+`call_events.attempt_number`, moves its uniqueness rules to per-attempt, and recreates
+`commit_transition_with_call_intent` — already without any `events.priority` reference, per clause 2
+above. 0009 redefines `commit_transition` and then drops `events.priority`. Neither migration's
+statements depend on the other completing first: 0008 touches only `call_events` and its own RPC;
+0009 touches only `commit_transition` and the `events` table. Applying 0009 without 0008 first
+would work identically for the column removal (0008 has no bearing on `events.priority` after its
+own edit); applying 0008 without 0009 leaves the column in place, unused, exactly as it is today.
+
+### Consequences
+
+- `event.priority` cannot be read, written, or displayed anywhere in the application — there is no
+  field left to hold a value even if some future code tried.
+- Tests that constructed an `EventRecord`/patch with a `priority` value no longer compile as
+  written; they were updated to drop the field entirely rather than pass `null` or `undefined` for
+  a property that no longer exists on the type.
+- Any future reintroduction of an operational priority tier would require a new migration adding
+  the column back, plus a new decision-log entry — it is not "commented out" or soft-disabled
+  anywhere.
+
+### Approval
+
+Project owner approval: approved as a direct follow-through from DEC-011's own "Priority removed"
+revision, with the explicit requirements that `trusted_contacts.priority` and
+`events.current_contact_priority` remain untouched, that migrations 0001–0007 are never edited,
+that the remote historical row count be reported before any migration runs, and that neither 0008
+nor 0009 be applied in this change.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

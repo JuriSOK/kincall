@@ -23,10 +23,27 @@ export type CascadeStage = "start" | "result" | "advance";
 //              path derives the same stage.
 //   event    — chosen by a deterministic branch over the persisted structured
 //              result, so a replay picks the identical literal.
+//
+// `discriminator` (DEC-011) separates two steps that share all three of the
+// above. Once a contact can be called twice, one unanswered call to Julie can
+// lead either to *Julie again* or to *Marc*, and both are
+// `<julieCall>:advance:FAMILY_CALL_STARTED`. Without a discriminator the second
+// would collide with the first and silently no-op — the retry would happen and
+// Marc would never be called, or vice versa. Callers pass the intended target
+// (contact id + attempt number), which is derived from durable facts and so is
+// recomputed byte-identically by a replaying worker.
 export function operationKey(
   trigger: string,
   stage: CascadeStage,
-  transitionEvent: TransitionEvent
+  transitionEvent: TransitionEvent,
+  discriminator?: string
 ): string {
-  return `${trigger}:${stage}:${transitionEvent}`;
+  const base = `${trigger}:${stage}:${transitionEvent}`;
+  return discriminator === undefined ? base : `${base}:${discriminator}`;
+}
+
+// The discriminator for one outbound attempt to one subject. Used for family
+// cascade steps and for the vulnerable person's bounded retry.
+export function attemptDiscriminator(subjectId: string, attemptNumber: number): string {
+  return `${subjectId}#${attemptNumber}`;
 }

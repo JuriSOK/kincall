@@ -36,11 +36,33 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open the home page, select Marie, and click **Launch demo**. In fake mode
-(the default) this runs the full scenario synchronously: Companion call to
-Marie → fall and mobility difficulty detected → Family call to Julie (no
-answer) → Family call to Marc (confirms a visit at 17:30) → case closed. The
+Open the home page, select Marie, pick a **scenario**, and click **Launch demo**.
+In fake mode (the default) this runs the whole scenario synchronously and the
 event page shows the timeline and summary as they're produced.
+
+The scenario selector is fake-mode only — it does not exist in live mode, and the
+API ignores the parameter there, so a real call can never be steered from the UI.
+Five scenarios cover the autonomous paths (DEC-011):
+
+| Scenario | What it exercises |
+|---|---|
+| Marie baseline | Fall and mobility difficulty. Julie does not answer **twice** (voicemail left on the second call), then Marc confirms a visit at 17:30 → case closed |
+| Explicit help request | No fall; Marie asks for someone to be contacted. The deterministic rule contacts the trusted circle regardless of the model's own report |
+| Other incident | Pain and distress with no fall — attention detection beyond falls |
+| Person unreachable | Marie misses both check-in attempts; KinCall stops calling her and contacts the circle |
+| All contacts unavailable | Everyone is tried twice and nobody helps; voicemail is unsupported → the event ends at `ATTENTION_UNRESOLVED` |
+
+KinCall's operational decision is binary — close the check-in, or contact the trusted circle. There
+is no priority tier: an earlier design assigned a High/Medium/Low priority to every escalation, but
+high and medium never triggered different cascade behaviour, so it was removed before shipping (see
+`docs/DECISION_LOG.md` DEC-011, "Priority removed"). This is an operational decision, not medical
+triage — KinCall never assesses severity.
+
+Every trusted contact gets exactly one retry, and the vulnerable person gets
+exactly one. Nothing waits for a human: an event that runs out of eligible
+contacts ends at `ATTENTION_UNRESOLVED`, a visible terminal outcome, rather than
+stalling in a review queue. KinCall never contacts emergency services, in any
+mode.
 
 ## Live Companion Agent mode
 
@@ -57,9 +79,11 @@ participant**:
 | `KINCALL_NICOLE_PHONE` | Nicole — trusted contact #3 |
 
 Leaving one unset keeps a reserved-for-fiction default (`+336399800xx`), which
-KinCall refuses to dial: that contact's step goes to `HUMAN_REVIEW_REQUIRED`
-naming the missing variable, and no CALL-E request is made. The cascade only
-needs as many contacts configured as you intend it to reach.
+KinCall refuses to dial: that contact is **skipped** with the missing variable
+named on the timeline, no CALL-E request is made, and the cascade continues to
+the next eligible contact. If none is eligible the event ends at
+`ATTENTION_UNRESOLVED`. The cascade only needs as many contacts configured as you
+intend it to reach.
 
 The API key is a **separate credential** from `calle auth login`'s browser OAuth
 session — that login is for the CALL-E MCP skill, a Claude-Code-only

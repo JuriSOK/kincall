@@ -31,6 +31,10 @@ function createDeps(calleAdapter: CalleAdapter = new FakeCalleAdapter()): Engine
 // Marie/Julie/Marc script cannot produce: a Nicole result. Companion always
 // returns the attention-triggering result instantly.
 class ScriptedFamilyAdapter implements CalleAdapter {
+  // Voicemail is treated as supported unless a test overrides it, so the
+  // voicemail-unsupported fallback is exercised explicitly where it matters.
+  capabilities = { voicemail: true };
+
   startFamilyCallSpy = vi.fn();
   familyResultsByContact: Record<string, FamilyStructuredResult> = {};
   private counter = 0;
@@ -135,7 +139,13 @@ describe("archived contacts are excluded from the cascade", () => {
     const event = await startDemoEvent("person_marie", deps);
 
     expect(event.status).toBe("CASE_CLOSED");
-    expect(adapter.contactsCalled()).toEqual(["contact_julie", "contact_nicole"]);
+    // Julie twice (her bounded retry, DEC-011), then straight to Nicole: Marc is
+    // archived and so is structurally absent from the list the cascade reasons over.
+    expect(adapter.contactsCalled()).toEqual([
+      "contact_julie",
+      "contact_julie",
+      "contact_nicole",
+    ]);
     expect(adapter.contactsCalled()).not.toContain("contact_marc");
   });
 
@@ -206,6 +216,7 @@ describe("historical display keeps resolving an archived contact's name", () => 
       eventId: "event_001",
       agentType: "family" as const,
       contactId: "contact_julie",
+      attemptNumber: 1,
       calleCallId: "fake_family_contact_julie_x",
       idempotencyKey: "key_julie",
       status: "completed" as const,

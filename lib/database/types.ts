@@ -1,5 +1,5 @@
 import type { AgentType } from "../calle/adapter";
-import type { EventStatus, OrchestrationDecision, Priority } from "../orchestration/states";
+import type { EventStatus, OrchestrationDecision } from "../orchestration/states";
 
 export type ConsentStatus = "pending" | "confirmed" | "declined";
 
@@ -44,7 +44,9 @@ export interface EventRecord {
   runId: string;
   personId: string;
   status: EventStatus;
-  priority: Priority | null;
+  // events.priority was removed entirely (docs/DECISION_LOG.md DEC-012): the
+  // operational decision is binary — close or contact the trusted circle —
+  // and the column had no distinguishable effect on any behaviour.
   currentContactPriority: number | null;
   decision: OrchestrationDecision | null;
   decisionReason: string | null;
@@ -59,6 +61,12 @@ export interface CallEventRecord {
   eventId: string;
   agentType: AgentType;
   contactId: string | null;
+  // Which attempt to this subject this call is: 1 for the first, 2 for the
+  // bounded retry (DEC-011). Persisted rather than counted in memory, so a
+  // restart mid-cascade resumes at the correct attempt instead of restarting
+  // the sequence or looping. Part of the uniqueness key that replaced
+  // DEC-005's one-call-per-contact constraint.
+  attemptNumber: number;
   // Null while the row is only an *intent*: the transition that decided to
   // place this call has been committed, but CALL-E has not answered yet. The
   // row is created before the outbound request so a crash in that window can
