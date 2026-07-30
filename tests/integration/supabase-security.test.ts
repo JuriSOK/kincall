@@ -57,6 +57,11 @@ const RPCS = [
       p_patch: {},
       p_agent_type: "companion",
       p_contact_id: null,
+      // Required since migration 0008 (DEC-011). Omitting it made PostgREST
+      // fail to resolve the function at all, so the assertion below passed on
+      // "function does not exist" rather than on a denied EXECUTE grant —
+      // the privilege check it exists to make was not actually happening.
+      p_attempt_number: 1,
       p_idempotency_key: "k",
     },
   },

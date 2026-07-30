@@ -3,17 +3,24 @@ import { notFound } from "next/navigation";
 import { listDemoScenarios } from "@/lib/calle/demo-scenarios";
 import { getRepository } from "@/lib/database/store";
 import { maskPhone } from "@/lib/phone";
-import type { CallReadiness } from "@/lib/orchestration/person-status";
+import type { CallReadiness, StatusTone } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
 import { SafetyNotice } from "@/app/events/[id]/safety-notice";
+import { ButtonLink } from "@/app/ui/button";
+import { Badge, Card, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
+import type { Tone } from "@/app/ui/tone";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
 
-const TONE_CLASSES = {
-  calm: "border-emerald-600/40 text-emerald-700 dark:text-emerald-400",
-  attention: "border-amber-600/40 text-amber-700 dark:text-amber-400",
-  unknown: "border-black/20 opacity-70 dark:border-white/20",
-} as const;
+// describePersonStatus's operational tone, mapped onto the design system's.
+// "unknown" (in progress, nothing recorded yet) is a neutral state, not a
+// reassuring or a worrying one.
+const STATUS_TONE: Record<StatusTone, Tone> = {
+  calm: "calm",
+  attention: "attention",
+  unresolved: "unresolved",
+  unknown: "neutral",
+};
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,68 +49,74 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const contactReadiness = trustedCircle.map((contact) => describeCallReadiness(contact));
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">
-      <div className="flex flex-col gap-2">
-        <Link href="/" className="text-sm opacity-60 hover:underline">
+    <PageShell width="narrow">
+      <div className="flex flex-col gap-4">
+        <Link href="/" className="w-fit text-sm text-muted hover:text-accent">
           ← Profiles
         </Link>
-        <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-semibold">{person.firstName}</h1>
-          <DeletePersonButton
-            personId={person.id}
-            personName={person.firstName}
-            mode="redirect-home"
-          />
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full border px-3 py-1 text-xs ${TONE_CLASSES[status.tone]}`}>
-            {status.label}
-          </span>
-          <span className="text-sm opacity-60">
+        <PageHeader
+          title={person.firstName}
+          actions={
+            <DeletePersonButton
+              personId={person.id}
+              personName={person.firstName}
+              mode="redirect-home"
+            />
+          }
+        />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
+          <span className="text-sm text-muted">
             Next check-in: daily at {person.preferredCallTime}
           </span>
-          <span className="font-mono text-sm opacity-50">{maskPhone(person.phone)}</span>
+          <span className="font-mono text-sm text-subtle">{maskPhone(person.phone)}</span>
         </div>
       </div>
 
       <SafetyNotice />
       <CallReadinessNotice readiness={readiness} subject={person.firstName} />
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Trusted circle</h2>
-          <Link
-            href={`/people/${person.id}/contacts`}
-            className="text-sm opacity-60 hover:underline"
-          >
+      <Card
+        title="Trusted circle"
+        description="Called in this order, stopping as soon as someone confirms."
+        actions={
+          <ButtonLink href={`/people/${person.id}/contacts`} size="sm">
             Configure
-          </Link>
-        </div>
-
+          </ButtonLink>
+        }
+      >
         {trustedCircle.length === 0 ? (
-          <p className="rounded-md border border-black/10 px-4 py-3 text-sm opacity-70 dark:border-white/10">
-            No trusted contacts yet.{" "}
-            <Link href={`/people/${person.id}/contacts`} className="underline">
-              Add the first one
-            </Link>{" "}
-            — without one, KinCall has nobody to call when a check-in needs attention, and the
-            event can only end unresolved.
-          </p>
+          <EmptyState
+            title="No trusted contacts yet"
+            action={
+              <ButtonLink href={`/people/${person.id}/contacts`} variant="primary" size="sm">
+                Add the first one
+              </ButtonLink>
+            }
+          >
+            Without one, KinCall has nobody to call when a check-in needs attention, and the event
+            can only end unresolved.
+          </EmptyState>
         ) : (
           <ol className="flex flex-col gap-2">
             {trustedCircle.map((contact, index) => (
               <li
                 key={contact.id}
-                className="rounded-md border border-black/10 px-4 py-3 dark:border-white/10"
+                className="rounded-kc border border-line bg-sunken px-4 py-3"
               >
-                {contact.priority}. {contact.firstName} — {contact.relationship}
-                <span className="ml-2 font-mono text-xs opacity-50">
+                <span className="text-sm">
+                  <span className="text-subtle">{contact.priority}.</span>{" "}
+                  <span className="font-medium">{contact.firstName}</span>
+                  <span className="text-muted"> — {contact.relationship}</span>
+                </span>
+                <span className="ml-2 font-mono text-xs text-subtle">
                   {maskPhone(contact.phone)}
                 </span>
                 {contactReadiness[index].kind === "consent_missing" ||
                 contactReadiness[index].kind === "phone_missing" ? (
-                  <span className="block text-xs text-amber-700 dark:text-amber-400">
+                  <span className="mt-1 block text-xs text-attention-ink">
                     {contactReadiness[index].kind === "consent_missing"
                       ? "Consent not confirmed — skipped by the cascade."
                       : "Phone configuration missing — cannot be called in live mode."}
@@ -113,52 +126,56 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             ))}
           </ol>
         )}
-      </section>
+      </Card>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
-          Calls and decisions
-        </h2>
+      <Card title="Calls and decisions">
         {events.length === 0 ? (
-          <p className="rounded-md border border-black/10 px-4 py-3 text-sm opacity-70 dark:border-white/10">
-            No check-in has run yet.
-          </p>
+          <EmptyState title="No check-in has run yet">
+            Launch one below to see the full sequence of calls and decisions.
+          </EmptyState>
         ) : (
           <ol className="flex flex-col gap-2">
-            {events.map((event) => (
-              <li key={event.id}>
-                <Link
-                  href={`/events/${event.id}`}
-                  className="flex flex-wrap items-baseline justify-between gap-2 rounded-md border border-black/10 px-4 py-3 hover:border-black/30 dark:border-white/10 dark:hover:border-white/30"
-                >
-                  <span className="font-mono text-sm">
-                    {new Date(event.createdAt).toLocaleString([], {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
-                  </span>
-                  <span className="text-sm opacity-70">
-                    {describePersonStatus(event).label}
-                    {event.decisionReason ? ` — ${event.decisionReason}` : ""}
-                  </span>
-                </Link>
-              </li>
-            ))}
+            {events.map((event) => {
+              const eventStatus = describePersonStatus(event);
+              return (
+                <li key={event.id}>
+                  <Link
+                    href={`/events/${event.id}`}
+                    className="flex flex-wrap items-baseline justify-between gap-2 rounded-kc border border-line bg-sunken px-4 py-3 transition-colors hover:border-line-strong"
+                  >
+                    <span className="font-mono text-xs text-subtle">
+                      {new Date(event.createdAt).toLocaleString([], {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                    <span className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge tone={STATUS_TONE[eventStatus.tone]}>{eventStatus.label}</Badge>
+                      {event.decisionReason ? (
+                        <span className="text-muted">{event.decisionReason}</span>
+                      ) : null}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
           </ol>
         )}
-      </section>
+      </Card>
 
-      <LaunchDemoButton
-        personId={person.id}
-        // A check-in cannot be launched for someone who has not consented
-        // (§17.1 / DEC-007), so the button explains itself rather than failing
-        // after the click.
-        blockedReason={readiness.kind === "consent_missing" ? readiness.message : undefined}
-        // Fake mode only (DEC-011): in live mode this is undefined, so no selector
-        // is rendered and no scenario is ever sent.
-        scenarios={demoScenarios}
-      />
-    </main>
+      <Card title="Run a check-in">
+        <LaunchDemoButton
+          personId={person.id}
+          // A check-in cannot be launched for someone who has not consented
+          // (§17.1 / DEC-007), so the button explains itself rather than failing
+          // after the click.
+          blockedReason={readiness.kind === "consent_missing" ? readiness.message : undefined}
+          // Fake mode only (DEC-011): in live mode this is undefined, so no selector
+          // is rendered and no scenario is ever sent.
+          scenarios={demoScenarios}
+        />
+      </Card>
+    </PageShell>
   );
 }
 
@@ -172,10 +189,10 @@ function CallReadinessNotice({
   if (readiness.kind === "ready" || readiness.kind === "fake_mode") return null;
 
   return (
-    <p className="rounded-md border border-amber-600/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+    <Notice tone="attention">
       {readiness.kind === "consent_missing"
         ? readiness.message
         : `Phone configuration missing for ${subject}. ${readiness.message}`}
-    </p>
+    </Notice>
   );
 }

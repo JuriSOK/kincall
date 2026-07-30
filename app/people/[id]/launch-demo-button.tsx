@@ -2,6 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button } from "@/app/ui/button";
+import { controlClasses } from "@/app/ui/form-field";
+import { Badge, Notice } from "@/app/ui/surfaces";
 
 export interface DemoScenarioOption {
   id: string;
@@ -46,8 +49,14 @@ export function LaunchDemoButton({
         throw new Error(body?.error ?? `Failed to start demo event (${response.status}).`);
       }
 
-      const { eventId } = (await response.json()) as { eventId: string };
-      router.push(`/events/${eventId}`);
+      // Guarded rather than destructured straight through: a 200 whose body is
+      // not the JSON we expect must not navigate to /events/undefined.
+      const body = (await response.json().catch(() => null)) as { eventId?: string } | null;
+      if (!body?.eventId) {
+        throw new Error("The check-in started but its id could not be read. Reload to find it.");
+      }
+
+      router.push(`/events/${body.eventId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to launch demo.");
       setIsLaunching(false);
@@ -57,12 +66,10 @@ export function LaunchDemoButton({
   return (
     <div className="flex flex-col gap-2">
       {scenarios && scenarios.length > 0 ? (
-        <div className="flex flex-col gap-1 rounded-md border border-black/10 p-4 dark:border-white/10">
+        <div className="flex flex-col gap-2 rounded-kc border border-line bg-sunken p-4">
           {/* Labelled unmistakably as demo data, so nobody can mistake a canned
               scenario for something that actually happened. */}
-          <p className="text-xs font-medium uppercase tracking-wide opacity-60">
-            Demo data — fake mode only, no calls are placed
-          </p>
+          <Badge tone="attention">Demo data — fake mode only, no calls are placed</Badge>
           <label htmlFor="demo-scenario" className="mt-1 text-sm font-medium">
             Scenario
           </label>
@@ -71,7 +78,8 @@ export function LaunchDemoButton({
             value={scenario}
             onChange={(changeEvent) => setScenario(changeEvent.target.value)}
             disabled={isLaunching}
-            className="w-full rounded-md border border-black/20 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+            aria-describedby={selected ? "demo-scenario-description" : undefined}
+            className={controlClasses}
           >
             {scenarios.map((option) => (
               <option key={option.id} value={option.id}>
@@ -79,23 +87,23 @@ export function LaunchDemoButton({
               </option>
             ))}
           </select>
-          {selected ? <p className="text-xs opacity-70">{selected.description}</p> : null}
+          {selected ? (
+            <p id="demo-scenario-description" className="text-xs text-muted">
+              {selected.description}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      <button
-        type="button"
+      <Button
         onClick={handleClick}
         disabled={isLaunching || Boolean(blockedReason)}
-        title={blockedReason}
-        className="w-fit rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+        className="w-fit"
       >
         {isLaunching ? "Launching demo…" : "Launch demo"}
-      </button>
-      {blockedReason ? (
-        <p className="text-sm text-amber-700 dark:text-amber-400">{blockedReason}</p>
-      ) : null}
-      {error ? <p className="text-sm text-red-500">{error}</p> : null}
+      </Button>
+      {blockedReason ? <Notice tone="attention">{blockedReason}</Notice> : null}
+      {error ? <Notice tone="danger">{error}</Notice> : null}
     </div>
   );
 }

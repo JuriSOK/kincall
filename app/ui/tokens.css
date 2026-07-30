@@ -1,0 +1,144 @@
+/* KinCall design tokens.
+ *
+ * Imported once, from app/globals.css. Tailwind v4 is CSS-first — there is no
+ * tailwind.config.* file in this project — so the palette, spacing and radius
+ * scales live here as custom properties and are exposed to utilities through
+ * globals.css's `@theme inline` block.
+ *
+ * Direction: warm, luminous, calm. A family-coordination product, not a
+ * developer dashboard. Deliberately not dark-by-default, not neon, not
+ * glassmorphic.
+ *
+ * Status semantics are unchanged from the pre-existing interface: amber means
+ * attention, emerald means calm/resolved. `unresolved` is a third, heavier tone
+ * added for ATTENTION_UNRESOLVED (DEC-011), which must read as distinct from
+ * both "all is well" and "we are working on it" — without implying medical
+ * severity, which KinCall never assesses.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  /* Warm off-white page, plainer white cards layered on top of it. The slight
+   * warmth is what stops the interface reading as a blank admin panel. */
+  --kc-canvas: #fdfbf8;
+  --kc-surface: #ffffff;
+  --kc-surface-sunken: #f7f3ee;
+  --kc-border: #e8e0d6;
+  --kc-border-strong: #d6cabb;
+
+  /* ── Text ─────────────────────────────────────────────────────────────── */
+  --kc-text: #2a2320;
+  --kc-text-muted: #6b5f56;
+  --kc-text-subtle: #8d8078;
+
+  /* ── Accent (primary actions, links) ──────────────────────────────────── */
+  /* Terracotta. Warm and reassuring, and distinct from both status tones so a
+   * primary button can never be mistaken for a status signal. */
+  --kc-accent: #b4552d;
+  --kc-accent-hover: #9a4525;
+  --kc-accent-soft: #fbeee7;
+  --kc-accent-text: #ffffff;
+
+  /* ── Status tones ─────────────────────────────────────────────────────── */
+  --kc-calm-bg: #ecf7f0;
+  --kc-calm-border: #b6ddc5;
+  --kc-calm-text: #1f5c39;
+
+  --kc-attention-bg: #fdf3e2;
+  --kc-attention-border: #e9cd97;
+  --kc-attention-text: #7a5312;
+
+  --kc-unresolved-bg: #fbebe8;
+  --kc-unresolved-border: #e7b4aa;
+  --kc-unresolved-text: #8a2f20;
+
+  --kc-danger: #9d2b1c;
+  --kc-danger-bg: #fbebe8;
+  --kc-danger-border: #e7b4aa;
+
+  /* ── Shape ────────────────────────────────────────────────────────────── */
+  --kc-radius-sm: 0.375rem;
+  --kc-radius: 0.75rem;
+  --kc-radius-lg: 1.125rem;
+  --kc-radius-full: 999px;
+
+  /* ── Depth ────────────────────────────────────────────────────────────── */
+  /* Low-contrast and warm-tinted rather than neutral grey, so surfaces feel
+   * lit rather than outlined. */
+  --kc-shadow-sm: 0 1px 2px rgb(74 52 38 / 0.05);
+  --kc-shadow: 0 1px 3px rgb(74 52 38 / 0.06), 0 6px 16px -6px rgb(74 52 38 / 0.10);
+  --kc-shadow-lg: 0 2px 6px rgb(74 52 38 / 0.06), 0 18px 40px -12px rgb(74 52 38 / 0.16);
+
+  /* ── Focus ────────────────────────────────────────────────────────────── */
+  --kc-focus-ring: var(--kc-accent);
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --kc-transition: 150ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Warm-tinted dark, not pure black, so the same product identity survives
+     * the theme switch. */
+    --kc-canvas: #191512;
+    --kc-surface: #221d19;
+    --kc-surface-sunken: #14100e;
+    --kc-border: #392f28;
+    --kc-border-strong: #4d4038;
+
+    --kc-text: #f4eee8;
+    --kc-text-muted: #bcaea3;
+    --kc-text-subtle: #9a8b80;
+
+    --kc-accent: #e08558;
+    --kc-accent-hover: #eb9a70;
+    --kc-accent-soft: #33231b;
+    --kc-accent-text: #1b120d;
+
+    --kc-calm-bg: #16291f;
+    --kc-calm-border: #2f5540;
+    --kc-calm-text: #a5dcbb;
+
+    --kc-attention-bg: #2e2313;
+    --kc-attention-border: #5d4720;
+    --kc-attention-text: #ecc98a;
+
+    --kc-unresolved-bg: #331b17;
+    --kc-unresolved-border: #6a332a;
+    --kc-unresolved-text: #f0aa9c;
+
+    --kc-danger: #f0a496;
+    --kc-danger-bg: #331b17;
+    --kc-danger-border: #6a332a;
+
+    --kc-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --kc-shadow: 0 1px 3px rgb(0 0 0 / 0.45), 0 6px 16px -6px rgb(0 0 0 / 0.5);
+    --kc-shadow-lg: 0 2px 6px rgb(0 0 0 / 0.45), 0 18px 40px -12px rgb(0 0 0 / 0.6);
+  }
+}
+
+/* Honour an explicit request for less motion by removing it entirely, rather
+ * than merely shortening it. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --kc-transition: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* One focus treatment for every interactive element in the app. `:focus-visible`
+ * rather than `:focus`, so a mouse click does not leave a ring behind but
+ * keyboard navigation is always visible. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--kc-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--kc-radius-sm);
+}

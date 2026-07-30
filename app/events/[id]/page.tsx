@@ -12,9 +12,22 @@ import type { CallEventRecord, EventRecord, TrustedContact } from "@/lib/databas
 import { MAX_CONTACT_ATTEMPTS } from "@/lib/orchestration/engine";
 import { MAX_COMPANION_ATTEMPTS } from "@/lib/orchestration/decide-companion-action";
 import type { EventStatus } from "@/lib/orchestration/states";
+import type { StatusTone } from "@/lib/orchestration/person-status";
+import { describePersonStatus } from "@/lib/orchestration/person-status";
 import { describeVoicemailFromResult } from "@/lib/orchestration/voicemail";
+import { Badge, Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+import type { Tone } from "@/app/ui/tone";
 import { EventPollIndicator } from "./event-poll-indicator";
 import { SafetyNotice } from "./safety-notice";
+
+// Same mapping as the person page: describePersonStatus's operational tone onto
+// the design system's. "unknown" is neutral — neither reassuring nor worrying.
+const STATUS_TONE: Record<StatusTone, Tone> = {
+  calm: "calm",
+  attention: "attention",
+  unresolved: "unresolved",
+  unknown: "neutral",
+};
 
 export interface Confirmation {
   contact: TrustedContact | undefined;
@@ -369,34 +382,64 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     (contact) => !calledContactIds.has(contact.id) && contact.archivedAt === null
   );
 
+  const status = describePersonStatus(event);
+
   return (
-    <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">
-      <div className="flex flex-col gap-1">
-        <Link href={`/people/${event.personId}`} className="text-sm opacity-60 hover:underline">
+    <PageShell width="narrow">
+      <div className="flex flex-col gap-4">
+        <Link
+          href={`/people/${event.personId}`}
+          className="w-fit text-sm text-muted hover:text-accent"
+        >
           ← {person?.firstName ?? "Back"}
         </Link>
-        <h1 className="text-3xl font-semibold">Event {event.id}</h1>
-        <p className="flex items-center gap-2 text-sm opacity-60">
-          {describeWorkflowStep(event.status)}
-          <EventPollIndicator eventId={event.id} status={event.status} />
-        </p>
+        <PageHeader title={`Check-in ${event.id}`} />
+        <div className="flex flex-wrap items-center gap-3">
+          {/* The outcome badge carries the one tone that distinguishes
+              ATTENTION_UNRESOLVED from every other state (DEC-011). */}
+          <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
+          <span className="flex items-center gap-2 text-sm text-muted">
+            {describeWorkflowStep(event.status)}
+            <EventPollIndicator eventId={event.id} status={event.status} />
+          </span>
+        </div>
       </div>
 
       <SafetyNotice />
 
+      {/* Summary first: this is what a family member actually came to read. The
+          per-call detail below is the evidence for it. */}
+      <Card title="Summary">
+        <dl className="flex flex-col gap-3 text-sm">
+          <div>
+            <dt className="font-medium">What happened?</dt>
+            <dd className="text-muted">
+              {companionCalls[companionCalls.length - 1]?.summary ?? "No summary available yet."}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium">What did KinCall do?</dt>
+            <dd className="text-muted">{actionDescription}</dd>
+          </div>
+          <div>
+            <dt className="font-medium">Who is taking care of it?</dt>
+            <dd className="text-muted">
+              {confirmation ? confirmation.result.summary : describeOwnership(event)}
+            </dd>
+          </div>
+        </dl>
+      </Card>
+
       {attention ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
-            What the check-in found
-          </h2>
-          <div className="flex flex-col gap-3 rounded-md border border-black/10 p-4 text-sm dark:border-white/10">
+        <Card title="What the check-in found">
+          <div className="flex flex-col gap-3 text-sm">
             {describeAttentionOutcome(event) ? (
               <div>
                 <p className="font-medium">Attention</p>
-                <p className="opacity-80">{describeAttentionOutcome(event)}</p>
+                <p className="text-muted">{describeAttentionOutcome(event)}</p>
                 {/* §9.4's Limite critique: a binary operational outcome, never a
                     medical or severity judgement. KinCall does not diagnose. */}
-                <p className="mt-1 text-xs opacity-60">
+                <p className="mt-1 text-xs text-subtle">
                   This is an operational outcome — whether KinCall closed the check-in or contacted
                   the trusted circle — not a medical assessment or a severity level.
                 </p>
@@ -405,7 +448,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             {attention.attentionReasons.length > 0 ? (
               <div>
                 <p className="font-medium">Why</p>
-                <ul className="list-inside list-disc opacity-80">
+                <ul className="list-inside list-disc text-muted">
                   {attention.attentionReasons.map((reason) => (
                     <li key={reason}>{describeAttentionReason(reason)}</li>
                   ))}
@@ -414,127 +457,106 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             ) : null}
             <div>
               <p className="font-medium">What was said</p>
-              <p className="opacity-80">{attention.neutralSummary || "No summary available."}</p>
+              <p className="text-muted">{attention.neutralSummary || "No summary available."}</p>
             </div>
             <div>
               <p className="font-medium">Reporting confidence</p>
-              <p className="opacity-80">{describeConfidence(attention.confidence)}</p>
+              <p className="text-muted">{describeConfidence(attention.confidence)}</p>
             </div>
           </div>
-        </section>
+        </Card>
       ) : null}
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
-          Check-in calls to {person?.firstName ?? "the person"}
-        </h2>
-        <div className="rounded-md border border-black/10 p-4 text-sm dark:border-white/10">
-          <p className="opacity-80">
-            {companionCalls.length === 0
-              ? "No check-in call has been placed yet."
-              : `${companionCalls.length} of at most ${MAX_COMPANION_ATTEMPTS} attempts placed.`}
-          </p>
-          <ol className="mt-2 flex flex-col gap-1 opacity-80">
-            {companionCalls.map((call) => {
-              const result = readCompanionResult(call.structuredResult);
-              return (
-                <li key={call.id}>
-                  Attempt {call.attemptNumber}:{" "}
-                  {call.resultProcessedAt === null
-                    ? "in progress"
-                    : result === null
-                      ? "result could not be read"
-                      : result.personReached === "yes"
-                        ? "spoke with them"
-                        : result.personReached === "no"
-                          ? "did not reach them"
-                          : "could not confirm who answered"}
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      </section>
+      <Card
+        title={`Check-in calls to ${person?.firstName ?? "the person"}`}
+        description={
+          companionCalls.length === 0
+            ? "No check-in call has been placed yet."
+            : `${companionCalls.length} of at most ${MAX_COMPANION_ATTEMPTS} attempts placed.`
+        }
+      >
+        <ol className="flex flex-col gap-1 text-sm text-muted">
+          {companionCalls.map((call) => {
+            const result = readCompanionResult(call.structuredResult);
+            return (
+              <li key={call.id}>
+                Attempt {call.attemptNumber}:{" "}
+                {call.resultProcessedAt === null
+                  ? "in progress"
+                  : result === null
+                    ? "result could not be read"
+                    : result.personReached === "yes"
+                      ? "spoke with them"
+                      : result.personReached === "no"
+                        ? "did not reach them"
+                        : "could not confirm who answered"}
+              </li>
+            );
+          })}
+        </ol>
+      </Card>
 
       {familyCalls.length > 0 || neverCalled.length > 0 ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
-            Trusted-circle calls
-          </h2>
-          <div className="flex flex-col gap-3 rounded-md border border-black/10 p-4 text-sm dark:border-white/10">
+        <Card title="Trusted-circle calls">
+          <div className="flex flex-col gap-3 text-sm">
             {familyCalls.length > 0 ? (
               <ol className="flex flex-col gap-2">
                 {familyCalls.map((call) => {
                   const line = describeFamilyAttempt(call, contacts);
                   return (
-                    <li key={call.id} className="flex flex-col">
+                    <li
+                      key={call.id}
+                      className="flex flex-col rounded-kc border border-line bg-sunken px-3 py-2"
+                    >
                       <span className="font-medium">
                         {line.name} — {line.attempt}
                       </span>
-                      <span className="opacity-80">{line.outcome}</span>
-                      <span className="text-xs opacity-60">Voicemail: {line.voicemail}</span>
+                      <span className="text-muted">{line.outcome}</span>
+                      <span className="text-xs text-subtle">Voicemail: {line.voicemail}</span>
                     </li>
                   );
                 })}
               </ol>
             ) : (
-              <p className="opacity-80">No trusted contact has been called.</p>
+              <p className="text-muted">No trusted contact has been called.</p>
             )}
 
             {neverCalled.length > 0 ? (
               <div>
                 <p className="font-medium">Not called</p>
-                <ul className="list-inside list-disc opacity-80">
+                <ul className="list-inside list-disc text-muted">
                   {neverCalled.map((contact) => (
                     <li key={contact.id}>{contact.firstName}</li>
                   ))}
                 </ul>
-                <p className="mt-1 text-xs opacity-60">
+                <p className="mt-1 text-xs text-subtle">
                   The timeline below records why each of these was skipped, where one was skipped.
                 </p>
               </div>
             ) : null}
           </div>
-        </section>
+        </Card>
       ) : null}
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Timeline</h2>
-        <ol className="flex flex-col gap-1 font-mono text-sm">
+      <Card title="Timeline">
+        <ol className="flex flex-col">
           {timeline.map((entry) => (
-            <li key={entry.id}>
-              {new Date(entry.createdAt).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}{" "}
-              — {entry.message}
+            <li
+              key={entry.id}
+              className="flex gap-3 border-l-2 border-l-line py-1.5 pl-3 text-sm"
+            >
+              <span className="font-mono text-xs text-subtle">
+                {new Date(entry.createdAt).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+              <span>{entry.message}</span>
             </li>
           ))}
         </ol>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Summary</h2>
-        <div className="flex flex-col gap-3 rounded-md border border-black/10 p-4 text-sm dark:border-white/10">
-          <div>
-            <p className="font-medium">What happened?</p>
-            <p className="opacity-80">
-              {companionCalls[companionCalls.length - 1]?.summary ?? "No summary available yet."}
-            </p>
-          </div>
-          <div>
-            <p className="font-medium">What did KinCall do?</p>
-            <p className="opacity-80">{actionDescription}</p>
-          </div>
-          <div>
-            <p className="font-medium">Who is taking care of it?</p>
-            <p className="opacity-80">
-              {confirmation ? confirmation.result.summary : describeOwnership(event)}
-            </p>
-          </div>
-        </div>
-      </section>
-    </main>
+      </Card>
+    </PageShell>
   );
 }
 

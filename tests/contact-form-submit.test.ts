@@ -99,6 +99,70 @@ describe("submitContactForm — regression: form reference must survive the awai
   });
 });
 
+// Regression coverage for the stuck-disabled-button bug: `await fetchImpl(...)`
+// had no try/catch, so a network-level rejection (offline, DNS failure,
+// connection dropped) propagated out of submitContactForm, out of the caller's
+// click handler, and left its `busy` flag true forever — the submit button
+// stayed disabled for the rest of the session with no way back but a reload.
+describe("submitContactForm — regression: a thrown fetch must be a reported outcome, not an escape", () => {
+  it("reports a rejected request instead of throwing, and does not reset the form", async () => {
+    const form = fakeForm();
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    // The assertion that matters: this resolves rather than rejecting.
+    const result = await submitContactForm(form, VALID_FIELDS, {
+      personId: "person_marie",
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.networkError).toMatch(/could not reach the server/i);
+    // The failure belongs to no field, so no field is blamed for it.
+    expect(result.errors).toEqual({});
+    // Entered values survive a failed request.
+    expect(form.reset).not.toHaveBeenCalled();
+  });
+
+  it("reports a request that rejects after the connection opens", async () => {
+    const form = fakeForm();
+    const fetchImpl = vi.fn(
+      async () => Promise.reject(new Error("network error")) as unknown as Response
+    );
+
+    const result = await submitContactForm(form, VALID_FIELDS, {
+      personId: "person_marie",
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.networkError).toBeDefined();
+    expect(form.reset).not.toHaveBeenCalled();
+  });
+
+  it("does not set networkError for an ordinary server rejection", async () => {
+    // A 400 is a *response*, not a transport failure: it carries field errors
+    // and must not be reported as a connectivity problem.
+    const form = fakeForm();
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ errors: { phone: "Already in this circle." } }), {
+          status: 400,
+        })
+    );
+
+    const result = await submitContactForm(form, VALID_FIELDS, {
+      personId: "person_marie",
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.networkError).toBeUndefined();
+    expect(result.errors).toEqual({ phone: "Already in this circle." });
+  });
+});
+
 // Regression coverage for "TypeError: Failed to execute 'fetch' on 'Window':
 // Illegal invocation". A real browser's native fetch is a "legacy platform
 // object" method: it only works when invoked with the global object as its

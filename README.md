@@ -30,6 +30,9 @@ mode and the test suite need no configuration and make no network calls.
 
 ## Getting started
 
+Requires **Node 20.9+ or 22+** (declared in `package.json`'s `engines`). Node 21
+is excluded because Vitest does not support it.
+
 ```bash
 npm install
 cp .env.example .env.local
@@ -142,15 +145,31 @@ every restart — an event mid-cascade is orphaned, and its eventual result
 cannot be matched to anything.
 
 `KINCALL_PERSISTENCE=supabase` persists across restarts, redeploys and Vercel
-instances. Apply the migrations in order:
+instances. Apply **all** the migrations, in order — either with the Supabase CLI
+against a linked project:
+
+```bash
+npx supabase db push
+npx supabase migration list   # local and remote should match, with no drift
+```
+
+or directly, which is the full list and the required order:
 
 ```bash
 # 0004 must run after 0002: it revokes EXECUTE on functions that must exist.
-psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql
-psql "$DATABASE_URL" -f supabase/migrations/0002_functions.sql
-psql "$DATABASE_URL" -f supabase/migrations/0004_security.sql
-psql "$DATABASE_URL" -f supabase/migrations/0005_seed.sql
+psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql            # schema
+psql "$DATABASE_URL" -f supabase/migrations/0002_functions.sql       # atomic RPCs
+psql "$DATABASE_URL" -f supabase/migrations/0004_security.sql        # RLS + grants
+psql "$DATABASE_URL" -f supabase/migrations/0005_seed.sql            # demo rows
+psql "$DATABASE_URL" -f supabase/migrations/0006_reorder.sql         # cascade reordering
+psql "$DATABASE_URL" -f supabase/migrations/0007_archive_entities.sql # soft deletion
+psql "$DATABASE_URL" -f supabase/migrations/0008_call_attempts.sql   # bounded retries
+psql "$DATABASE_URL" -f supabase/migrations/0009_drop_event_priority.sql
 ```
+
+There is no `0003`: the number was skipped during Phase 5 and the gap is left as
+it is, since renumbering an applied migration would break every project already
+carrying it.
 
 Then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (neither prefixed
 `NEXT_PUBLIC_` — the service-role key bypasses Row Level Security and must
@@ -158,7 +177,9 @@ never reach client code) and set `KINCALL_PERSISTENCE=supabase`.
 
 **Rolling back** is the environment variable, not a code change: set it back to
 `memory` and redeploy. The schema is left untouched.
-`supabase/migrations/0000_rollback.sql` is the full teardown, and destroys data.
+`supabase/rollback/0000_rollback.sql` is the full teardown, and destroys data —
+it lives outside `migrations/` precisely so `supabase db push` can never pick it
+up.
 
 ### How a crash is survived
 

@@ -1039,6 +1039,151 @@ nor 0009 be applied in this change.
 
 ---
 
+## DEC-013 — Pre-release resilience, a shared design system, and error boundaries
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+The autonomous cascade was validated (fake mode, five scenarios, migrations 0001–0009 applied, 471
+tests green) but nothing had been built *around* it. An audit before any public deployment found one
+class of genuine defect and several silent-failure hazards:
+
+**1. Five of six interactive components could permanently disable themselves.** `PersonForm`,
+`ContactManager` (add and reorder), `DeletePersonButton`, `DeleteContactButton` and the shared
+`submitContactForm` all did `setBusy(true)` and then `await fetch(...)` with no `try`/`catch`. A
+network-level rejection — offline, DNS failure, a dropped connection — propagated out of the click
+handler and left the busy flag `true` for the rest of the session: the button stayed disabled with
+no route back but a full page reload. `LaunchDemoButton` was the only one that handled it. The
+`catch` calls a grep found in the others were all `response.json().catch(() => ({}))`, which
+protects the body parse, not the request. `PersonForm` additionally called `await response.json()`
+on its *success* path with no guard, so a 200 with an unexpected body threw the same way.
+
+**2. Two safety-net files carried a stale function signature.**
+`supabase/rollback/0000_rollback.sql` dropped `commit_transition_with_call_intent` with the
+pre-0008 ten-parameter signature. `DROP FUNCTION IF EXISTS` with a non-matching argument list is a
+silent no-op, so a teardown would have reported success while leaving the current eleven-parameter
+function in place. `tests/integration/supabase-security.test.ts` called the same RPC with the same
+stale ten-argument shape, so PostgREST could not resolve the function at all — its
+`expect(error).not.toBeNull()` passed on *"function does not exist"* rather than on a denied
+`EXECUTE` grant, meaning that one privilege check had not actually been running since 0008.
+
+**3. No error boundaries existed at all.** `app/error.tsx`, `app/global-error.tsx` and
+`app/not-found.tsx` were all absent, so any unhandled server error or unmatched route fell through
+to Next.js's own default screen.
+
+**4. There was no design system.** `app/globals.css` was the untouched `create-next-app` starter
+(`--background`/`--foreground` only). Every page hand-rolled its own `border-black/10`,
+`opacity-70`, `text-amber-700` utilities independently. There were five `aria-*` attributes in the
+whole of `app/`, zero `aria-invalid`, zero `aria-describedby`, no `focus-visible` styling and no
+`prefers-reduced-motion` handling.
+
+### Decision
+
+**1. Every client fetch is wrapped.** All six components now use one pattern: `try` around the
+request, a `catch` that records a message, and a `finally` guarded by a `navigating` flag — so a
+successful redirect keeps the control disabled through the route transition while every other exit,
+including a thrown request, releases it. `submitContactForm` gained an additive optional
+`networkError` field on `SubmitContactResult`, deliberately separate from `errors`: a transport
+failure belongs to no field, and reporting it as one ("First name: could not add this contact")
+tells the user to fix something that is not wrong. Every response body read — success paths
+included — is now guarded.
+
+**2. The two stale signatures are corrected**, both to the current post-0008 eleven-parameter form
+with `p_attempt_number integer` in position 10. Neither file has ever run against a database, so
+this is not an edit to an applied migration.
+
+**3. `app/error.tsx`, `app/global-error.tsx` and `app/not-found.tsx` are added.** None renders
+`error.message`, which can carry internal detail; they surface `error.digest` for log correlation
+instead. `global-error.tsx` is styled with **inline styles only** and imports no component: it
+replaces the root layout, so it is reached when the layout itself failed — possibly because the
+stylesheet or font never loaded — and a recovery screen that depends on the thing that just broke
+is not a recovery screen. All three state that nothing has been changed or deleted, and none of
+them implies anything about whether a check-in is in flight, since any route can reach them.
+
+**4. A shared design system in `app/ui/`**: `tokens.css` (imported once from `globals.css`;
+Tailwind v4 is CSS-first and this project has no `tailwind.config.*`), plus `button.tsx`,
+`surfaces.tsx` (`PageShell`, `PageHeader`, `Card`, `Badge`, `Notice`, `EmptyState`, `Skeleton`,
+`DetailRow`), `form-field.tsx`, `confirm-delete-button.tsx` and `tone.ts`. All five existing pages
+were migrated onto it; no page hand-rolls button or card markup any more.
+
+**5. `FormField` wires accessibility structurally rather than by convention.** `aria-invalid` and
+`aria-describedby` have to be set on the *control* while the message they point at lives outside
+it, which is why doing it by hand in every form had resulted in it being done in none of them. The
+component uses a render prop so the generated ids reach whichever control the caller uses, and it
+only references message ids that are actually rendered. `tokens.css` adds one `:focus-visible`
+treatment for every interactive element, and disables motion outright under
+`prefers-reduced-motion` rather than merely shortening it.
+
+**6. `ConfirmDeleteButton` consolidates the two near-identical archive buttons**, which now
+delegate to it. Confirmation stays the browser's native `window.confirm()` (DEC-009's reasoning is
+unchanged: no modal component exists, and a native dialog is keyboard- and screen-reader-operable
+with no dependency), but the trigger gained a **visible text label** instead of being an emoji
+glyph whose only textual identity was an `aria-label`.
+
+**7. `ATTENTION_UNRESOLVED` gets its own visual tone.** `StatusTone`
+(`lib/orchestration/person-status.ts`) gains `"unresolved"`, and that status returns it instead of
+`"attention"`. "We are currently contacting the circle" and "we finished the cascade and reached
+nobody" are different outcomes and were rendering identically. This remains an **operational**
+distinction: no severity is expressed in either direction (§7.5).
+
+**8. Documentation corrected to the current state**, without rewriting any decision history:
+`README.md`'s migration list showed only `0001, 0002, 0004, 0005` and now lists all eight files
+through `0009`, notes the deliberate `0003` gap, documents the required Node version, and points at
+`supabase/rollback/` rather than the `supabase/migrations/` path the script left in commit
+`be4b321`. `START_HERE.md`, which was entirely pre-implementation bootstrap instructions ("commit
+the frozen documentation before writing application code"), now orients a reader around the
+documents and names the specification clauses that approved decisions have superseded.
+
+**9. Repository hygiene.** `.DS_Store` and all eight `supabase/.temp/*` files (Supabase CLI session
+cache, regenerated by `supabase link`) were tracked; both are untracked and `supabase/.temp/` is
+now ignored. `package.json` declares `engines.node` as `^20.9.0 || >=22.0.0` — Next 16 requires
+20.9+, and Vitest excludes 21.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted, and no frozen document is edited. No new
+`EventStatus`, no new `TransitionEvent`, no new decision rule, no migration, and no change to any
+prompt or CALL-E schema: `git diff` on `lib/orchestration/engine.ts`,
+`decide-companion-action.ts`, `states.ts`, `transitions.ts`, `lib/database/*`, `lib/calle/*`,
+`prompts/*` and `supabase/migrations/*` is empty. The five fake scenarios produce their existing
+timelines and terminal statuses unchanged.
+
+`person-status.ts`'s new tone is presentation only — it changes which colour a label renders in,
+not which label, and nothing branches on it. The one behavioural change is that requests which
+previously threw now report a failure, which is strictly a repair.
+
+### Consequences
+
+- Test count grows from 471 to 479: four new cases on `submitContactForm` (a rejected request is a
+  reported outcome and does not reset the form; a rejection after the connection opens; a 4xx is
+  *not* reported as a connectivity problem) and a new `tests/person-status.test.ts` covering the
+  unresolved tone's distinctness, that an unresolved event is never calm, that a check-in closed
+  after the circle stepped in is labelled differently from one that was simply fine, and that every
+  `EventStatus` — including the retained legacy ones — still yields a label and a known tone.
+- `SubmitContactResult.networkError` is optional and additive, so the existing regression suite for
+  the `currentTarget` and "Illegal invocation" bugs was unaffected.
+- The `--background`/`--foreground` theme colours are gone. Nothing referenced `bg-foreground` or
+  `text-background` any more, verified before removal.
+- Accessibility is **improved, not audited**: no WCAG conformance is claimed.
+- The Supabase integration lane still cannot run — no `KINCALL_TEST_SUPABASE_*` variables are
+  configured, and pointing it at the live `SUPABASE_URL` would truncate real event history via
+  `kincall_test_reset()`. The security-test correction above is therefore verified by inspection of
+  the migration's own signature, not by execution.
+
+### Approval
+
+Project owner approval: approved as a pre-release readiness phase, with three design forks resolved
+before implementation — a contact's confirmation stays **terminal** (no human-blocking
+intervention state, preserving DEC-011's autonomy and `archivePerson`'s active-event refusal);
+contact availability will **order but never exclude** when it is built; and analytics will ship
+**count-based only**, with duration metrics omitted rather than shown as ~0 ms in fake mode and
+with false-positive and unnecessary-escalation rates rejected outright as unsupportable by any data
+KinCall holds.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

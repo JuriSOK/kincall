@@ -9,6 +9,14 @@ export interface ResettableForm {
 export interface SubmitContactResult {
   ok: boolean;
   errors: FieldErrors;
+  /**
+   * Set when the request never produced a usable response at all — offline, DNS
+   * failure, a connection dropped mid-flight. Deliberately separate from
+   * `errors`: a network failure belongs to no field, and reporting it as one
+   * ("First name: could not add this contact") tells the user to fix something
+   * that is not wrong. Callers render this on its own.
+   */
+  networkError?: string;
 }
 
 export interface SubmitContactDeps {
@@ -65,11 +73,25 @@ export async function submitContactForm(
   }
 
   const fetchImpl = deps.fetchImpl ?? defaultFetch;
-  const response = await fetchImpl(`/api/people/${deps.personId}/contacts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(local.values),
-  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(`/api/people/${deps.personId}/contacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(local.values),
+    });
+  } catch {
+    // A thrown fetch used to propagate all the way out of the caller's click
+    // handler, which left its `busy` flag stuck true and the submit button
+    // permanently disabled. It is now a reported outcome like any other, and
+    // the form is not reset, so the entered values survive.
+    return {
+      ok: false,
+      errors: {},
+      networkError: "Could not reach the server. Check your connection and try again.",
+    };
+  }
 
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };

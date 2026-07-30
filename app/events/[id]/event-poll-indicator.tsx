@@ -58,7 +58,7 @@ export function EventPollIndicator({
   if (!isWaitingStatus(status)) return null;
 
   return (
-    <span aria-live="polite" className="text-xs italic opacity-60">
+    <span aria-live="polite" className="text-xs italic text-subtle">
       Updating…
     </span>
   );

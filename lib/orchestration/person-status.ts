@@ -10,7 +10,13 @@ import { describeUnusablePhone } from "../phone";
 // describeAction/describeOwnership on the event page: a newly added status
 // fails typecheck here rather than silently falling through to a reassuring
 // message it was never checked against.
-export type StatusTone = "calm" | "attention" | "unknown";
+// "unresolved" is deliberately its own tone rather than a shade of "attention".
+// ATTENTION_UNRESOLVED is the one terminal outcome where KinCall finished its
+// configured cascade without reaching anybody (DEC-011), and it must not read
+// as interchangeable with "we are currently contacting the circle". It is still
+// an operational distinction, not a severity one — KinCall assesses no medical
+// severity in either direction (§7.5).
+export type StatusTone = "calm" | "attention" | "unresolved" | "unknown";
 
 export interface PersonStatus {
   label: string;
@@ -41,7 +47,7 @@ export function describePersonStatus(event: EventRecord | undefined): PersonStat
     case "HUMAN_REVIEW_REQUIRED":
       return { label: "Human review required", tone: "attention" };
     case "ATTENTION_UNRESOLVED":
-      return { label: "Unresolved — nobody could be reached", tone: "attention" };
+      return { label: "Unresolved — nobody could be reached", tone: "unresolved" };
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
       return event.decision === "CONTACT_TRUSTED_PERSON"

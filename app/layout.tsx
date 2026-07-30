@@ -18,6 +18,15 @@ export const metadata: Metadata = {
     "A multi-agent phone care coordinator that checks in on vulnerable people and coordinates their trusted contacts.",
 };
 
+// Matches ui/tokens.css's canvas in both schemes, so the browser chrome and any
+// overscroll area do not flash white against a warm page.
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fdfbf8" },
+    { media: "(prefers-color-scheme: dark)", color: "#191512" },
+  ],
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{

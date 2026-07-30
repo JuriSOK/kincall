@@ -8,6 +8,9 @@ import {
   validatePersonInput,
   type FieldErrors,
 } from "@/lib/validation/profile";
+import { Button } from "@/app/ui/button";
+import { controlClasses, FormField } from "@/app/ui/form-field";
+import { Notice } from "@/app/ui/surfaces";
 
 const PROFILE_LABELS: Record<string, string> = {
   standard: "Standard — warm and open-ended",
@@ -18,6 +21,10 @@ const PROFILE_LABELS: Record<string, string> = {
 export function PersonForm() {
   const router = useRouter();
   const [errors, setErrors] = useState<FieldErrors>({});
+  // A failure that belongs to no single field: the request never reached the
+  // server, or its response could not be read. Kept separate from `errors` so
+  // a network problem is not reported as if the user mistyped a name.
+  const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(formEvent: React.FormEvent<HTMLFormElement>) {
@@ -47,98 +54,113 @@ export function PersonForm() {
     }
 
     setSubmitting(true);
-    const response = await fetch("/api/people", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    setErrors({});
+    setFormError(null);
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };
-      setErrors(body.errors ?? { firstName: "Could not create this profile." });
-      setSubmitting(false);
-      return;
+    // `navigating` rather than an unconditional `finally { setSubmitting(false) }`:
+    // on success we leave the button disabled while the route transition runs,
+    // so it cannot be clicked twice. Every other exit — including a thrown
+    // fetch, which is what left this button disabled forever before — must
+    // release it.
+    let navigating = false;
+    try {
+      const response = await fetch("/api/people", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };
+        if (body.errors) {
+          setErrors(body.errors);
+        } else {
+          setFormError("Could not create this profile. Please try again.");
+        }
+        return;
+      }
+
+      // Guarded like the failure path: a 200 whose body is not the JSON we
+      // expect must not throw out of the handler.
+      const body = (await response.json().catch(() => null)) as { personId?: string } | null;
+      if (!body?.personId) {
+        setFormError("The profile may have been created, but the response could not be read. Reload this page to check.");
+        return;
+      }
+
+      navigating = true;
+      router.push(`/people/${body.personId}`);
+    } catch {
+      setFormError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      if (!navigating) setSubmitting(false);
     }
-
-    const { personId } = (await response.json()) as { personId: string };
-    router.push(`/people/${personId}`);
   }
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-5">
-      <Field label="First name" error={errors.firstName}>
-        <input
-          name="firstName"
-          required
-          maxLength={50}
-          className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-        />
-      </Field>
+      <FormField label="First name" error={errors.firstName}>
+        {(field) => <input {...field} name="firstName" required maxLength={50} className={controlClasses} />}
+      </FormField>
 
-      <Field label="Phone (E.164)" error={errors.phone}>
-        <input
-          name="phone"
-          type="tel"
-          required
-          placeholder="+33612345678"
-          className="w-full rounded-md border border-black/20 px-3 py-2 font-mono dark:border-white/20 dark:bg-transparent"
-        />
-      </Field>
+      <FormField label="Phone (E.164)" error={errors.phone}>
+        {(field) => (
+          <input
+            {...field}
+            name="phone"
+            type="tel"
+            required
+            placeholder="+33612345678"
+            className={`${controlClasses} font-mono`}
+          />
+        )}
+      </FormField>
 
-      <Field label="Language" error={errors.preferredLanguage}>
-        <select
-          name="preferredLanguage"
-          defaultValue="fr-FR"
-          className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-        >
-          {PREFERRED_LANGUAGES.map((language) => (
-            <option key={language} value={language}>
-              {language}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <FormField label="Language" error={errors.preferredLanguage}>
+        {(field) => (
+          <select {...field} name="preferredLanguage" defaultValue="fr-FR" className={controlClasses}>
+            {PREFERRED_LANGUAGES.map((language) => (
+              <option key={language} value={language}>
+                {language}
+              </option>
+            ))}
+          </select>
+        )}
+      </FormField>
 
-      <Field label="Conversation profile" error={errors.conversationProfile}>
-        <select
-          name="conversationProfile"
-          defaultValue="standard"
-          className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-        >
-          {CONVERSATION_PROFILES.map((profile) => (
-            <option key={profile} value={profile}>
-              {PROFILE_LABELS[profile] ?? profile}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <FormField label="Conversation profile" error={errors.conversationProfile}>
+        {(field) => (
+          <select {...field} name="conversationProfile" defaultValue="standard" className={controlClasses}>
+            {CONVERSATION_PROFILES.map((profile) => (
+              <option key={profile} value={profile}>
+                {PROFILE_LABELS[profile] ?? profile}
+              </option>
+            ))}
+          </select>
+        )}
+      </FormField>
 
-      <Field label="Preferred check-in time" error={errors.preferredCallTime}>
-        <input
-          name="preferredCallTime"
-          type="time"
-          defaultValue="09:00"
-          className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-        />
-      </Field>
+      <FormField label="Preferred check-in time" error={errors.preferredCallTime}>
+        {(field) => (
+          <input {...field} name="preferredCallTime" type="time" defaultValue="09:00" className={controlClasses} />
+        )}
+      </FormField>
 
-      <Field
+      <FormField
         label="Interests (comma separated)"
         error={errors.interests}
         hint="Mentioned by the Companion Agent to open the conversation naturally."
       >
-        <input
-          name="interests"
-          placeholder="gardening, family"
-          className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-        />
-      </Field>
+        {(field) => (
+          <input {...field} name="interests" placeholder="gardening, family" className={controlClasses} />
+        )}
+      </FormField>
 
-      <label className="flex items-start gap-3 rounded-md border border-black/10 p-4 text-sm dark:border-white/10">
-        <input name="consent" type="checkbox" className="mt-1" />
+      <label className="flex items-start gap-3 rounded-kc border border-line bg-sunken p-4 text-sm">
+        <input name="consent" type="checkbox" className="mt-1 accent-accent" />
         <span>
           <span className="font-medium">They have agreed to be called.</span>
-          <span className="block opacity-70">
+          <span className="mt-1 block text-muted">
             KinCall only calls people who have accepted automated calls, conversation analysis,
             and sharing the necessary facts with their trusted circle. Without this, the profile
             is saved but no check-in can be launched.
@@ -146,40 +168,17 @@ export function PersonForm() {
         </span>
       </label>
 
-      <p className="rounded-md border border-black/10 p-4 text-sm opacity-70 dark:border-white/10">
+      <p className="rounded-kc border border-line bg-sunken p-4 text-sm text-muted">
         The phone number is stored on the server only and masked wherever it is shown. An
         environment-variable override can still redirect this profile&apos;s live number if one is
         set.
       </p>
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-fit rounded-md border border-black/20 px-4 py-2 text-sm hover:border-black/40 disabled:opacity-50 dark:border-white/20 dark:hover:border-white/40"
-      >
-        {submitting ? "Creating…" : "Create profile"}
-      </button>
-    </form>
-  );
-}
+      {formError ? <Notice tone="danger">{formError}</Notice> : null}
 
-function Field({
-  label,
-  error,
-  hint,
-  children,
-}: {
-  label: string;
-  error?: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-sm font-medium">{label}</span>
-      {children}
-      {hint && !error ? <span className="text-xs opacity-60">{hint}</span> : null}
-      {error ? <span className="text-xs text-red-600 dark:text-red-400">{error}</span> : null}
-    </label>
+      <Button type="submit" disabled={submitting}>
+        {submitting ? "Creating…" : "Create profile"}
+      </Button>
+    </form>
   );
 }

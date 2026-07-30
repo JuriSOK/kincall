@@ -1,7 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { ConfirmDeleteButton } from "@/app/ui/confirm-delete-button";
 
 interface Props {
   personId: string;
@@ -14,54 +13,18 @@ interface Props {
 }
 
 // Soft deletion (optional interface administration, not core orchestration —
-// see docs/DECISION_LOG.md DEC-009). The confirmation dialog is the browser's
-// native confirm(): there is no modal component in this codebase, and a
-// native dialog needs no dependency and is unambiguous.
+// see docs/DECISION_LOG.md DEC-009). The behaviour lives in
+// app/ui/confirm-delete-button.tsx, shared with trusted-contact archiving;
+// this wrapper only supplies the wording and the endpoint.
 export function DeletePersonButton({ personId, personName, mode }: Props) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleClick() {
-    const confirmed = window.confirm(
-      `Delete ${personName}? This removes them from view but keeps their history.`
-    );
-    if (!confirmed) return;
-
-    setBusy(true);
-    setError(null);
-
-    const response = await fetch(`/api/people/${personId}`, { method: "DELETE" });
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
-      // Nothing removed: the error is shown and the list/page is untouched.
-      setError(body.error ?? "Could not delete this profile.");
-      setBusy(false);
-      return;
-    }
-
-    if (mode === "redirect-home") {
-      router.push("/");
-      return;
-    }
-    setBusy(false);
-    router.refresh();
-  }
-
   return (
-    <span className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={busy}
-        aria-label={`Delete ${personName}`}
-        title={`Delete ${personName}`}
-        className="rounded p-1 text-sm leading-none opacity-50 hover:text-red-600 hover:opacity-100 disabled:opacity-30 dark:hover:text-red-400"
-      >
-        🗑
-      </button>
-      {error ? <span className="text-xs text-red-600 dark:text-red-400">{error}</span> : null}
-    </span>
+    <ConfirmDeleteButton
+      endpoint={`/api/people/${personId}`}
+      subject={personName}
+      label="Remove"
+      confirmMessage={`Remove ${personName}? They disappear from the list, and their check-in history is kept.`}
+      fallbackError="Could not remove this profile."
+      onSuccess={mode}
+    />
   );
 }

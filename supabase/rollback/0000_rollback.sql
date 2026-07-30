@@ -8,8 +8,13 @@
 drop function if exists archive_trusted_contact(text);
 drop function if exists archive_person(text);
 drop function if exists reorder_trusted_contacts(text, text[]);
+-- Signature must match the CURRENT function exactly: `drop function if exists`
+-- with a non-matching argument list is a silent no-op, which would leave this
+-- function orphaned by a teardown that reports success. Migration 0008 added
+-- `p_attempt_number integer` in position 10 (DEC-011), replacing the pre-0008
+-- ten-parameter form.
 drop function if exists commit_transition_with_call_intent(
-  text, text, text, text, text, text[], jsonb, text, text, text);
+  text, text, text, text, text, text[], jsonb, text, text, integer, text);
 drop function if exists commit_transition(text, text, text, text, text, text[], jsonb);
 drop function if exists release_call_event_lease(text, uuid);
 drop function if exists finalize_call_event_result(text, uuid, text, text, jsonb, timestamptz);

@@ -3,6 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FieldErrors } from "@/lib/validation/profile";
+import { Button } from "@/app/ui/button";
+import { controlClasses, FormField } from "@/app/ui/form-field";
+import { Card, EmptyState, Notice } from "@/app/ui/surfaces";
 import { submitContactForm } from "./contact-form-submit";
 import { DeleteContactButton } from "./delete-contact-button";
 
@@ -29,7 +32,12 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
   const router = useRouter();
   const [order, setOrder] = useState(contacts.map((contact) => contact.id));
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Announced politely so a keyboard or screen-reader user gets confirmation
+  // that a move or a save actually took effect — otherwise reordering is
+  // silent and there is no way to tell.
+  const [announcement, setAnnouncement] = useState("");
 
   // useState's initializer only runs on mount, so without this, adding or
   // deleting a contact and calling router.refresh() would leave `order`
@@ -51,29 +59,44 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
     const next = [...order];
     [next[index], next[target]] = [next[target], next[index]];
     setOrder(next);
+    const moved = byId.get(next[target]);
+    if (moved) {
+      setAnnouncement(`${moved.firstName} moved to position ${target + 1} of ${next.length}. Not saved yet.`);
+    }
   }
 
   async function saveOrder() {
     setBusy(true);
-    const response = await fetch(`/api/people/${personId}/contacts/order`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderedIds: order }),
-    });
+    setFormError(null);
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };
-      setErrors(body.errors ?? { orderedIds: "Could not save the order." });
-      // Rejected whole — put the list back exactly as it was, so the screen
-      // never shows an order the cascade will not follow.
+    try {
+      const response = await fetch(`/api/people/${personId}/contacts/order`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderedIds: order }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { errors?: FieldErrors };
+        setErrors(body.errors ?? { orderedIds: "Could not save the order." });
+        // Rejected whole — put the list back exactly as it was, so the screen
+        // never shows an order the cascade will not follow.
+        setOrder(contacts.map((contact) => contact.id));
+        return;
+      }
+
+      setErrors({});
+      setAnnouncement("Cascade order saved.");
+      router.refresh();
+    } catch {
+      // Same reasoning as the rejection path: the saved order is unknown, so
+      // the displayed order must go back to the last known-good one rather
+      // than keep showing an order the cascade may not follow.
       setOrder(contacts.map((contact) => contact.id));
+      setFormError("Could not reach the server. The order was not saved.");
+    } finally {
       setBusy(false);
-      return;
     }
-
-    setErrors({});
-    setBusy(false);
-    router.refresh();
   }
 
   async function addContact(formEvent: React.FormEvent<HTMLFormElement>) {
@@ -91,39 +114,58 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
     };
 
     setBusy(true);
-    // fetchImpl is intentionally omitted: submitContactForm's own default
-    // safely wraps the global fetch. Passing the bare `fetch` reference here
-    // directly is exactly the "Illegal invocation" bug this must never repeat
-    // — browsers require native fetch to be called with the global object as
-    // `this`, and handing the reference to another module detaches it.
-    const result = await submitContactForm(form, fieldValues, { personId });
-    setBusy(false);
+    setFormError(null);
 
-    if (!result.ok) {
-      // The form is deliberately not reset here: the entered values stay in
-      // the (uncontrolled) inputs exactly as the user left them.
-      setErrors(result.errors);
-      return;
+    try {
+      // fetchImpl is intentionally omitted: submitContactForm's own default
+      // safely wraps the global fetch. Passing the bare `fetch` reference here
+      // directly is exactly the "Illegal invocation" bug this must never repeat
+      // — browsers require native fetch to be called with the global object as
+      // `this`, and handing the reference to another module detaches it.
+      const result = await submitContactForm(form, fieldValues, { personId });
+
+      if (!result.ok) {
+        // The form is deliberately not reset here: the entered values stay in
+        // the (uncontrolled) inputs exactly as the user left them.
+        setErrors(result.errors);
+        if (result.networkError) setFormError(result.networkError);
+        return;
+      }
+
+      setErrors({});
+      setAnnouncement("Contact added.");
+      router.refresh();
+    } catch {
+      // submitContactForm reports a failed request rather than throwing, so
+      // this is the belt-and-braces case: anything unexpected still releases
+      // the button instead of disabling it for the rest of the session.
+      setFormError("Could not add this contact. Please try again.");
+    } finally {
+      setBusy(false);
     }
-
-    setErrors({});
-    router.refresh();
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">
-          Cascade order
-        </h2>
-        <p className="text-sm opacity-70">
-          KinCall calls the circle in this order and stops as soon as someone confirms.
-        </p>
+    <div className="flex flex-col gap-6">
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
 
+      <Card
+        title="Cascade order"
+        description="KinCall calls the circle in this order and stops as soon as someone confirms."
+        actions={
+          dirty ? (
+            <Button onClick={saveOrder} disabled={busy} size="sm">
+              {busy ? "Saving…" : "Save order"}
+            </Button>
+          ) : null
+        }
+      >
         {order.length === 0 ? (
-          <p className="rounded-md border border-black/10 px-4 py-3 text-sm opacity-70 dark:border-white/10">
-            No trusted contacts yet. Add one below.
-          </p>
+          <EmptyState title="No trusted contacts yet">
+            Add the first person KinCall should call when a check-in needs attention.
+          </EmptyState>
         ) : (
           <ol className="flex flex-col gap-2">
             {order.map((id, index) => {
@@ -133,36 +175,38 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
               return (
                 <li
                   key={id}
-                  className="flex items-center gap-3 rounded-md border border-black/10 px-4 py-3 dark:border-white/10"
+                  className="flex flex-wrap items-center gap-3 rounded-kc border border-line bg-sunken px-4 py-3"
                 >
-                  <span className="w-6 text-sm opacity-60">{index + 1}.</span>
-                  <span className="flex-1">
-                    {contact.firstName} — {contact.relationship}
-                    <span className="ml-2 font-mono text-xs opacity-50">{contact.maskedPhone}</span>
+                  <span className="w-6 text-sm text-subtle">{index + 1}.</span>
+                  <span className="min-w-48 flex-1">
+                    <span className="text-sm font-medium">{contact.firstName}</span>
+                    <span className="text-sm text-muted"> — {contact.relationship}</span>
+                    <span className="ml-2 font-mono text-xs text-subtle">{contact.maskedPhone}</span>
                     {state && state.kind !== "ready" && state.kind !== "fake_mode" ? (
-                      <span className="block text-xs text-amber-700 dark:text-amber-400">
-                        {state.message}
-                      </span>
+                      <span className="mt-1 block text-xs text-attention-ink">{state.message}</span>
                     ) : null}
                   </span>
-                  <button
-                    type="button"
+                  {/* Kept as the accessible ordering path: plain buttons work
+                      with a keyboard and a screen reader without any of the
+                      pointer-event handling drag-and-drop needs. */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => move(index, -1)}
                     disabled={index === 0 || busy}
                     aria-label={`Move ${contact.firstName} earlier`}
-                    className="rounded border border-black/20 px-2 py-1 text-xs disabled:opacity-30 dark:border-white/20"
                   >
                     ↑
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => move(index, 1)}
                     disabled={index === order.length - 1 || busy}
                     aria-label={`Move ${contact.firstName} later`}
-                    className="rounded border border-black/20 px-2 py-1 text-xs disabled:opacity-30 dark:border-white/20"
                   >
                     ↓
-                  </button>
+                  </Button>
                   <DeleteContactButton
                     personId={personId}
                     contactId={contact.id}
@@ -175,89 +219,69 @@ export function ContactManager({ personId, contacts, readiness }: Props) {
         )}
 
         {errors.orderedIds ? (
-          <p className="text-xs text-red-600 dark:text-red-400">{errors.orderedIds}</p>
+          <p role="alert" className="mt-3 text-xs font-medium text-danger">
+            {errors.orderedIds}
+          </p>
         ) : null}
+      </Card>
 
-        {dirty ? (
-          <button
-            type="button"
-            onClick={saveOrder}
-            disabled={busy}
-            className="w-fit rounded-md border border-black/20 px-4 py-2 text-sm hover:border-black/40 disabled:opacity-50 dark:border-white/20"
-          >
-            {busy ? "Saving…" : "Save order"}
-          </button>
-        ) : null}
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium uppercase tracking-wide opacity-60">Add a contact</h2>
+      <Card title="Add a contact">
         <form onSubmit={addContact} className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">First name</span>
-            <input
-              name="firstName"
-              required
-              maxLength={50}
-              className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-            />
-            {errors.firstName ? (
-              <span className="text-xs text-red-600 dark:text-red-400">{errors.firstName}</span>
-            ) : null}
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Phone (E.164)</span>
-            <input
-              name="phone"
-              type="tel"
-              required
-              placeholder="+33612345678"
-              className="w-full rounded-md border border-black/20 px-3 py-2 font-mono dark:border-white/20 dark:bg-transparent"
-            />
-            {errors.phone ? (
-              <span className="text-xs text-red-600 dark:text-red-400">{errors.phone}</span>
-            ) : (
-              <span className="text-xs opacity-60">
-                Stored on the server, masked wherever it is shown. An environment-variable
-                override can still redirect this contact&apos;s live number if one is set.
-              </span>
+          <FormField label="First name" error={errors.firstName}>
+            {(field) => (
+              <input {...field} name="firstName" required maxLength={50} className={controlClasses} />
             )}
-          </label>
+          </FormField>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Relationship</span>
-            <input
-              name="relationship"
-              required
-              maxLength={40}
-              placeholder="daughter, son, trusted neighbour"
-              className="w-full rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
-            />
-            {errors.relationship ? (
-              <span className="text-xs text-red-600 dark:text-red-400">{errors.relationship}</span>
-            ) : null}
-          </label>
+          <FormField
+            label="Phone (E.164)"
+            error={errors.phone}
+            hint="Stored on the server, masked wherever it is shown. An environment-variable override can still redirect this contact's live number if one is set."
+          >
+            {(field) => (
+              <input
+                {...field}
+                name="phone"
+                type="tel"
+                required
+                placeholder="+33612345678"
+                className={`${controlClasses} font-mono`}
+              />
+            )}
+          </FormField>
 
-          <label className="flex items-start gap-3 text-sm">
-            <input name="consent" type="checkbox" className="mt-1" />
+          <FormField label="Relationship" error={errors.relationship}>
+            {(field) => (
+              <input
+                {...field}
+                name="relationship"
+                required
+                maxLength={40}
+                placeholder="daughter, son, trusted neighbour"
+                className={controlClasses}
+              />
+            )}
+          </FormField>
+
+          <label className="flex items-start gap-3 rounded-kc border border-line bg-sunken p-4 text-sm">
+            <input name="consent" type="checkbox" className="mt-1 accent-accent" />
             <span>
-              They have agreed to be called by KinCall on this person&apos;s behalf.
-              <span className="block opacity-70">
+              <span className="font-medium">
+                They have agreed to be called by KinCall on this person&apos;s behalf.
+              </span>
+              <span className="mt-1 block text-muted">
                 Without this, the contact is saved but is skipped by the cascade.
               </span>
             </span>
           </label>
 
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-fit rounded-md border border-black/20 px-4 py-2 text-sm hover:border-black/40 disabled:opacity-50 dark:border-white/20"
-          >
-            Add contact
-          </button>
+          {formError ? <Notice tone="danger">{formError}</Notice> : null}
+
+          <Button type="submit" disabled={busy} className="w-fit">
+            {busy ? "Adding…" : "Add contact"}
+          </Button>
         </form>
-      </section>
+      </Card>
     </div>
   );
 }

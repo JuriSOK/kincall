@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getRepository } from "@/lib/database/store";
 import { maskPhone } from "@/lib/phone";
 import { describeCallReadiness } from "@/lib/orchestration/person-status";
+import { PageHeader, PageShell } from "@/app/ui/surfaces";
 import { ContactManager } from "./contact-manager";
 
 // PRODUCT_SPECIFICATION.md §13.1: "création d'un cercle de confiance" and
@@ -39,15 +40,18 @@ export default async function ContactsPage({ params }: { params: Promise<{ id: s
   }));
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-1 flex-col gap-8 p-8">
-      <div className="flex flex-col gap-1">
-        <Link href={`/people/${person.id}`} className="text-sm opacity-60 hover:underline">
+    <PageShell width="narrow">
+      <div className="flex flex-col gap-4">
+        <Link href={`/people/${person.id}`} className="w-fit text-sm text-muted hover:text-accent">
           ← {person.firstName}
         </Link>
-        <h1 className="text-3xl font-semibold">Trusted circle</h1>
+        <PageHeader
+          title="Trusted circle"
+          lead={`The people KinCall calls when a check-in for ${person.firstName} needs attention. Each is called at most twice, and the cascade stops as soon as someone confirms.`}
+        />
       </div>
 
       <ContactManager personId={person.id} contacts={contactSummaries} readiness={readiness} />
-    </main>
+    </PageShell>
   );
 }
