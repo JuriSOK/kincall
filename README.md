@@ -142,10 +142,10 @@ No recurring scheduling, and nothing deployed yet.
 | Route | What it is |
 |---|---|
 | `/` | Public marketing landing page — no repository access, no Nav. `Get started` leads to `/dashboard`. |
-| `/dashboard` | The operational home: unresolved cases first, configuration gaps, a count-based KPI strip, every profile, and recent activity grouped by day. |
+| `/dashboard` | The operational home: unresolved cases first, configuration gaps, a count-based KPI strip, schedule configuration counts, upcoming check-ins, every profile, and recent activity grouped by day. |
 | `/history` | A monthly calendar (three neutral outcome categories, no medical-severity colour scale) plus a filterable, day-grouped list of every check-in. |
 | `/people/new` | Create a profile — avatar, identity, check-in preferences, conversation preferences, consent. |
-| `/people/[id]` | The profile page: avatar, language, timezone, masked phone state, consent, interests, conversation preferences and notes, check-in time/days/schedule state, trusted-circle summary, a person-specific KPI panel, and event history. |
+| `/people/[id]` | The profile page: avatar, language, timezone, masked phone state, consent, interests, conversation preferences and notes, a Schedule card (state, next planned check-in, Pause/Resume, Launch demo), trusted-circle summary, a person-specific KPI panel, and event history. |
 | `/people/[id]/edit` | Edit the profile fields above (not first name or phone — see "Profiles" below). |
 | `/people/[id]/contacts`, `/events/[id]` | Unchanged from earlier phases. |
 
@@ -166,8 +166,8 @@ the week, plus an `active`/`paused`/`inactive` state).
 `scheduleState` are stored and displayed so the interface can collect an
 intended schedule; nothing reads them to place a call automatically. The only
 way a check-in happens is `Call now` / `Launch demo`, exactly as before. A
-future phase would add the scheduler that actually reads this configuration —
-see `docs/DECISION_LOG.md` DEC-015.
+future phase would add the actual scheduler — see `docs/DECISION_LOG.md`
+DEC-015 and DEC-016.
 
 `conversation_notes` is stored and shown on the profile page, but is **not**
 sent to CALL-E in this phase — the validator can mechanically guarantee "no
@@ -199,14 +199,42 @@ Deliberately **not** shown, in any form:
   knowing whether attention was *actually* warranted, which nothing in this
   product ever learns. See `docs/DECISION_LOG.md` DEC-014.
 
-### One fixed display timezone, for now
+### Deterministic next-check-in calculation, and Pause/Resume — planned configuration, never an execution
 
-Every date and time shown anywhere (`/dashboard`, `/history`, the person and
-event pages) uses `Europe/Paris`, explicitly — never the server's own
-timezone (which depends on which region a serverless function happens to run
-in) and never the visitor's browser timezone. No person has a persisted
-timezone yet; when one exists (a later phase), it should be used in place of
-this fixed fallback. See `lib/presentation/format-date.ts`.
+`lib/schedule/next-check-in.ts`'s `computeNextCheckIn(schedule, now)` is a pure
+function that turns a stored `{ timezone, preferredCallTime, checkInDays,
+scheduleState }` into either a "no occurrence" result (`paused`, `inactive`, or
+`no_days_selected`, when no valid day is selected) or the ISO instant of the
+**first scheduled occurrence strictly after `now`**. It always uses the
+**person's own persisted IANA timezone** — never the browser's or the server
+process's default — built entirely from the platform's own `Intl.DateTimeFormat`
+with an explicit `timeZone`; no timezone library was added, since Node's ICU
+build already carries the full IANA database this needs.
+
+DST is handled explicitly, not ignored: a spring-forward request for a
+nonexistent local time (e.g. `02:30` on the night the clock jumps from 02:00 to
+03:00) resolves forward to the first valid instant after the gap; a fall-back
+request for a repeated local time resolves, deterministically, to the
+**earlier** of the two UTC instants. Both are covered by dedicated tests
+against real Europe/Paris 2026 transitions. See `docs/DECISION_LOG.md`
+DEC-016 for the full reasoning.
+
+**This is a calculation, not a scheduler.** Nothing anywhere reads its output
+to place a call — no cron, no background job, no unattended calling exists in
+this codebase. `Call now` / `Launch demo` remain the only trigger, and neither
+one reads or writes any schedule field. The person page's Schedule card adds a
+**Pause/Resume** control that flips `scheduleState` through the exact same
+`PATCH /api/people/[id]` route and validation the full profile-edit form uses
+— a minimal one-field patch, not a second write path — with no optimistic UI:
+the control's label only changes once the server has confirmed the write.
+
+Every date and time shown for **events** (`/dashboard`'s recent activity,
+`/history`, the event page) still uses a fixed `Europe/Paris` display timezone,
+explicitly — never the server's own region-dependent timezone and never the
+visitor's browser timezone; see `lib/presentation/format-date.ts`. Schedule-
+related text (next planned check-in, "Today"/"Tomorrow" wording) is the one
+place that instead uses each **person's own** persisted timezone, since that is
+what the schedule configuration is defined in.
 
 ## Before a public deployment
 

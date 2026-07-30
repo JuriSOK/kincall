@@ -1468,6 +1468,121 @@ explicit decision to wire it in.
 
 ---
 
+## DEC-016 — Deterministic next-check-in calculation, and pause/resume — planned configuration only, never an execution
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+DEC-015 stored a schedule configuration (`timezone`, `preferredCallTime`, `checkInDays`,
+`scheduleState`) but never computed anything from it: the person page rendered the static string
+"Preferred check-in time: daily at {preferredCallTime}", never an actual next occurrence, and there
+was no way to pause a schedule short of a full profile edit. Stage D's brief asks for a real,
+deterministic "next planned check-in" computation, presentation of it across the person page and
+dashboard, and a lightweight pause/resume control — explicitly **not** a scheduler: no cron, no
+background job, and no code path that places a call other than the existing `Call now` / `Launch
+demo` trigger.
+
+### Decision
+
+**1. `computeNextCheckIn` (`lib/schedule/next-check-in.ts`), pure and dependency-free.** Given a
+person's stored `{ timezone, preferredCallTime, checkInDays, scheduleState }` and an explicit `now`
+(never the ambient clock), it returns one of four kinds: `"paused"` and `"inactive"` when
+`scheduleState` is not `"active"`; `"no_days_selected"` when `checkInDays` is empty; otherwise
+`"scheduled"` with the ISO instant of the first occurrence strictly after `now`. It scans 8
+consecutive calendar days in the person's **own** IANA timezone (never the browser's or server
+process's default), which both covers every possible ISO weekday at least once and correctly
+handles "week wrap" (e.g. only Monday selected, evaluated on a Tuesday). No timezone library was
+added: every conversion is built from `Intl.DateTimeFormat` with an explicit `timeZone`, the same
+built-in guarantee `lib/presentation/format-date.ts` already relies on for the fixed Europe/Paris
+event timestamps elsewhere — Node's ICU build ships the full IANA database, so a library would add
+a dependency without adding a capability this codebase doesn't already have safe access to.
+
+**2. DST is resolved explicitly, not ignored.** `zonedWallClockToUtc` samples the zone's UTC offset
+at hourly resolution across a ±26-hour window around a naive guess, builds one UTC candidate per
+distinct offset, and keeps only the candidates whose formatted wall-clock actually matches the
+target: zero matches means the requested local time falls in a spring-forward **gap** (resolved
+forward to the first valid instant, found by binary-searching the transition boundary to
+sub-second precision and rounding to the exact whole-minute transition); more than one match means
+an autumn **fall-back ambiguity** (resolved, deterministically, to the **earlier** of the two UTC
+instants — a documented choice, not an arbitrary one, and covered by explicit tests against the
+real Europe/Paris 2026 transitions, 29 March and 25 October).
+
+**3. Pause/Resume reuses the existing PATCH route, not a second write path.**
+`ScheduleToggleButton` (`app/(app)/people/[id]/schedule-toggle-button.tsx`) sends exactly
+`{ scheduleState }` through `submitScheduleToggle` to the same `PATCH /api/people/[id]` route and
+the same `validateUpdatePersonInput` that the full profile-edit form already uses (DEC-015) — a
+minimal one-field patch, never a duplicate schedule-configuration surface. The control shows no
+optimistic state: its own label does not change until the server confirms the write and
+`router.refresh()` re-reads the authoritative `scheduleState`; a thrown `fetch` or a non-2xx
+response restores the control to its previous label with an inline error, never leaving it stuck
+mid-save.
+
+**4. Presentation never states a computed occurrence as guaranteed.** `formatNextCheckIn` /
+`formatOccurrence` (`lib/schedule/format-schedule.ts`) always prefix a resolved occurrence with
+"Next planned check-in", never bare "Next check-in", and the dashboard's new sections are captioned
+"Scheduled configuration, not a guarantee" / "no automatic scheduler places these calls yet". A
+paused, inactive, or unconfigured (`no_days_selected`) profile renders an explicit fallback string
+("Schedule paused" / "Schedule inactive" / "No check-in days selected") and is excluded entirely —
+never shown with a placeholder occurrence — from the dashboard's "Upcoming check-ins" list
+(`lib/dashboard/upcoming-check-ins.ts`). Raw values are never rendered directly: not the bare
+`scheduleState` string, not the raw `checkInDays` array, not a timezone identifier without the local
+time it belongs with — local time and timezone are always one text node, so assistive technology
+announces them together.
+
+**5. Nothing here creates an event.** `computeNextCheckIn`, `computeUpcomingCheckIns`, and every
+presentation helper are pure functions of already-loaded data; none calls `createEvent` or any
+repository write. Rendering a "next planned check-in" on the dashboard or the person page is exactly
+that — a render — and a planned occurrence never appears in `/history` or on any event timeline,
+which continue to show only persisted, actually-occurred events. `Call now` / `Launch demo` remain
+the only code path anywhere in this product that starts a check-in, and neither reads nor writes
+any schedule field: `launch-demo-button.tsx` posts to `/api/events/start` exactly as before this
+change.
+
+### Product-scope check
+
+No feature is added, removed, or reinterpreted: §13.2's "planification récurrente" remains
+optional and unbuilt — this phase computes and displays what a stored configuration *would* mean,
+it does not execute it. No cron, background job, or orchestration-framework dependency was
+introduced. `git diff` on `lib/orchestration/*`, `lib/calle/*`, `prompts/*`,
+`lib/kpi/dashboard-kpis.ts`, and `supabase/migrations/0001–0010` is empty, and no migration 0011 was
+created — every column this phase reads (`timezone`, `preferredCallTime`, `checkInDays`,
+`scheduleState`) already exists from DEC-015.
+
+### Consequences
+
+- New: `lib/schedule/next-check-in.ts`, `lib/schedule/format-schedule.ts` (moved `WEEKDAYS`,
+  `formatCheckInDays`, `SCHEDULE_STATE_LABEL` here from `profile-form-constants.ts`, now the single
+  source of truth for schedule-domain presentation), `lib/dashboard/upcoming-check-ins.ts`,
+  `app/(app)/people/[id]/schedule-toggle-submit.ts`, `app/(app)/people/[id]/schedule-toggle-
+  button.tsx`.
+- `app/(app)/people/[id]/page.tsx` gained a "Schedule" card (state badge, next planned check-in,
+  timezone/time/days, Pause/Resume, Launch demo) replacing the old static "Preferred check-in time"
+  line.
+- `app/(app)/dashboard/page.tsx` gained a "Schedule configuration" card (active / paused /
+  incomplete counts, partitioned directly from each person's own `computeNextCheckIn` kind — never
+  a second, divergent count) and an "Upcoming check-ins" card, both visually separate from the
+  existing period-based "Operational activity" KPI strip, since these are current-configuration
+  snapshots, not 7/30/90-day metrics.
+- `app/ui/profile-card.tsx`'s `preferredCallTime: string` prop became `scheduleSummary: string`, a
+  pre-formatted line built by the caller via `formatNextCheckIn` — the component itself computes no
+  schedule.
+- No migration added; no existing migration edited.
+- Test count grows from 589 to (reported in the final verification below): `next-check-in.ts`'s DST
+  gap/ambiguity/week-wrap/cross-process-timezone behaviour, `format-schedule.ts`'s formatting,
+  `upcoming-check-ins.ts`'s sort/bound/exclusion, and `schedule-toggle-submit.ts`'s success/
+  network-failure paths.
+
+### Approval
+
+Project owner approval: approved for exactly this scope — deterministic next-check-in computation,
+its presentation on the person page and dashboard, and pause/resume — with an actual scheduler
+(cron or any unattended calling), Stage E (contact availability), and Stage G (fake SMS) explicitly
+out of scope and not begun.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

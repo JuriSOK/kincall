@@ -1,7 +1,13 @@
 // Shared between the create form (people/new/person-form.tsx) and the edit
 // form (people/[id]/edit/person-edit-form.tsx), so the two never drift apart
-// on what a "conversation profile" label reads, which zones are offered, or
-// how a weekday is labelled.
+// on what a "conversation profile" label reads or which timezones are
+// offered.
+//
+// The weekday list, day/state formatting (WEEKDAYS, formatCheckInDays,
+// SCHEDULE_STATE_LABEL) moved to lib/schedule/format-schedule.ts in Stage D:
+// those are schedule DOMAIN presentation, needed by the dashboard and person
+// page too, not merely form-specific constants — see that module for the
+// single source of truth.
 
 export const PROFILE_LABELS: Record<string, string> = {
   standard: "Standard — warm and open-ended",
@@ -26,32 +32,3 @@ export const COMMON_TIMEZONES = [
   "America/Los_Angeles",
   "UTC",
 ] as const;
-
-export const WEEKDAYS: { value: number; label: string }[] = [
-  { value: 1, label: "Mon" },
-  { value: 2, label: "Tue" },
-  { value: 3, label: "Wed" },
-  { value: 4, label: "Thu" },
-  { value: 5, label: "Fri" },
-  { value: 6, label: "Sat" },
-  { value: 7, label: "Sun" },
-];
-
-// A one-line, human-readable rendering of the stored check-in days — used on
-// the person page. "Every day" reads better than "Mon, Tue, Wed, Thu, Fri,
-// Sat, Sun" for the common case.
-export function formatCheckInDays(days: number[]): string {
-  if (days.length === 7) return "Every day";
-  if (days.length === 0) return "No days selected";
-  const sorted = [...days].sort((a, b) => a - b);
-  return sorted.map((day) => WEEKDAYS.find((w) => w.value === day)?.label ?? String(day)).join(", ");
-}
-
-// A plain-language label for the stored schedule configuration (Stage C).
-// Deliberately makes no claim about a computed next occurrence — see
-// docs/DECISION_LOG.md DEC-015 and the person page's own comment.
-export const SCHEDULE_STATE_LABEL: Record<string, string> = {
-  active: "Active",
-  paused: "Paused",
-  inactive: "Inactive",
-};

@@ -1,14 +1,19 @@
+import Link from "next/link";
 import { getRepository } from "@/lib/database/store";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
 import { detectConfigurationGaps, type ConfigurationGap } from "@/lib/dashboard/configuration-gaps";
 import { groupByDay } from "@/lib/dashboard/group-by-day";
 import { partitionUnresolvedEvents } from "@/lib/dashboard/partition-unresolved";
+import { computeUpcomingCheckIns } from "@/lib/dashboard/upcoming-check-ins";
 import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
 import { parsePeriod, periodSince } from "@/lib/kpi/period";
 import { describeAction } from "@/lib/presentation/event-summary";
 import { buildHistoryEventView } from "@/lib/presentation/history-view";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
+import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
+import { formatNextCheckIn, formatOccurrence } from "@/lib/schedule/format-schedule";
 import { ActivityRow } from "@/app/ui/activity-row";
+import { Avatar } from "@/app/ui/avatars/avatar";
 import { ButtonLink } from "@/app/ui/button";
 import { KpiCard } from "@/app/ui/kpi-card";
 import { PeriodSelector } from "@/app/ui/period-selector";
@@ -25,6 +30,10 @@ const RECENT_EVENTS_LIMIT = 500;
 // but a glanceable activity feed does not need hundreds of rows. The full,
 // filterable list lives on /history.
 const RECENT_ACTIVITY_DISPLAY_LIMIT = 20;
+// How many rows "Upcoming check-ins" shows (Stage D / DEC-016) — a
+// glanceable preview, not the full schedule; every profile still has its own
+// computed next check-in on its person page.
+const UPCOMING_CHECK_INS_LIMIT = 8;
 
 export default async function DashboardPage({
   searchParams,
@@ -36,6 +45,11 @@ export default async function DashboardPage({
   const repository = getRepository();
 
   const people = await repository.listPeople();
+
+  // Stage D (DEC-016): computed once for this render and threaded through
+  // every schedule computation below, so "today"/"tomorrow" and every
+  // occurrence agree with each other within a single page load.
+  const now = new Date();
 
   // Per-person data needed for profile cards and configuration gaps. Bounded
   // by the number of profiles, which is small at any realistic scale for this
@@ -49,13 +63,64 @@ export default async function DashboardPage({
       ]);
       const personReadiness = describeCallReadiness(person);
       const contactReadiness = activeContacts.map((contact) => describeCallReadiness(contact));
-      return { person, latestEvent: latestEvents[0], activeContacts, personReadiness, contactReadiness };
+      const nextCheckIn = computeNextCheckIn(
+        {
+          timezone: person.timezone,
+          preferredCallTime: person.preferredCallTime,
+          checkInDays: person.checkInDays,
+          scheduleState: person.scheduleState,
+        },
+        now
+      );
+      return {
+        person,
+        latestEvent: latestEvents[0],
+        activeContacts,
+        personReadiness,
+        contactReadiness,
+        nextCheckIn,
+      };
     })
   );
 
   const configurationGaps: ConfigurationGap[] = perPerson.flatMap(
     ({ person, personReadiness, activeContacts, contactReadiness }) =>
       detectConfigurationGaps(person, personReadiness, activeContacts, contactReadiness)
+  );
+
+  // Schedule configuration counts (§7 of the Stage D brief) — current
+  // configuration snapshots, NOT metrics over the selected KPI period, which
+  // is exactly why they are rendered in their own card rather than folded
+  // into the "Operational activity" strip below. Partitioned directly from
+  // each person's own computeNextCheckIn `kind`, so this can never disagree
+  // with what that person's own page or profile card shows: "scheduled" is
+  // active-with-valid-config, "paused" is a deliberate pause, and both
+  // "inactive" and "no_days_selected" mean the schedule is not fully set up.
+  const activeScheduleCount = perPerson.filter((p) => p.nextCheckIn.kind === "scheduled").length;
+  const pausedScheduleCount = perPerson.filter((p) => p.nextCheckIn.kind === "paused").length;
+  const incompleteScheduleCount = perPerson.filter(
+    (p) => p.nextCheckIn.kind === "inactive" || p.nextCheckIn.kind === "no_days_selected"
+  ).length;
+
+  // "Upcoming check-ins" (§4 of the Stage D brief) — sorted chronologically
+  // and bounded, via the pure lib/dashboard/upcoming-check-ins.ts helper.
+  // Paused/inactive/unconfigured profiles are excluded entirely by that
+  // helper, never shown with a placeholder. Rendering this list creates
+  // nothing: it is read-only, computed fresh on every request.
+  const upcomingCheckIns = computeUpcomingCheckIns(
+    people.map((person) => ({
+      personId: person.id,
+      personName: person.firstName,
+      avatarKey: person.avatarKey,
+      schedule: {
+        timezone: person.timezone,
+        preferredCallTime: person.preferredCallTime,
+        checkInDays: person.checkInDays,
+        scheduleState: person.scheduleState,
+      },
+    })),
+    now,
+    UPCOMING_CHECK_INS_LIMIT
   );
 
   // The period-bounded, cross-person read that backs both the KPI strip and
@@ -194,6 +259,54 @@ export default async function DashboardPage({
         </div>
       </Card>
 
+      {/* Schedule configuration (Stage D / DEC-016). Current configuration
+          snapshots, not metrics over the period selected above — kept in its
+          own card, visually separate from "Operational activity", so the two
+          are never mistaken for the same kind of number. */}
+      <Card
+        title="Schedule configuration"
+        description="Current configuration only — not an event-period metric."
+      >
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <KpiCard label="Active schedules" value={String(activeScheduleCount)} />
+          <KpiCard label="Paused schedules" value={String(pausedScheduleCount)} />
+          <KpiCard label="Incomplete configuration" value={String(incompleteScheduleCount)} />
+        </div>
+      </Card>
+
+      {/* Upcoming check-ins (Stage D / DEC-016). A planned configuration
+          preview, never a guarantee — no scheduler places these calls
+          automatically, and rendering this list creates no event. */}
+      <Card
+        title="Upcoming check-ins"
+        description="Scheduled configuration, not a guarantee — no automatic scheduler places these calls yet."
+      >
+        {upcomingCheckIns.length === 0 ? (
+          <EmptyState title="No upcoming check-ins">
+            Every profile is paused, inactive, or has no check-in days selected.
+          </EmptyState>
+        ) : (
+          <ol className="flex flex-col gap-2">
+            {upcomingCheckIns.map((item) => (
+              <li key={item.personId}>
+                <Link
+                  href={`/people/${item.personId}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-kc border border-line bg-sunken px-4 py-3 transition-colors hover:border-line-strong"
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <Avatar avatarKey={item.avatarKey} name={item.personName} size="sm" />
+                    {item.personName}
+                  </span>
+                  <span className="text-xs text-subtle">
+                    {formatOccurrence(item.nextOccurrenceIso, item.timezone, now)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </Card>
+
       {/* D — People (§7D). */}
       <Card title="People" description={`${people.length} ${people.length === 1 ? "profile" : "profiles"}`}>
         {people.length === 0 ? (
@@ -209,7 +322,7 @@ export default async function DashboardPage({
           </EmptyState>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {perPerson.map(({ person, latestEvent, activeContacts, contactReadiness }) => {
+            {perPerson.map(({ person, latestEvent, activeContacts, contactReadiness, nextCheckIn }) => {
               // Computed directly from the person's own true latest event —
               // NEVER looked up in `views`, which is bounded to the selected
               // KPI period and would otherwise misreport "No check-in yet"
@@ -227,7 +340,7 @@ export default async function DashboardPage({
                   latestResultSummary={
                     latestEvent ? describeAction(latestEvent) : "No check-in has run yet."
                   }
-                  preferredCallTime={person.preferredCallTime}
+                  scheduleSummary={formatNextCheckIn(nextCheckIn, person.timezone, now)}
                   circleCount={activeContacts.length}
                   circleConsentGapCount={
                     contactReadiness.filter((r) => r.kind === "consent_missing").length

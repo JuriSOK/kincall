@@ -12,7 +12,8 @@ import { Button, ButtonLink } from "@/app/ui/button";
 import { controlClasses, FormField } from "@/app/ui/form-field";
 import { Notice } from "@/app/ui/surfaces";
 import { AvatarPicker } from "@/app/ui/avatars/avatar-picker";
-import { COMMON_TIMEZONES, PROFILE_LABELS, WEEKDAYS } from "../../profile-form-constants";
+import { WEEKDAYS } from "@/lib/schedule/format-schedule";
+import { COMMON_TIMEZONES, PROFILE_LABELS } from "../../profile-form-constants";
 import { submitPersonEdit } from "./person-edit-submit";
 
 export function PersonEditForm({ person }: { person: VulnerablePerson }) {

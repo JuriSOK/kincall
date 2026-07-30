@@ -6,6 +6,8 @@ import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
 import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
+import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
+import { formatCheckInDays, formatNextCheckIn, SCHEDULE_STATE_LABEL } from "@/lib/schedule/format-schedule";
 import { formatDateTime } from "@/lib/presentation/format-date";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
 import { SafetyNotice } from "@/app/(app)/events/[id]/safety-notice";
@@ -13,9 +15,9 @@ import { Avatar } from "@/app/ui/avatars/avatar";
 import { ButtonLink } from "@/app/ui/button";
 import { KpiCard } from "@/app/ui/kpi-card";
 import { Badge, Card, DetailRow, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
-import { formatCheckInDays, SCHEDULE_STATE_LABEL } from "../profile-form-constants";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
+import { ScheduleToggleButton } from "./schedule-toggle-button";
 
 // How many rows the "Calls and decisions" list itself shows — the KPI
 // section below reads from the person's FULL event history, not just this
@@ -44,6 +46,21 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   // never silently disagree about what "normal" or "a cascade" means.
   const callEvents = await repository.listCallEventsForEvents(events.map((event) => event.id));
   const kpis = computeCheckInKpis(events, groupCallEventsByEvent(callEvents));
+
+  // Stage D: the deterministic next-check-in calculation (DEC-016) — stored
+  // configuration only, never a claim that a scheduler will actually place
+  // this call. `now` is computed once, server-side, for this render; nothing
+  // here writes anything or creates any event.
+  const now = new Date();
+  const nextCheckIn = computeNextCheckIn(
+    {
+      timezone: person.timezone,
+      preferredCallTime: person.preferredCallTime,
+      checkInDays: person.checkInDays,
+      scheduleState: person.scheduleState,
+    },
+    now
+  );
 
   // Fake-mode demo scenarios (DEC-011). Undefined in live mode, which is what
   // keeps the selector out of the interface entirely rather than merely disabled.
@@ -95,7 +112,6 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       <Card title="Profile">
         <dl className="flex flex-col divide-y divide-line">
           <DetailRow label="Language">{person.preferredLanguage}</DetailRow>
-          <DetailRow label="Timezone">{person.timezone}</DetailRow>
           <DetailRow label="Conversation profile">{person.conversationProfile}</DetailRow>
           <DetailRow label="Interests">
             {person.interests.length > 0 ? person.interests.join(", ") : "None entered"}
@@ -103,15 +119,65 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           {person.conversationNotes ? (
             <DetailRow label="Conversation notes">{person.conversationNotes}</DetailRow>
           ) : null}
-          {/* "Preferred", not "Next": no schedule has been computed yet
-              (Stage D). Claiming a computed next occurrence here would be a
-              fact this page cannot back up. */}
-          <DetailRow label="Preferred check-in time">daily at {person.preferredCallTime}</DetailRow>
-          <DetailRow label="Check-in days">{formatCheckInDays(person.checkInDays)}</DetailRow>
-          <DetailRow label="Schedule state">
-            {SCHEDULE_STATE_LABEL[person.scheduleState] ?? person.scheduleState}
-          </DetailRow>
         </dl>
+      </Card>
+
+      {/* Stage D (DEC-016): everything about WHEN KinCall checks in, together
+          — configuration, the computed next planned occurrence, and the one
+          real trigger this product has (Call now / Launch demo). */}
+      <Card
+        title="Schedule"
+        actions={
+          <ScheduleToggleButton
+            personId={person.id}
+            personName={person.firstName}
+            scheduleState={person.scheduleState}
+          />
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge
+              tone={
+                person.scheduleState === "active"
+                  ? "calm"
+                  : person.scheduleState === "paused"
+                    ? "attention"
+                    : "neutral"
+              }
+            >
+              {SCHEDULE_STATE_LABEL[person.scheduleState] ?? person.scheduleState}
+            </Badge>
+            {/* Timezone and local time announced together in one text node,
+                not as disconnected fragments — lib/schedule/format-schedule.ts's
+                own doc comment explains why. */}
+            <p className="text-sm font-medium">
+              {formatNextCheckIn(nextCheckIn, person.timezone, now)}
+            </p>
+          </div>
+
+          <dl className="flex flex-col divide-y divide-line">
+            <DetailRow label="Timezone">{person.timezone}</DetailRow>
+            <DetailRow label="Preferred check-in time">{person.preferredCallTime}</DetailRow>
+            <DetailRow label="Check-in days">{formatCheckInDays(person.checkInDays)}</DetailRow>
+          </dl>
+
+          <p className="text-xs text-subtle">
+            Stored configuration only — no production scheduler places this call
+            automatically yet. Use Launch demo below to check in now.
+          </p>
+
+          <LaunchDemoButton
+            personId={person.id}
+            // A check-in cannot be launched for someone who has not consented
+            // (§17.1 / DEC-007), so the button explains itself rather than
+            // failing after the click.
+            blockedReason={readiness.kind === "consent_missing" ? readiness.message : undefined}
+            // Fake mode only (DEC-011): in live mode this is undefined, so no
+            // selector is rendered and no scenario is ever sent.
+            scenarios={demoScenarios}
+          />
+        </div>
       </Card>
 
       <Card
@@ -204,7 +270,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       <Card title="Calls and decisions">
         {events.length === 0 ? (
           <EmptyState title="No check-in has run yet">
-            Launch one below to see the full sequence of calls and decisions.
+            Launch one above to see the full sequence of calls and decisions.
           </EmptyState>
         ) : (
           <ol className="flex flex-col gap-2">
@@ -231,19 +297,6 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             })}
           </ol>
         )}
-      </Card>
-
-      <Card title="Run a check-in">
-        <LaunchDemoButton
-          personId={person.id}
-          // A check-in cannot be launched for someone who has not consented
-          // (§17.1 / DEC-007), so the button explains itself rather than failing
-          // after the click.
-          blockedReason={readiness.kind === "consent_missing" ? readiness.message : undefined}
-          // Fake mode only (DEC-011): in live mode this is undefined, so no selector
-          // is rendered and no scenario is ever sent.
-          scenarios={demoScenarios}
-        />
       </Card>
     </PageShell>
   );

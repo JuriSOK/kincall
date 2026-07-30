@@ -12,7 +12,12 @@ export interface ProfileCardProps {
   // One plain sentence — the same text a person page/event page would show,
   // never a raw enum.
   latestResultSummary: string;
-  preferredCallTime: string;
+  // A single, ready-to-render schedule line — e.g. "Next planned check-in:
+  // Tomorrow at 09:00 (Europe/Paris)", "Schedule paused", "Schedule
+  // inactive", or "No check-in days selected" — built by the caller via
+  // lib/schedule/format-schedule.ts's formatNextCheckIn (Stage D), so this
+  // component stays presentation-only and never computes a schedule itself.
+  scheduleSummary: string;
   circleCount: number;
   // How many of that circle have not confirmed consent — 0 renders nothing.
   circleConsentGapCount: number;
@@ -20,9 +25,9 @@ export interface ProfileCardProps {
 
 // Deliberately five facts, not fifteen (progressive disclosure — §7 of the
 // Stage B brief): name, one status badge, the latest result in one sentence,
-// the preferred check-in time (never "next check-in" — no schedule has been
-// computed anywhere yet, see lib/presentation's Stage D note), and a one-line
-// circle summary. Everything else lives one click away via the three links.
+// the schedule summary (Stage D — never claims a computed occurrence is
+// guaranteed to run), and a one-line circle summary. Everything else lives
+// one click away via the three links.
 export function ProfileCard({
   personId,
   personName,
@@ -30,7 +35,7 @@ export function ProfileCard({
   statusLabel,
   statusTone,
   latestResultSummary,
-  preferredCallTime,
+  scheduleSummary,
   circleCount,
   circleConsentGapCount,
 }: ProfileCardProps) {
@@ -46,7 +51,7 @@ export function ProfileCard({
 
       <p className="text-sm text-muted">{latestResultSummary}</p>
 
-      <p className="text-xs text-subtle">Preferred check-in time: daily at {preferredCallTime}</p>
+      <p className="text-xs text-subtle">{scheduleSummary}</p>
 
       <p className="text-xs text-subtle">
         {circleCount === 0
