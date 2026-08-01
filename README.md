@@ -147,7 +147,8 @@ No recurring scheduling, and nothing deployed yet.
 | `/people/new` | Create a profile — avatar, identity, check-in preferences, conversation preferences, consent. |
 | `/people/[id]` | The profile page: avatar, language, timezone, masked phone state, consent, interests, conversation preferences and notes, a Schedule card (state, next planned check-in, Pause/Resume, Launch demo), trusted-circle summary, a person-specific KPI panel, and event history. |
 | `/people/[id]/edit` | Edit the profile fields above (not first name or phone — see "Profiles" below). |
-| `/people/[id]/contacts`, `/events/[id]` | Unchanged from earlier phases. |
+| `/people/[id]/contacts` | The trusted-circle manager: drag-and-drop (plus keyboard and ↑/↓) reordering, primary/enabled/availability/max-attempts configuration per contact, and per-contact statistics — see "Trusted-contact configuration" below. |
+| `/events/[id]` | Unchanged from earlier phases. |
 
 All of the above share one Nav under `app/(app)/layout.tsx`. `/dashboard` and
 `/history` are read-only: launching a check-in, editing a profile, or
@@ -236,6 +237,48 @@ related text (next planned check-in, "Today"/"Tomorrow" wording) is the one
 place that instead uses each **person's own** persisted timezone, since that is
 what the schedule configuration is defined in.
 
+### Trusted-contact configuration: primary, enabled, availability, and per-contact attempt limits
+
+Each trusted contact (`trusted_contacts`) now carries, beyond identity and
+relationship: a **primary flag** (at most one per person, changed only by
+choosing a new one — the previous primary is cleared atomically, never left
+dangling); an **enabled/disabled state**, a reversible exclusion from new
+cascades distinct from archival (permanent) and from missing consent (a
+different reason the interface never blends together); an optional **usual
+callable window** (`callableFrom`/`callableTo`, "HH:MM", both set or both
+null — null means always available, and a window may cross midnight, e.g.
+`22:00`–`07:00`); an optional **contact-specific timezone** (null inherits the
+person's own); and a **maximum-attempts override** (1 or 2 — never higher than
+the platform-wide bound).
+
+**Availability only reorders who is tried first — it never delays or excludes
+anyone.** `lib/orchestration/contact-order.ts`'s `orderContactsForCascade`
+tries every contact currently inside their usual window before any contact
+who is currently outside it, but every disabled-or-archived-excluded contact
+aside, **nobody is ever dropped for being outside their window** — if
+everyone in the circle is unavailable, KinCall calls them anyway, immediately,
+in their configured order. There is no cron, no wait, and no code path that
+delays a call until a window opens. See `docs/DECISION_LOG.md` DEC-017 for
+the full reasoning, including why consent filtering deliberately stays a
+separate, unchanged step from availability ordering.
+
+**Reordering** in `/people/[id]/contacts` supports mouse and touch via Pointer
+Events (chosen over native HTML5 drag-and-drop specifically because that does
+not reliably support touch — no drag library was added), a full keyboard path
+on the same drag handle (Space to lift, arrow keys to move, Enter to drop,
+Escape to cancel, announced through a live region), and the original ↑/↓
+buttons, retained unchanged as the accessible fallback. An order is only
+persisted after **Save order** is pressed.
+
+**Contact statistics** (`lib/kpi/contact-stats.ts`) are calculated only from
+persisted Family call events: answer rate, acceptance/decline rate among
+answered calls, mean attempt number when answering, latest participation, and
+a confirmed-intervention count. Every rate shows its own sample size and reads
+"Not enough data" rather than a fabricated percentage. As with the dashboard's
+own KPIs, there is deliberately no duration metric and no "reliable"/
+"unreliable" label — a number is shown with its sample size and left for a
+human to read, never a verdict this interface renders.
+
 ## Before a public deployment
 
 Every mutating route (`POST /api/people`, `POST .../contacts`, both
@@ -276,18 +319,19 @@ psql "$DATABASE_URL" -f supabase/migrations/0007_archive_entities.sql # soft del
 psql "$DATABASE_URL" -f supabase/migrations/0008_call_attempts.sql   # bounded retries
 psql "$DATABASE_URL" -f supabase/migrations/0009_drop_event_priority.sql
 psql "$DATABASE_URL" -f supabase/migrations/0010_person_profile.sql  # avatar, timezone, schedule config
+psql "$DATABASE_URL" -f supabase/migrations/0011_contact_availability.sql # primary/enabled/availability/max-attempts
 ```
 
 There is no `0003`: the number was skipped during Phase 5 and the gap is left as
 it is, since renumbering an applied migration would break every project already
 carrying it.
 
-**`0010_person_profile.sql` is not yet applied to the linked remote project** —
-`npx supabase migration list` will show it as the one pending migration until a
-project owner applies it. It is additive and backward-compatible (every new
-column is nullable or defaulted), reviewed for dependents before being written,
-and safe to apply whenever that's decided; this repository does not apply it on
-its own.
+**`0011_contact_availability.sql` is not yet applied to the linked remote
+project** — `npx supabase migration list` will show it as the one pending
+migration until a project owner applies it. It is additive and
+backward-compatible (every new column is nullable or defaulted to the current
+behaviour exactly), reviewed for dependents before being written, and safe to
+apply whenever that's decided; this repository does not apply it on its own.
 
 Then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (neither prefixed
 `NEXT_PUBLIC_` — the service-role key bypasses Row Level Security and must

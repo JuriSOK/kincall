@@ -65,6 +65,14 @@ export function seedRepository(repository: InMemoryRepository): void {
     priority: 1,
     consentStatus: "confirmed",
     archivedAt: null,
+    // Stage E (DEC-017) — matches migration 0011's column defaults exactly,
+    // so the five fake scenarios' exact call order is unaffected by this seed.
+    isPrimary: true,
+    enabled: true,
+    callableFrom: null,
+    callableTo: null,
+    timezone: null,
+    maxAttempts: 2,
   });
 
   repository.seedContact({
@@ -76,6 +84,12 @@ export function seedRepository(repository: InMemoryRepository): void {
     priority: 2,
     consentStatus: "confirmed",
     archivedAt: null,
+    isPrimary: false,
+    enabled: true,
+    callableFrom: null,
+    callableTo: null,
+    timezone: null,
+    maxAttempts: 2,
   });
 
   repository.seedContact({
@@ -87,6 +101,12 @@ export function seedRepository(repository: InMemoryRepository): void {
     priority: 3,
     consentStatus: "confirmed",
     archivedAt: null,
+    isPrimary: false,
+    enabled: true,
+    callableFrom: null,
+    callableTo: null,
+    timezone: null,
+    maxAttempts: 2,
   });
 }
 

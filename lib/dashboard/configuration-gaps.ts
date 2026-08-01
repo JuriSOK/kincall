@@ -10,7 +10,17 @@ export type ConfigurationGapKind =
   | "consent_missing"
   | "no_active_circle"
   | "contact_consent_missing"
-  | "phone_missing";
+  | "phone_missing"
+  // Stage E (DEC-017): contacts exist, but none would actually be tried —
+  // the overarching alarm, whatever the mix of reasons.
+  | "no_eligible_contact"
+  // A more specific, more actionable variant of the above: every contact is
+  // individually disabled (re-enabling one is the direct fix), regardless of
+  // consent.
+  | "all_contacts_disabled"
+  // Informational only — see this gap's own construction below for why it
+  // is never treated as a blocking error.
+  | "no_primary_contact";
 
 export interface ConfigurationGap {
   personId: string;
@@ -18,6 +28,11 @@ export interface ConfigurationGap {
   kind: ConfigurationGapKind;
   message: string;
   href: string;
+  // Stage E: "no_primary_contact" is an informational suggestion, never a
+  // blocking error (Stage E brief §10) — every other kind is "attention".
+  // Absent (treated as "attention") for every pre-Stage-E kind, so existing
+  // callers/tests that never set this keep their exact current rendering.
+  severity?: "attention" | "informational";
 }
 
 // One person's gaps. `contactReadiness` must be aligned by index with
@@ -27,7 +42,7 @@ export interface ConfigurationGap {
 export function detectConfigurationGaps(
   person: Pick<VulnerablePerson, "id" | "firstName">,
   personReadiness: CallReadiness,
-  activeContacts: Pick<TrustedContact, "id" | "firstName">[],
+  activeContacts: Pick<TrustedContact, "id" | "firstName" | "enabled" | "isPrimary">[],
   contactReadiness: CallReadiness[]
 ): ConfigurationGap[] {
   const gaps: ConfigurationGap[] = [];
@@ -78,6 +93,47 @@ export function detectConfigurationGaps(
       message: `${pendingContacts.length} trusted contact${plural ? "s" : ""} for ${person.firstName} ${plural ? "have" : "has"} not confirmed consent, and will be skipped by the cascade.`,
       href: circleHref,
     });
+  }
+
+  // Stage E (DEC-017). Only meaningful once a circle exists at all — an empty
+  // circle is already covered by "no_active_circle" above, and both firing
+  // together would be a redundant double warning for the same underlying fact.
+  if (activeContacts.length > 0) {
+    const eligibleCount = activeContacts.filter(
+      (contact, index) => contact.enabled && contactReadiness[index]?.kind !== "consent_missing"
+    ).length;
+    const allDisabled = activeContacts.every((contact) => !contact.enabled);
+
+    if (eligibleCount === 0) {
+      gaps.push({
+        personId: person.id,
+        personName: person.firstName,
+        kind: "no_eligible_contact",
+        message: `None of ${person.firstName}'s trusted contacts would currently be tried — a check-in that needs attention can only end unresolved.`,
+        href: circleHref,
+      });
+    }
+
+    if (allDisabled) {
+      gaps.push({
+        personId: person.id,
+        personName: person.firstName,
+        kind: "all_contacts_disabled",
+        message: `Every trusted contact for ${person.firstName} is disabled. Re-enable at least one to restore the cascade.`,
+        href: circleHref,
+      });
+    }
+
+    if (!activeContacts.some((contact) => contact.isPrimary)) {
+      gaps.push({
+        personId: person.id,
+        personName: person.firstName,
+        kind: "no_primary_contact",
+        message: `${person.firstName} has no primary contact set yet.`,
+        href: circleHref,
+        severity: "informational",
+      });
+    }
   }
 
   return gaps;

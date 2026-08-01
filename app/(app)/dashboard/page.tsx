@@ -195,7 +195,10 @@ export default async function DashboardPage({
           <ul className="flex flex-col gap-2">
             {configurationGaps.map((gap, index) => (
               <li key={`${gap.personId}-${gap.kind}-${index}`}>
-                <Notice tone="attention">
+                {/* Stage E (DEC-017): "no_primary_contact" is an informational
+                    suggestion, never a blocking error — rendered in the
+                    neutral tone, unlike every other configuration gap here. */}
+                <Notice tone={gap.severity === "informational" ? "neutral" : "attention"}>
                   <a href={gap.href} className="hover:underline">
                     {gap.message}
                   </a>

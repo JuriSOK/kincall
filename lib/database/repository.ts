@@ -109,9 +109,42 @@ export type UpdatePersonInput = Partial<
 >;
 
 // `personId` is a separate argument, and `priority` is assigned by appending.
+// The six Stage-E fields are optional — like CreatePersonInput's own
+// enrichment fields — so every caller and fixture that predates DEC-017 keeps
+// compiling and keeps working unchanged; both drivers apply the identical
+// defaults migration 0011's own column defaults express (enabled: true,
+// maxAttempts: 2, isPrimary: false, no availability window) when a caller
+// omits one.
 export type CreateTrustedContactInput = Omit<
   TrustedContact,
-  "id" | "priority" | "personId" | "archivedAt"
+  | "id"
+  | "priority"
+  | "personId"
+  | "archivedAt"
+  | "isPrimary"
+  | "enabled"
+  | "callableFrom"
+  | "callableTo"
+  | "timezone"
+  | "maxAttempts"
+> &
+  Partial<
+    Pick<
+      TrustedContact,
+      "isPrimary" | "enabled" | "callableFrom" | "callableTo" | "timezone" | "maxAttempts"
+    >
+  >;
+
+// Stage E (DEC-017), the trusted-circle editing counterpart to
+// UpdatePersonInput: a partial patch where an absent key means "leave this
+// exactly as it is". Deliberately excludes `isPrimary` — primary status
+// changes ONLY through setPrimaryContact, which must atomically clear the
+// previous primary, something a plain field-by-field patch cannot do safely.
+export type UpdateTrustedContactInput = Partial<
+  Pick<
+    TrustedContact,
+    "relationship" | "enabled" | "callableFrom" | "callableTo" | "timezone" | "maxAttempts"
+  >
 >;
 
 export interface Repository {
@@ -152,6 +185,21 @@ export interface Repository {
   // missing, nothing foreign, and no archived contact — or the whole call is
   // rejected and nothing changes.
   reorderTrustedContacts(personId: string, orderedIds: string[]): Promise<TrustedContact[]>;
+  // Stage E (DEC-017). A partial patch — see UpdateTrustedContactInput for
+  // exactly which fields and why `isPrimary` is not among them. Throws
+  // UnknownRecordError for an unknown id, and ArchivedContactCannotBeReactivatedError
+  // when the patch would set `enabled: true` on an archived contact (an
+  // archived contact can never become enabled again — see migration 0011).
+  updateTrustedContact(
+    contactId: string,
+    input: UpdateTrustedContactInput
+  ): Promise<TrustedContact>;
+  // Stage E. The ONLY way isPrimary changes: atomically clears any previous
+  // primary and sets the new one, so no interim state with zero or two
+  // primaries is ever observable. Returns the person's full active circle.
+  // Throws InvalidPrimaryContactError for an unknown, foreign, or archived
+  // contact id — never silently promotes one.
+  setPrimaryContact(personId: string, contactId: string): Promise<TrustedContact[]>;
 
   // ── Soft deletion (DEC-009): optional interface administration, not a core
   // orchestration feature. Rows are never physically deleted. Idempotent —

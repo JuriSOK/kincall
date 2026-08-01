@@ -91,6 +91,30 @@ export class InvalidContactOrderError extends Error {
   }
 }
 
+// Stage E (DEC-017): there is no "unarchive" action anywhere in this
+// codebase, so an archived contact re-becoming primary or enabled would be a
+// silent, permanent inconsistency with no interface path to notice or fix it
+// — migration 0011's own CHECK constraint enforces this at the database
+// layer; this is what a violation of it surfaces as in TypeScript.
+export class ArchivedContactCannotBeReactivatedError extends Error {
+  constructor(public readonly contactId: string) {
+    super(
+      `Repository: cannot enable or set as primary — contact "${contactId}" is archived.`
+    );
+    this.name = "ArchivedContactCannotBeReactivatedError";
+  }
+}
+
+// setPrimaryContact refused: the id is unknown, belongs to a different
+// person, or is archived. Nothing is changed when this is thrown — no
+// interim state with zero or two primaries is ever left behind.
+export class InvalidPrimaryContactError extends Error {
+  constructor(personId: string, detail: string) {
+    super(`Repository: cannot set primary contact for "${personId}" — ${detail}.`);
+    this.name = "InvalidPrimaryContactError";
+  }
+}
+
 // A call-start operation was replayed, but the intent the ledger permanently
 // recorded for it is not the one the caller expected — a different contact, or
 // a different idempotency key. Never a reason to create a second intent: the

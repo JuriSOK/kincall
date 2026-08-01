@@ -53,6 +53,28 @@ export interface TrustedContact {
   // Soft deletion (DEC-009). An archived contact disappears from the active
   // circle and the cascade, but historical call summaries still resolve it.
   archivedAt: string | null;
+  // Stage E (DEC-017). At most one TRUE per person among non-archived
+  // contacts (enforced in the database — see migration 0011). Visual/
+  // informational only: it never reorders the cascade or bypasses consent,
+  // enabled state, or retry rules. Changed only via Repository.setPrimaryContact.
+  isPrimary: boolean;
+  // Stage E. Excluded from new cascades when false, same as archivedAt !== null
+  // — but reversible, unlike archival. Distinct from consentStatus: an
+  // unconsented contact is never called regardless of this flag.
+  enabled: boolean;
+  // Stage E. "HH:MM" local time, or both null meaning always available. Never
+  // makes the cascade wait — see lib/orchestration/contact-order.ts for the
+  // "orders, never delays or excludes solely by time" rule. May cross
+  // midnight (callableFrom > callableTo, e.g. "22:00"/"07:00").
+  callableFrom: string | null;
+  callableTo: string | null;
+  // Stage E. IANA timezone identifier for interpreting callableFrom/
+  // callableTo, or null to inherit the person's own persisted timezone.
+  timezone: string | null;
+  // Stage E. 1 or 2. Configuration may only LOWER how many times this contact
+  // is tried below lib/orchestration/engine.ts's MAX_CONTACT_ATTEMPTS, never
+  // raise it — the engine always applies min(maxAttempts, MAX_CONTACT_ATTEMPTS).
+  maxAttempts: number;
 }
 
 export interface EventRecord {

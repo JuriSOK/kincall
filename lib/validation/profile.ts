@@ -1,7 +1,7 @@
 import { isE164, isReservedFictionPhone } from "../phone";
 import { AVATAR_KEYS, isAvatarKey, type AvatarKey } from "../avatars";
 import type { ConsentStatus, ScheduleState } from "../database/types";
-import type { UpdatePersonInput } from "../database/repository";
+import type { UpdatePersonInput, UpdateTrustedContactInput } from "../database/repository";
 
 // Pure, framework-free validation shared by the route handlers and the client
 // forms, so the server never trusts what the browser sent. Returns field-keyed
@@ -447,6 +447,93 @@ export function validateContactInput(raw: unknown): ValidationResult<ContactInpu
     return { errors };
   }
   return { errors, values: { firstName, phone: phoneNumber, relationship, consentStatus } };
+}
+
+// Same nullable-or-valid-IANA-identifier rule as the person's own timezone,
+// but null is a legitimate, deliberate value here — "inherit the person's
+// timezone" (Stage E, DEC-017) — never an error.
+function nullableTimezoneField(
+  raw: unknown,
+  field: string,
+  errors: FieldErrors
+): string | null | undefined {
+  if (raw === null || raw === undefined) return null;
+  return timezoneField(raw, field, errors);
+}
+
+// 1 or 2 only — CLAUDE.md / DEC-017: configuration may LOWER how many times a
+// contact is tried below the engine's global bound, never raise it. Rejected
+// here so a value outside that range can never even be stored; the engine
+// still re-clamps at cascade time regardless (min(maxAttempts, 2)) as a
+// second, independent line of defence.
+function maxAttemptsField(raw: unknown, field: string, errors: FieldErrors): number | undefined {
+  const value = typeof raw === "string" ? Number(raw) : raw;
+  if (value !== 1 && value !== 2) {
+    errors[field] = "Must be 1 or 2.";
+    return undefined;
+  }
+  return value;
+}
+
+// Stage E (DEC-017), the trusted-circle counterpart to
+// validateUpdatePersonInput: a PARTIAL patch where an absent key means "leave
+// this field exactly as it is". `isPrimary` is deliberately never accepted
+// here — see UpdateTrustedContactInput's own comment for why (primary status
+// changes only through setPrimaryContact, atomically).
+//
+// callableFrom/callableTo are validated as a PAIR: if either key is present in
+// the submitted body, BOTH must be present and both must be valid "HH:MM"
+// times (migration 0011's own "reject only one side of an incomplete window"
+// rule) — this validator has no access to whatever is currently stored, so it
+// cannot safely reconcile a single supplied side against it; the caller (the
+// edit form) always submits the whole window together.
+export function validateUpdateContactInput(raw: unknown): ValidationResult<UpdateTrustedContactInput> {
+  const errors: FieldErrors = {};
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const values: UpdateTrustedContactInput = {};
+
+  if ("relationship" in body) {
+    const value = text(body.relationship, "relationship", { min: 1, max: 40, errors });
+    if (value !== undefined) values.relationship = value;
+  }
+  if ("enabled" in body) {
+    if (typeof body.enabled !== "boolean") {
+      errors.enabled = "Must be true or false.";
+    } else {
+      values.enabled = body.enabled;
+    }
+  }
+  if ("callableFrom" in body || "callableTo" in body) {
+    const bothNull = body.callableFrom === null && body.callableTo === null;
+    if (bothNull) {
+      values.callableFrom = null;
+      values.callableTo = null;
+    } else if (
+      typeof body.callableFrom !== "string" ||
+      typeof body.callableTo !== "string" ||
+      !CALL_TIME_PATTERN.test(body.callableFrom) ||
+      !CALL_TIME_PATTERN.test(body.callableTo)
+    ) {
+      errors.callableFrom =
+        "Set both a start and an end time (each a 24-hour time, e.g. 09:00), or clear both to mean always available.";
+    } else {
+      values.callableFrom = body.callableFrom;
+      values.callableTo = body.callableTo;
+    }
+  }
+  if ("timezone" in body) {
+    const value = nullableTimezoneField(body.timezone, "timezone", errors);
+    if (value !== undefined) values.timezone = value;
+  }
+  if ("maxAttempts" in body) {
+    const value = maxAttemptsField(body.maxAttempts, "maxAttempts", errors);
+    if (value !== undefined) values.maxAttempts = value;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+  return { errors, values };
 }
 
 export function validateOrderedIds(raw: unknown): ValidationResult<string[]> {

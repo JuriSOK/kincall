@@ -633,6 +633,12 @@ describe("selectCascadeTarget — who the cascade calls next (DEC-011)", () => {
       priority: 1,
       consentStatus: "confirmed",
       archivedAt: null,
+      isPrimary: false,
+      enabled: true,
+      callableFrom: null,
+      callableTo: null,
+      timezone: null,
+      maxAttempts: 2,
       ...overrides,
     };
   }

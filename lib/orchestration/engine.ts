@@ -22,6 +22,7 @@ import { phoneEnvVarFor } from "../database/seed";
 import { getRepository } from "../database/store";
 import { describeUnusablePhone } from "../phone";
 import type { CallEventRecord, EventRecord, TrustedContact } from "../database/types";
+import { orderContactsForCascade } from "./contact-order";
 import { decideCompanionAction } from "./decide-companion-action";
 import { handleFamilyResult } from "./handle-family-result";
 import { attemptDiscriminator, operationKey } from "./operation-keys";
@@ -233,10 +234,13 @@ export async function placeCallForIntent(
             // contact, and only when the integration can genuinely leave and
             // confirm one (DEC-011). Both conditions, decided here rather than
             // by the agent, so an unsupported integration never produces a
-            // message KinCall would then have to describe as "left".
+            // message KinCall would then have to describe as "left". "Final"
+            // is per-contact (DEC-017: effectiveMaxAttempts) — a contact
+            // configured for a single attempt has no attempt 2 at all, so
+            // attempt 1 is already their last.
             mayLeaveVoicemail:
               deps.calleAdapter.capabilities.voicemail &&
-              callEvent.attemptNumber >= MAX_CONTACT_ATTEMPTS,
+              callEvent.attemptNumber >= effectiveMaxAttempts(contact!),
           });
     callId = reference.callId;
   } catch (error) {
@@ -392,6 +396,16 @@ async function startCompanionRetry(
 // to an endless redial of the same one.
 export const MAX_CONTACT_ATTEMPTS = 2;
 
+// Stage E (DEC-017) / CLAUDE.md: per-contact configuration
+// (TrustedContact.maxAttempts) may only LOWER how many times a contact is
+// tried below MAX_CONTACT_ATTEMPTS, never raise it. Applied everywhere an
+// attempt number is compared against "the last attempt to this contact" —
+// selection (selectCascadeTarget), and voicemail eligibility below — so a
+// stored value greater than 2 (however it got there) can never be honoured.
+function effectiveMaxAttempts(contact: TrustedContact): number {
+  return Math.min(contact.maxAttempts, MAX_CONTACT_ATTEMPTS);
+}
+
 // What just happened to the contact whose result triggered this cascade step.
 // `retryable` is what distinguishes "call them once more" from "move on": a
 // contact who declined has given a definitive answer, so calling them again
@@ -435,9 +449,16 @@ export function selectCascadeTarget(
   // A retry of the same contact, if one is still owed and they are still
   // eligible. `contacts` is the ACTIVE circle, so a contact archived mid-cascade
   // has already disappeared from it and falls through to the walk below.
-  if (previous && previous.retryable && previous.attemptNumber < MAX_CONTACT_ATTEMPTS) {
+  // The bound is per-contact (DEC-017: effectiveMaxAttempts), never higher
+  // than MAX_CONTACT_ATTEMPTS — a contact configured for a single attempt
+  // (maxAttempts: 1) has no retry owed at all, whatever `previous` says.
+  if (previous && previous.retryable) {
     const same = contacts.find((candidate) => candidate.id === previous.contactId);
-    if (same && contactBlockedReason(same) === null) {
+    if (
+      same &&
+      previous.attemptNumber < effectiveMaxAttempts(same) &&
+      contactBlockedReason(same) === null
+    ) {
       return { target: { contact: same, attemptNumber: previous.attemptNumber + 1 }, skipped };
     }
   }
@@ -482,8 +503,17 @@ async function startNextFamilyCall(
   }
 
   // Active-only (DEC-009): an archived contact must never be selected for a
-  // new cascade step.
-  const contacts = await deps.repository.getActiveTrustedContacts(current.personId);
+  // new cascade step. Stage E (DEC-017): reordered by availability at the
+  // event's own persisted creation instant — never Date.now() — so a replay,
+  // a poll, or a restart recomputes the identical order every time. Consent
+  // is deliberately NOT filtered by orderContactsForCascade; that stays
+  // selectCascadeTarget's own job (contactBlockedReason, unchanged since
+  // DEC-011), which is what still produces its "Skipped <name> — has not
+  // confirmed consent" timeline entry.
+  const activeContacts = await deps.repository.getActiveTrustedContacts(current.personId);
+  const person = await deps.repository.getPerson(current.personId);
+  if (!person) throw new Error(`Engine: unknown person "${current.personId}".`);
+  const contacts = orderContactsForCascade(activeContacts, current.createdAt, person.timezone);
   const { target, skipped } = selectCascadeTarget(contacts, options.previous);
 
   // Recorded on whichever transition actually applies, so these entries are
@@ -874,7 +904,13 @@ export async function processFamilyResult(
   // Active-only (DEC-009): this call's own contact cannot have been archived
   // while its result is still unprocessed (the same safety rule as above), and
   // `remaining` must only ever count contacts the cascade could actually call.
-  const contacts = await deps.repository.getActiveTrustedContacts(event.personId);
+  // Stage E (DEC-017): ordered the same way startNextFamilyCall orders its own
+  // selection, from the SAME persisted event.createdAt instant, so the two
+  // never disagree about the circle's shape mid-cascade.
+  const activeContacts = await deps.repository.getActiveTrustedContacts(event.personId);
+  const person = await deps.repository.getPerson(event.personId);
+  if (!person) throw new Error(`Engine: unknown person "${event.personId}".`);
+  const contacts = orderContactsForCascade(activeContacts, event.createdAt, person.timezone);
   const contact = contacts.find((candidate) => candidate.id === callEvent.contactId);
   if (!contact) {
     throw new Error(`Engine: call event "${callEventId}" has no known trusted contact.`);
@@ -1029,7 +1065,8 @@ export async function processFamilyResult(
           classifyVoicemail(structuredResult, {
             supported: deps.calleAdapter.capabilities.voicemail,
             attemptNumber: callEvent.attemptNumber,
-            maxAttempts: MAX_CONTACT_ATTEMPTS,
+            // Per-contact (DEC-017), never higher than MAX_CONTACT_ATTEMPTS.
+            maxAttempts: effectiveMaxAttempts(contact),
           })
         ),
       ],

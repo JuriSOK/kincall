@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  ArchivedContactCannotBeReactivatedError,
   CallIntentIntegrityError,
   ContactHasActiveCallError,
+  InvalidPrimaryContactError,
   PersonHasActiveEventError,
   UnknownRecordError,
 } from "@/lib/database/errors";
@@ -747,6 +749,187 @@ export function repositoryContract(name: string, harness: ContractHarness): void
         ).rejects.toThrow();
 
         expect(await repository.getTrustedContacts(person.id)).toEqual(before);
+      });
+    });
+
+    // Stage E (DEC-017): the trusted-circle editing repository methods.
+    describe("updateTrustedContact", () => {
+      it("updates exactly the supplied fields, preserving everything else", async () => {
+        const before = (await repository.getTrustedContacts("person_marie")).find(
+          (c) => c.id === "contact_julie"
+        )!;
+        const updated = await repository.updateTrustedContact("contact_julie", {
+          relationship: "eldest daughter",
+        });
+
+        expect(updated.relationship).toBe("eldest daughter");
+        expect(updated.firstName).toBe(before.firstName);
+        expect(updated.phone).toBe(before.phone);
+        expect(updated.priority).toBe(before.priority);
+        expect(updated.enabled).toBe(before.enabled);
+        expect(updated.maxAttempts).toBe(before.maxAttempts);
+      });
+
+      it("an absent key means 'leave exactly as is'", async () => {
+        const updated = await repository.updateTrustedContact("contact_julie", { enabled: false });
+        expect(updated.enabled).toBe(false);
+        expect(updated.relationship).toBe("daughter");
+      });
+
+      it("can set a callable window and later clear it back to always-available", async () => {
+        const withWindow = await repository.updateTrustedContact("contact_julie", {
+          callableFrom: "09:00",
+          callableTo: "18:00",
+        });
+        expect(withWindow.callableFrom).toBe("09:00");
+        expect(withWindow.callableTo).toBe("18:00");
+
+        const cleared = await repository.updateTrustedContact("contact_julie", {
+          callableFrom: null,
+          callableTo: null,
+        });
+        expect(cleared.callableFrom).toBeNull();
+        expect(cleared.callableTo).toBeNull();
+      });
+
+      it("can update every editable field in one call", async () => {
+        const updated = await repository.updateTrustedContact("contact_marc", {
+          relationship: "youngest son",
+          enabled: false,
+          callableFrom: "22:00",
+          callableTo: "07:00",
+          timezone: "America/New_York",
+          maxAttempts: 1,
+        });
+
+        expect(updated).toMatchObject({
+          relationship: "youngest son",
+          enabled: false,
+          callableFrom: "22:00",
+          callableTo: "07:00",
+          timezone: "America/New_York",
+          maxAttempts: 1,
+        });
+      });
+
+      it("throws UnknownRecordError for an unknown contact", async () => {
+        await expect(
+          repository.updateTrustedContact("contact_nope", { enabled: false })
+        ).rejects.toThrow(UnknownRecordError);
+      });
+
+      it("refuses to re-enable an archived contact, and changes nothing", async () => {
+        await repository.archiveTrustedContact("contact_julie");
+
+        await expect(
+          repository.updateTrustedContact("contact_julie", { enabled: true })
+        ).rejects.toThrow(ArchivedContactCannotBeReactivatedError);
+
+        const stillArchived = (await repository.getTrustedContacts("person_marie")).find(
+          (c) => c.id === "contact_julie"
+        )!;
+        expect(stillArchived.enabled).toBe(false);
+      });
+    });
+
+    describe("setPrimaryContact", () => {
+      it("sets the named contact primary", async () => {
+        const [updated] = (
+          await repository.setPrimaryContact("person_marie", "contact_marc")
+        ).filter((c) => c.id === "contact_marc");
+        expect(updated.isPrimary).toBe(true);
+      });
+
+      it("atomically clears any previous primary", async () => {
+        await repository.setPrimaryContact("person_marie", "contact_julie");
+        const afterFirst = await repository.getActiveTrustedContacts("person_marie");
+        expect(afterFirst.filter((c) => c.isPrimary).map((c) => c.id)).toEqual(["contact_julie"]);
+
+        const afterSecond = await repository.setPrimaryContact("person_marie", "contact_nicole");
+        expect(afterSecond.filter((c) => c.isPrimary).map((c) => c.id)).toEqual(["contact_nicole"]);
+      });
+
+      it("refuses an archived contact, and changes nothing", async () => {
+        await repository.setPrimaryContact("person_marie", "contact_julie");
+        await repository.archiveTrustedContact("contact_marc");
+
+        await expect(
+          repository.setPrimaryContact("person_marie", "contact_marc")
+        ).rejects.toThrow(InvalidPrimaryContactError);
+
+        const circle = await repository.getActiveTrustedContacts("person_marie");
+        expect(circle.filter((c) => c.isPrimary).map((c) => c.id)).toEqual(["contact_julie"]);
+      });
+
+      it("refuses a contact belonging to a different person", async () => {
+        const other = await repository.createPerson({
+          firstName: "Sophie",
+          phone: "+33698765432",
+          preferredLanguage: "fr-FR",
+          conversationProfile: "standard",
+          preferredCallTime: "09:00",
+          interests: [],
+          consentStatus: "confirmed",
+        });
+
+        await expect(
+          repository.setPrimaryContact(other.id, "contact_julie")
+        ).rejects.toThrow(InvalidPrimaryContactError);
+      });
+
+      it("refuses an unknown contact id", async () => {
+        await expect(
+          repository.setPrimaryContact("person_marie", "contact_nope")
+        ).rejects.toThrow(InvalidPrimaryContactError);
+      });
+    });
+
+    describe("archiveTrustedContact clears primary and enabled (DEC-017)", () => {
+      it("archiving the primary contact clears both flags", async () => {
+        await repository.setPrimaryContact("person_marie", "contact_julie");
+        const archived = await repository.archiveTrustedContact("contact_julie");
+
+        expect(archived.isPrimary).toBe(false);
+        expect(archived.enabled).toBe(false);
+        expect(archived.archivedAt).not.toBeNull();
+      });
+    });
+
+    describe("createTrustedContact defaults the Stage-E fields", () => {
+      it("defaults enabled, maxAttempts and an open availability window", async () => {
+        const created = await repository.createTrustedContact("person_marie", {
+          firstName: "Paul",
+          phone: "+33644444444",
+          relationship: "neighbour",
+          consentStatus: "confirmed",
+        });
+
+        expect(created.isPrimary).toBe(false);
+        expect(created.enabled).toBe(true);
+        expect(created.callableFrom).toBeNull();
+        expect(created.callableTo).toBeNull();
+        expect(created.timezone).toBeNull();
+        expect(created.maxAttempts).toBe(2);
+      });
+
+      it("stores the Stage-E fields when supplied", async () => {
+        const created = await repository.createTrustedContact("person_marie", {
+          firstName: "Paul",
+          phone: "+33644444444",
+          relationship: "neighbour",
+          consentStatus: "confirmed",
+          enabled: false,
+          callableFrom: "09:00",
+          callableTo: "18:00",
+          timezone: "Europe/London",
+          maxAttempts: 1,
+        });
+
+        expect(created.enabled).toBe(false);
+        expect(created.callableFrom).toBe("09:00");
+        expect(created.callableTo).toBe("18:00");
+        expect(created.timezone).toBe("Europe/London");
+        expect(created.maxAttempts).toBe(1);
       });
     });
 

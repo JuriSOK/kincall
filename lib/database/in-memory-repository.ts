@@ -3,9 +3,11 @@ import { isTerminalEventStatus, type EventStatus } from "../orchestration/states
 import { slugify } from "../validation/profile";
 import {
   assertIntentMatches,
+  ArchivedContactCannotBeReactivatedError,
   CallIntentIntegrityError,
   ContactHasActiveCallError,
   InvalidContactOrderError,
+  InvalidPrimaryContactError,
   PersonHasActiveEventError,
   UnknownRecordError,
 } from "./errors";
@@ -19,6 +21,7 @@ import type {
   CreateTrustedContactInput,
   Repository,
   UpdatePersonInput,
+  UpdateTrustedContactInput,
 } from "./repository";
 import type {
   CallEventRecord,
@@ -167,16 +170,69 @@ export class InMemoryRepository implements Repository {
       this.store.contacts.has(candidate)
     );
     // input.phone is already a validated E.164 number (DEC-008) — stored as
-    // given, never minted.
+    // given, never minted. The six Stage-E fields are optional on
+    // CreateTrustedContactInput (DEC-017); defaulted here identically to
+    // migration 0011's own column defaults, so the two drivers never disagree
+    // about what an omitted field becomes.
     const contact: TrustedContact = {
       ...input,
       id,
       personId,
       archivedAt: null,
       priority: activeSiblings.reduce((max, sibling) => Math.max(max, sibling.priority), 0) + 1,
+      isPrimary: input.isPrimary ?? false,
+      enabled: input.enabled ?? true,
+      callableFrom: input.callableFrom ?? null,
+      callableTo: input.callableTo ?? null,
+      timezone: input.timezone ?? null,
+      maxAttempts: input.maxAttempts ?? 2,
     };
     this.store.contacts.set(id, contact);
     return contact;
+  }
+
+  // Stage E (DEC-017). A partial patch: an absent key preserves the existing
+  // value, exactly like updatePerson. Refuses to enable an archived contact —
+  // migration 0011's own CHECK constraint enforces the same rule in SQL, so
+  // this driver must reject it too rather than silently diverging from the
+  // Supabase-backed one.
+  async updateTrustedContact(
+    contactId: string,
+    input: UpdateTrustedContactInput
+  ): Promise<TrustedContact> {
+    const existing = this.store.contacts.get(contactId);
+    if (!existing) throw new UnknownRecordError("trusted contact", contactId);
+    if (existing.archivedAt !== null && input.enabled === true) {
+      throw new ArchivedContactCannotBeReactivatedError(contactId);
+    }
+    const updated: TrustedContact = { ...existing, ...input };
+    this.store.contacts.set(contactId, updated);
+    return updated;
+  }
+
+  // Stage E. The only place isPrimary changes: atomically clears any previous
+  // primary and sets the new one — synchronous start to finish, so no other
+  // caller can observe an interim state with zero or two primaries.
+  async setPrimaryContact(personId: string, contactId: string): Promise<TrustedContact[]> {
+    const target = this.store.contacts.get(contactId);
+    if (!target || target.personId !== personId) {
+      throw new InvalidPrimaryContactError(
+        personId,
+        `"${contactId}" is not a trusted contact of this person`
+      );
+    }
+    if (target.archivedAt !== null) {
+      throw new InvalidPrimaryContactError(personId, "an archived contact cannot become primary");
+    }
+
+    for (const contact of this.store.contacts.values()) {
+      if (contact.personId === personId && contact.isPrimary) {
+        this.store.contacts.set(contact.id, { ...contact, isPrimary: false });
+      }
+    }
+    this.store.contacts.set(contactId, { ...this.store.contacts.get(contactId)!, isPrimary: true });
+
+    return this.getActiveTrustedContacts(personId);
   }
 
   async reorderTrustedContacts(
@@ -240,7 +296,16 @@ export class InMemoryRepository implements Repository {
     );
     if (hasActiveCall) throw new ContactHasActiveCallError(contactId);
 
-    const updated: TrustedContact = { ...existing, archivedAt: this.nowIso() };
+    // Stage E (DEC-017): mirrors migration 0011's redefined SQL function —
+    // there is no "unarchive" action anywhere in this codebase, so a stale
+    // primary/enabled flag on an archived row would be a silent, permanent
+    // inconsistency with no interface path to notice or fix it.
+    const updated: TrustedContact = {
+      ...existing,
+      archivedAt: this.nowIso(),
+      isPrimary: false,
+      enabled: false,
+    };
     this.store.contacts.set(contactId, updated);
     return updated;
   }

@@ -1,7 +1,7 @@
 import type { AgentType } from "../calle/adapter";
 import type { EventStatus, OrchestrationDecision } from "../orchestration/states";
 import { resolveConfiguredPhone } from "./seed";
-import type { UpdatePersonInput } from "./repository";
+import type { UpdatePersonInput, UpdateTrustedContactInput } from "./repository";
 import type {
   CallEventRecord,
   CallEventStatus,
@@ -91,6 +91,13 @@ export interface ContactRow {
   priority: number;
   consent_status: string;
   archived_at: string | null;
+  // Stage E (DEC-017) — migration 0011_contact_availability.sql.
+  is_primary: boolean;
+  enabled: boolean;
+  callable_from: string | null;
+  callable_to: string | null;
+  timezone: string | null;
+  max_attempts: number;
 }
 
 export function toContact(row: ContactRow): TrustedContact {
@@ -103,7 +110,30 @@ export function toContact(row: ContactRow): TrustedContact {
     priority: row.priority,
     consentStatus: row.consent_status as ConsentStatus,
     archivedAt: iso(row.archived_at),
+    isPrimary: row.is_primary,
+    enabled: row.enabled,
+    // Postgres `time` arrives as "HH:MM:SS" — normalised to the "HH:MM" shape
+    // the rest of the application (and migration 0010's own preferred_call_time
+    // convention) uses throughout.
+    callableFrom: row.callable_from ? row.callable_from.slice(0, 5) : null,
+    callableTo: row.callable_to ? row.callable_to.slice(0, 5) : null,
+    timezone: row.timezone,
+    maxAttempts: row.max_attempts,
   };
+}
+
+// Only the columns updateTrustedContact is allowed to touch — see
+// UpdateTrustedContactInput in repository.ts for exactly which fields those
+// are and why `isPrimary` is deliberately absent (setPrimaryContact only).
+export function fromContactPatch(patch: UpdateTrustedContactInput): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if ("relationship" in patch) row.relationship = patch.relationship;
+  if ("enabled" in patch) row.enabled = patch.enabled;
+  if ("callableFrom" in patch) row.callable_from = patch.callableFrom;
+  if ("callableTo" in patch) row.callable_to = patch.callableTo;
+  if ("timezone" in patch) row.timezone = patch.timezone;
+  if ("maxAttempts" in patch) row.max_attempts = patch.maxAttempts;
+  return row;
 }
 
 export interface EventRow {

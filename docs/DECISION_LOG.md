@@ -1583,6 +1583,225 @@ out of scope and not begun.
 
 ---
 
+## DEC-017 — Richer trusted-contact configuration: primary, enabled, availability windows, per-contact attempt limits, and availability-aware cascade ordering
+
+**Date:** 30 July 2026
+**Status:** Approved
+
+### Context
+
+A trusted contact (`trusted_contacts`) had seven fields: identity, `relationship`, `priority`,
+`consent_status`, and `archived_at`. There was no way to mark a preferred contact, no way to
+temporarily pause one without archiving them, no notion of "usually reachable in the evening", and
+no per-contact override of the two-attempt retry bound. The cascade itself (`selectCascadeTarget`,
+unchanged since DEC-011) walked the active circle strictly in `priority` order — correct, but blind
+to when a contact actually tends to be reachable.
+
+This is the one stage in the KinCall roadmap that touches the validated autonomous cascade
+directly, so the design was deliberately conservative: add configuration and a new ordering layer,
+but change nothing about what the cascade already guarantees.
+
+### Decision
+
+**1. Six additive columns on `trusted_contacts`** (`supabase/migrations/0011_contact_availability.sql`):
+`is_primary boolean not null default false`, `enabled boolean not null default true`,
+`callable_from time`, `callable_to time` (both null or both set — `check ((callable_from is null) =
+(callable_to is null))`), `timezone text` (null inherits the person's own), `max_attempts smallint
+not null default 2` (`check (max_attempts between 1 and 2)`). A partial unique index
+(`idx_trusted_contacts_one_primary`, `where is_primary and archived_at is null`) enforces one
+primary per person among non-archived contacts at the database layer. A further check
+(`trusted_contacts_archived_not_primary_or_enabled`) forbids an archived row from carrying either
+flag true — there is no "unarchive" action anywhere in this codebase, so a stale primary/enabled
+flag on an archived row would be a silent, permanent inconsistency nothing could ever surface or
+fix. Every default matches CURRENT behaviour exactly (enabled, two attempts, no window), so the
+default-preservation rule below holds by construction, not by special-casing. **Not applied
+remotely by this change.**
+
+**2. `archive_trusted_contact` redefined** (`create or replace`, same signature — the precedent
+0007_archive_entities.sql itself set when it redefined `reorder_trusted_contacts`) to also clear
+`is_primary` and `enabled` on archival, so the new CHECK constraint above never blocks an ordinary
+archive of a contact who happened to be primary or enabled. **`set_primary_contact(person_id,
+contact_id)`, new**: one transaction that clears any previous primary and sets the new one, so no
+caller can ever observe an interim state with zero or two primaries. Refuses for an archived or
+foreign contact, changing nothing.
+
+**3. `Repository.updateTrustedContact` / `setPrimaryContact`**, on both drivers, added to the shared
+contract suite. `UpdateTrustedContactInput` covers `relationship`, `enabled`, `callableFrom`,
+`callableTo`, `timezone`, `maxAttempts` — **not** `isPrimary`, which changes only through
+`setPrimaryContact`, never a plain field patch, because only that path can atomically clear the
+previous primary. An absent key preserves the existing value. `lib/validation/profile.ts`'s
+`validateUpdateContactInput` mirrors the database's own rules in TypeScript before any write:
+`callableFrom`/`callableTo` must be supplied as a pair (both a valid "HH:MM" or both null) since the
+validator cannot see what is currently stored and so cannot safely reconcile a single supplied
+side against it; `maxAttempts` accepts only 1 or 2.
+
+**4. `lib/orchestration/contact-order.ts`, a new pure module — `orderContactsForCascade(contacts,
+eventCreatedAt, personTimezone)`.** It removes archived and disabled contacts (silently, the same
+treatment archived contacts already received — no timeline message of their own, because none ever
+existed for archival either), then partitions the remainder into "inside their callable window at
+`eventCreatedAt`" and "not", preserving each partition's own configured `priority` order. A null
+window means always available; a window where `callableFrom > callableTo` crosses midnight (e.g.
+`22:00`–`07:00`); a degenerate `callableFrom === callableTo` is treated as always-available rather
+than a zero-width exclusion nothing asked for. The contact's own `timezone` is used when configured,
+otherwise the person's persisted one — never the browser's or the server's default, and never
+`Date.now()` — `eventCreatedAt` is always the event's own persisted, immutable `created_at`, so a
+webhook replay, a poll, or a process restart recomputes the identical partition every time (rule 8
+of the brief: replay-stability).
+
+**Consent is deliberately NOT filtered by this module.** `lib/orchestration/engine.ts`'s
+`contactBlockedReason`/`selectCascadeTarget` (unchanged since DEC-011) already filters consent and
+(in live mode) phone-usability, and is what produces the "Skipped Julie — has not confirmed consent
+(§17.1)" timeline entry `tests/consent.test.ts` and `tests/engine.test.ts` already depend on. Moving
+that filter earlier, into `orderContactsForCascade`, would silently swallow that message for any
+consent-missing contact it removed before `selectCascadeTarget` ever saw them. The engine therefore
+calls `orderContactsForCascade` first (availability ordering, disabled/archived removed) and feeds
+its result — still consent-inclusive — into the unchanged `selectCascadeTarget`, which performs its
+own consent/phone filtering exactly as it always has, on whatever order it is handed.
+
+**5. Cascade integration is a re-ordering, not a rewrite.** `startNextFamilyCall` and
+`processFamilyResult` (`lib/orchestration/engine.ts`) now fetch the person and call
+`orderContactsForCascade` before `selectCascadeTarget`, instead of passing the raw
+`getActiveTrustedContacts` result straight through. `selectCascadeTarget`'s own successor logic
+(retry-same-contact-if-owed, else walk forward from the previous contact's position) is completely
+unchanged — it already worked purely in terms of "the array it was given," so handing it an
+availability-ordered array instead of a priority-ordered one was sufficient; nothing about *how* it
+walks needed to change. **Per-contact attempt bound**: `effectiveMaxAttempts(contact) =
+min(contact.maxAttempts, MAX_CONTACT_ATTEMPTS)`, applied everywhere an attempt number was compared
+against "the last attempt to this contact" — the retry-eligibility check in `selectCascadeTarget`,
+and both voicemail-eligibility call sites (a contact configured for a single attempt has no attempt
+2 at all, so attempt 1 is already their last, including for voicemail purposes). Configuration can
+only lower this ceiling, never raise it, even if a stored value somehow exceeded 2 — the engine
+re-derives the effective bound itself rather than trusting the stored number.
+
+**6. Default preservation, proved rather than asserted.** When every contact is enabled and has no
+availability window, every contact is "in window" (an empty exclusion), so the single partition
+sorts by `priority` and the result is byte-identical to the pre-Stage-E order — not a special case,
+a direct consequence of the algorithm. `tests/contact-order-cascade.test.ts` hand-derives the exact
+call order, attempt numbers, and terminal status/decision for all five fake scenarios independently
+from `lib/calle/fake-adapter.ts`'s own definitions and asserts them unchanged; all 638 pre-Stage-E
+tests continue to pass with zero modification to their assertions.
+
+**7. Per-contact operational statistics** (`lib/kpi/contact-stats.ts`, `computeContactStats` /
+`computeContactStatsByContact`) — reuses `lib/kpi/dashboard-kpis.ts`'s own `RateMetric`/`MeanMetric`
+shapes, computed purely from persisted Family `call_events`, nothing invented. Answer rate is
+against every call placed; acceptance and decline rates are against *answered* calls only (their
+denominators always sum to the answered count); a malformed/unreadable structured result counts as
+unanswered, never as a decline. No duration metric (matching `dashboard-kpis.ts`'s own exclusion —
+fake-mode calls complete synchronously), no "reliable"/"unreliable" label, no ranking contacts
+against each other — a rate is shown with its own sample size and left for a human to read.
+
+**8. Trusted-circle interface** (`app/(app)/people/[id]/contacts/`) redesigned: each contact is one
+row carrying a drag handle, primary/enabled/consent badges, the masked phone, the callable window
+and timezone, maximum attempts, the Stage-E statistics above, and Edit/Make-primary/Enable-disable/
+Archive actions. Reordering is Pointer-Events-based (mouse, touch and pen in one API — chosen over
+native HTML5 drag-and-drop specifically because that does not reliably support touch, and no drag
+library was added) plus a full keyboard path on the same drag handle (Space lifts, arrow keys move,
+Enter drops, Escape cancels, announced through a polite live region) — the existing ↑/↓ buttons are
+retained unchanged as the accessible fallback, never removed. Enable/disable and "Make primary" are
+each their own single-purpose control reusing the general PATCH route/validation (Enable/disable)
+or the dedicated `set_primary_contact` route (primary) — mirroring DEC-016's own established pattern
+of a lightweight dedicated toggle beside the full edit panel, never a second divergent write path.
+The dashboard's configuration gaps gained `no_eligible_contact`, `all_contacts_disabled`, and
+`no_primary_contact` — the last marked `severity: "informational"` and rendered in a neutral tone,
+never presented as a blocking error, per the brief's explicit instruction.
+
+### Product-scope check
+
+No product feature is added, removed or reinterpreted: §10's "cercle de confiance ordonné" already
+described ordering and configuration; this phase adds richer configuration and a smarter ordering
+signal, not a new workflow. §9.3's cascade-failure behaviour (retry-then-advance, bounded twice
+over) is unchanged. `git diff` on `lib/orchestration/decide-companion-action.ts`,
+`lib/orchestration/handle-family-result.ts`, `lib/orchestration/states.ts`,
+`lib/orchestration/transitions.ts`, `lib/orchestration/operation-keys.ts`,
+`lib/kpi/dashboard-kpis.ts`, and `supabase/migrations/0001–0010` is empty. `lib/orchestration/
+engine.ts` and `lib/database/*` changed only to thread the new ordering step and the per-contact
+attempt bound through, never to alter a transition, a retry count, an idempotency key, a lease, or
+`ATTENTION_UNRESOLVED`'s terminal meaning. No migration 0011 was applied remotely.
+
+### Consequences
+
+- New: `lib/orchestration/contact-order.ts`, `lib/kpi/contact-stats.ts`,
+  `supabase/migrations/0011_contact_availability.sql`, `app/api/people/[id]/contacts/
+  [contactId]/primary/route.ts`, `app/(app)/people/[id]/contacts/{contact-edit-submit,
+  contact-toggle-submit,contact-primary-submit}.ts`.
+- `TrustedContact` gained six required fields (`isPrimary`, `enabled`, `callableFrom`, `callableTo`,
+  `timezone`, `maxAttempts`); `CreateTrustedContactInput` makes all six optional with defaults
+  identical to migration 0011's own column defaults, applied identically by both repository
+  drivers — every fixture and caller that predates this decision was updated to supply them
+  explicitly where a full `TrustedContact` literal (not a `CreateTrustedContactInput`) is
+  constructed directly, matching exactly how DEC-015 handled the same situation for
+  `VulnerablePerson`.
+- `PATCH /api/people/[id]/contacts/[contactId]` gained five updatable fields; `POST
+  /api/people/[id]/contacts/[contactId]/primary` is new, alongside the existing `DELETE`.
+- The person page's "Trusted circle" card gained a circle-health summary line (primary contact,
+  how many would actually be tried, and why not for the rest) computed from the same active circle
+  everything else on that page already reads.
+- `lib/dashboard/configuration-gaps.ts`'s `detectConfigurationGaps` signature widened
+  (`activeContacts` now also needs `enabled`/`isPrimary`); every existing caller already passes full
+  `TrustedContact` records, so only its own test fixtures needed updating.
+- Test count grows from 638 to (reported in the final verification below): the ordering algorithm
+  in isolation (availability, cross-midnight, timezone inheritance/override, disabled/archived
+  exclusion, default preservation, replay stability), the explicit five-scenario regression net, new
+  availability/maxAttempts/disabled cascade-integration scenarios, the new repository-contract
+  coverage for `updateTrustedContact`/`setPrimaryContact`, the new route tests, the new
+  `contact-stats` unit tests, and the new dashboard configuration-gap tests.
+
+### Approval
+
+Project owner approval: approved for exactly this scope — richer trusted-contact configuration,
+availability-aware (never delaying, never excluding-by-time) cascade ordering, per-contact attempt
+limits clamped to the existing global bound, and operational contact statistics — with Stage F
+(intervention display), Stage G (fake SMS), and the final global UI-polish phase explicitly out of
+scope and not begun, and migration 0011 not applied remotely.
+
+---
+
+## DEC-018 — Stage G (SMS notification) cancelled permanently
+
+**Date:** 1 August 2026
+**Status:** Approved
+
+### Context
+
+Every prior stage's approval section listed Stage G — a fake, simulated SMS notification sent when
+an event reaches `ATTENTION_UNRESOLVED` — as future, out-of-scope work, tracked but never begun (see
+DEC-015, DEC-016, DEC-017's own approval sections, and the original phased roadmap). The project
+owner has now decided not to build it at all, in any form.
+
+### Decision
+
+Stage G is cancelled permanently, not merely deferred. Concretely, none of the following will be
+built: a fake SMS adapter, a real SMS integration, Twilio or any other SMS provider, a
+`NotificationAdapter` abstraction, a `notifications` table, or a `0012_notifications.sql` migration.
+`ATTENTION_UNRESOLVED` keeps its existing, unchanged meaning and visibility: a terminal, autonomous
+outcome (DEC-011) shown on the dashboard's "Needs attention now" section and on the event's own
+history/timeline — visible to whoever next opens KinCall, never pushed to anyone by any automatic
+external channel. No code in this repository sends or has ever sent a notification of any kind; this
+decision simply closes the possibility rather than changing present behaviour.
+
+### Product-scope check
+
+This removes a feature that was always listed as optional/future (`PRODUCT_SPECIFICATION.md` §13.2's
+"résumé envoyé par email ou SMS") and never implemented — no shipped behaviour changes. It does not
+touch orchestration: `ATTENTION_UNRESOLVED`'s terminal semantics, the autonomous cascade, and every
+retry/consent/idempotency rule are exactly as DEC-011 and DEC-017 left them.
+
+### Consequences
+
+- No new files, migration, dependency, or orchestration hook of any kind.
+- Every earlier "Stage G... explicitly out of scope and not begun" line in DEC-015 through DEC-017
+  remains accurate as written and is not rewritten — this entry only records that the deferral
+  became a cancellation.
+- Any future revival of SMS notification (or any external-channel notification) requires a new
+  decision-log entry and explicit project-owner approval, per `CLAUDE.md`'s change-control rule —
+  this entry is not that approval.
+
+### Approval
+
+Project owner approval: approved. Stage G will not be implemented in any form.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

@@ -71,6 +71,20 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const readiness = describeCallReadiness(person);
   const contactReadiness = trustedCircle.map((contact) => describeCallReadiness(contact));
 
+  // Stage E (DEC-017): a circle-health summary — computed here, once, from
+  // the same active circle everything else on this page already reads.
+  // "No primary contact" is shown as an informational fact, never an error:
+  // primary status is a visual indicator only and is never required for the
+  // cascade to work.
+  const primaryContact = trustedCircle.find((contact) => contact.isPrimary);
+  const disabledCount = trustedCircle.filter((contact) => !contact.enabled).length;
+  const consentMissingCount = trustedCircle.filter(
+    (contact) => contact.consentStatus !== "confirmed"
+  ).length;
+  const eligibleCount = trustedCircle.filter(
+    (contact) => contact.enabled && contact.consentStatus === "confirmed"
+  ).length;
+
   return (
     <PageShell width="narrow">
       <div className="flex flex-col gap-4">
@@ -202,31 +216,67 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             can only end unresolved.
           </EmptyState>
         ) : (
-          <ol className="flex flex-col gap-2">
-            {trustedCircle.map((contact, index) => (
-              <li
-                key={contact.id}
-                className="rounded-kc border border-line bg-sunken px-4 py-3"
-              >
-                <span className="text-sm">
-                  <span className="text-subtle">{contact.priority}.</span>{" "}
-                  <span className="font-medium">{contact.firstName}</span>
-                  <span className="text-muted"> — {contact.relationship}</span>
-                </span>
-                <span className="ml-2 font-mono text-xs text-subtle">
-                  {maskPhone(contact.phone)}
-                </span>
-                {contactReadiness[index].kind === "consent_missing" ||
-                contactReadiness[index].kind === "phone_missing" ? (
-                  <span className="mt-1 block text-xs text-attention-ink">
-                    {contactReadiness[index].kind === "consent_missing"
-                      ? "Consent not confirmed — skipped by the cascade."
-                      : "Phone configuration missing — cannot be called in live mode."}
+          <div className="flex flex-col gap-3">
+            {/* Stage E (DEC-017): a concise circle-health summary — primary
+                contact, how many would actually be tried, and how many are
+                sitting out (disabled or missing consent) — before the full
+                per-contact list below. */}
+            <p className="text-sm text-muted">
+              {primaryContact ? (
+                <>
+                  Primary contact: <span className="font-medium text-ink">{primaryContact.firstName}</span>.{" "}
+                </>
+              ) : (
+                "No primary contact set. "
+              )}
+              {eligibleCount} of {trustedCircle.length} would be tried
+              {disabledCount + consentMissingCount > 0
+                ? ` (${[
+                    disabledCount > 0 ? `${disabledCount} disabled` : null,
+                    consentMissingCount > 0 ? `${consentMissingCount} missing consent` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")})`
+                : ""}
+              .
+            </p>
+
+            <ol className="flex flex-col gap-2">
+              {trustedCircle.map((contact, index) => (
+                <li
+                  key={contact.id}
+                  className="rounded-kc border border-line bg-sunken px-4 py-3"
+                >
+                  <span className="text-sm">
+                    <span className="text-subtle">{contact.priority}.</span>{" "}
+                    <span className="font-medium">{contact.firstName}</span>
+                    {contact.isPrimary ? (
+                      <span className="ml-2">
+                        <Badge tone="calm">Primary</Badge>
+                      </span>
+                    ) : null}
+                    {!contact.enabled ? (
+                      <span className="ml-2">
+                        <Badge tone="neutral">Disabled</Badge>
+                      </span>
+                    ) : null}
+                    <span className="text-muted"> — {contact.relationship}</span>
                   </span>
-                ) : null}
-              </li>
-            ))}
-          </ol>
+                  <span className="ml-2 font-mono text-xs text-subtle">
+                    {maskPhone(contact.phone)}
+                  </span>
+                  {contactReadiness[index].kind === "consent_missing" ||
+                  contactReadiness[index].kind === "phone_missing" ? (
+                    <span className="mt-1 block text-xs text-attention-ink">
+                      {contactReadiness[index].kind === "consent_missing"
+                        ? "Consent not confirmed — skipped by the cascade."
+                        : "Phone configuration missing — cannot be called in live mode."}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          </div>
         )}
       </Card>
 

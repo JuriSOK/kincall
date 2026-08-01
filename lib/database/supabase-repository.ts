@@ -1,10 +1,12 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { EventStatus } from "../orchestration/states";
 import {
+  ArchivedContactCannotBeReactivatedError,
   CallIntentIntegrityError,
   ContactHasActiveCallError,
   DuplicateIdempotencyKeyError,
   InvalidContactOrderError,
+  InvalidPrimaryContactError,
   PersonHasActiveEventError,
   UnknownRecordError,
 } from "./errors";
@@ -19,9 +21,11 @@ import type {
   CreateTrustedContactInput,
   Repository,
   UpdatePersonInput,
+  UpdateTrustedContactInput,
 } from "./repository";
 import {
   fromCallEventPatch,
+  fromContactPatch,
   fromEventPatch,
   fromPersonPatch,
   toCallEvent,
@@ -45,6 +49,11 @@ import type {
 
 const UNIQUE_VIOLATION = "23505";
 const INTEGRITY_VIOLATION = "23000";
+// Postgres's standard "check_violation" class — migration 0011's
+// trusted_contacts_archived_not_primary_or_enabled constraint raises this,
+// not the application's own '23000' convention (that class is reserved for
+// hand-written `raise exception ... using errcode = '23000'` domain errors).
+const CHECK_VIOLATION = "23514";
 
 function fail(context: string, error: PostgrestError): never {
   throw new Error(`SupabaseRepository: ${context} failed — ${error.message} (${error.code}).`);
@@ -192,9 +201,60 @@ export class SupabaseRepository implements Repository {
         relationship: input.relationship,
         priority,
         consent_status: input.consentStatus,
+        // Defaulted identically to InMemoryRepository and to migration 0011's
+        // own column defaults (DEC-017), rather than left for the database
+        // default to apply — so both drivers return the exact same row
+        // whether or not a caller supplied these optional fields.
+        is_primary: input.isPrimary ?? false,
+        enabled: input.enabled ?? true,
+        callable_from: input.callableFrom ?? null,
+        callable_to: input.callableTo ?? null,
+        timezone: input.timezone ?? null,
+        max_attempts: input.maxAttempts ?? 2,
       })
     );
     return toContact(row);
+  }
+
+  // Stage E (DEC-017). A partial patch, mirroring updatePerson exactly.
+  // Migration 0011's CHECK constraint refuses to enable an archived contact —
+  // surfaced here as the same typed error InMemoryRepository throws, so the
+  // two drivers never disagree about this rule.
+  async updateTrustedContact(
+    contactId: string,
+    input: UpdateTrustedContactInput
+  ): Promise<TrustedContact> {
+    const { data, error } = await this.client
+      .from("trusted_contacts")
+      .update(fromContactPatch(input))
+      .eq("id", contactId)
+      .select()
+      .maybeSingle();
+    if (error) {
+      if (error.code === CHECK_VIOLATION) {
+        throw new ArchivedContactCannotBeReactivatedError(contactId);
+      }
+      fail("updateTrustedContact", error);
+    }
+    if (!data) throw new UnknownRecordError("trusted contact", contactId);
+    return toContact(data as ContactRow);
+  }
+
+  // Stage E. Atomic via the RPC (one transaction): clears any previous
+  // primary and sets the new one, so no interim state with zero or two
+  // primaries is ever observable.
+  async setPrimaryContact(personId: string, contactId: string): Promise<TrustedContact[]> {
+    const { data, error } = await this.client.rpc("set_primary_contact", {
+      p_person_id: personId,
+      p_contact_id: contactId,
+    });
+    if (error) {
+      if (error.code === INTEGRITY_VIOLATION) {
+        throw new InvalidPrimaryContactError(personId, error.message);
+      }
+      fail("setPrimaryContact", error);
+    }
+    return ((data ?? []) as ContactRow[]).map(toContact);
   }
 
   async reorderTrustedContacts(

@@ -12,6 +12,12 @@ const marc: TrustedContact = {
   priority: 2,
   consentStatus: "confirmed",
   archivedAt: null,
+  isPrimary: false,
+  enabled: true,
+  callableFrom: null,
+  callableTo: null,
+  timezone: null,
+  maxAttempts: 2,
 };
 
 const nicole: TrustedContact = {
@@ -23,6 +29,12 @@ const nicole: TrustedContact = {
   priority: 3,
   consentStatus: "confirmed",
   archivedAt: null,
+  isPrimary: false,
+  enabled: true,
+  callableFrom: null,
+  callableTo: null,
+  timezone: null,
+  maxAttempts: 2,
 };
 
 function familyResult(overrides: Partial<FamilyStructuredResult>): FamilyStructuredResult {
