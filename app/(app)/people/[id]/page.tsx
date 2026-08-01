@@ -6,27 +6,41 @@ import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
 import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
+import { parseProfilePeriod, profilePeriodSince } from "@/lib/kpi/period";
 import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
 import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
 import { formatCheckInDays, formatNextCheckIn, SCHEDULE_STATE_LABEL } from "@/lib/schedule/format-schedule";
 import { formatDateTime } from "@/lib/presentation/format-date";
+import {
+  describeConsentStatus,
+  describeConversationProfile,
+  describeLanguage,
+} from "@/lib/presentation/labels";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
-import { SafetyNotice } from "@/app/(app)/events/[id]/safety-notice";
 import { Avatar } from "@/app/ui/avatars/avatar";
 import { ButtonLink } from "@/app/ui/button";
 import { KpiCard } from "@/app/ui/kpi-card";
+import { ProfilePeriodSelector } from "@/app/ui/profile-period-selector";
 import { Badge, Card, DetailRow, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
 import { ScheduleToggleButton } from "./schedule-toggle-button";
 
-// How many rows the "Calls and decisions" list itself shows — the KPI
-// section below reads from the person's FULL event history, not just this
-// slice, so a person with a long history still gets an accurate answer rate.
+// How many rows the "Calls and decisions" list itself shows — within the
+// already period-filtered set, so a wide period on a long history still
+// shows only the most recent slice.
 const EVENT_HISTORY_DISPLAY_LIMIT = 20;
 
-export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PersonPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ period?: string | string[] }>;
+}) {
   const { id } = await params;
+  const { period: periodParam } = await searchParams;
+  const period = parseProfilePeriod(periodParam);
   const repository = getRepository();
   const person = await repository.getPerson(id);
 
@@ -46,11 +60,16 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   ]);
 
   // Person-specific Stage-B KPI: the same computeCheckInKpis the dashboard
-  // uses, over this person's own (unbounded) event history, so the two can
-  // never silently disagree about what "normal" or "a cascade" means.
+  // uses. UI/UX cleanup pass: Activity and Calls-and-decisions share one
+  // `?period=` window, filtered in memory over the already-fetched (and
+  // already person-bounded) `events` list — no new database read is
+  // introduced. `events` itself (unfiltered) is kept around only to tell
+  // "never had a check-in" apart from "none in this period".
+  const periodSinceIso = profilePeriodSince(period);
+  const periodEvents = events.filter((event) => event.createdAt >= periodSinceIso);
   const callEvents = await repository.listCallEventsForEvents(events.map((event) => event.id));
   const callEventsByEvent = groupCallEventsByEvent(callEvents);
-  const kpis = computeCheckInKpis(events, callEventsByEvent);
+  const kpis = computeCheckInKpis(periodEvents, callEventsByEvent);
 
   // Stage D: the deterministic next-check-in calculation (DEC-016) — stored
   // configuration only, never a claim that a scheduler will actually place
@@ -118,20 +137,21 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <div className="flex flex-wrap items-center gap-3">
             <Badge tone={STATUS_TONE[status.tone]}>{status.label}</Badge>
             <Badge tone={person.consentStatus === "confirmed" ? "calm" : "attention"}>
-              Consent: {person.consentStatus}
+              Consent: {describeConsentStatus(person.consentStatus)}
             </Badge>
             <span className="font-mono text-sm text-subtle">{maskPhone(person.phone)}</span>
           </div>
         </div>
       </div>
 
-      <SafetyNotice />
       <CallReadinessNotice readiness={readiness} subject={person.firstName} />
 
       <Card title="Profile">
         <dl className="flex flex-col divide-y divide-line">
-          <DetailRow label="Language">{person.preferredLanguage}</DetailRow>
-          <DetailRow label="Conversation profile">{person.conversationProfile}</DetailRow>
+          <DetailRow label="Language">{describeLanguage(person.preferredLanguage)}</DetailRow>
+          <DetailRow label="Conversation profile">
+            {describeConversationProfile(person.conversationProfile)}
+          </DetailRow>
           <DetailRow label="Interests">
             {person.interests.length > 0 ? person.interests.join(", ") : "None entered"}
           </DetailRow>
@@ -287,7 +307,12 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
 
       <Card
         title="Activity"
-        description="Operational activity only — not a health assessment."
+        actions={
+          <ProfilePeriodSelector
+            current={period}
+            basePath={`/people/${person.id}`}
+          />
+        }
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard label="Check-ins" value={String(kpis.totalCheckIns)} />
@@ -322,14 +347,24 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         </div>
       </Card>
 
-      <Card title="Calls and decisions">
+      <Card
+        title="Calls and decisions"
+        actions={
+          <ProfilePeriodSelector
+            current={period}
+            basePath={`/people/${person.id}`}
+          />
+        }
+      >
         {events.length === 0 ? (
           <EmptyState title="No check-in has run yet">
             Launch one above to see the full sequence of calls and decisions.
           </EmptyState>
+        ) : periodEvents.length === 0 ? (
+          <EmptyState title="No check-ins in this period" />
         ) : (
           <ol className="flex flex-col gap-2">
-            {events.slice(0, EVENT_HISTORY_DISPLAY_LIMIT).map((event) => {
+            {periodEvents.slice(0, EVENT_HISTORY_DISPLAY_LIMIT).map((event) => {
               const eventStatus = describePersonStatus(event);
               // Stage F (DEC-019): the same one-line sentence the event page's
               // card leads with, so this list and that page never describe the

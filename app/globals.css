@@ -19,6 +19,8 @@
   --color-accent-hover: var(--kc-accent-hover);
   --color-accent-soft: var(--kc-accent-soft);
   --color-accent-ink: var(--kc-accent-text);
+  --color-brand-blue: var(--kc-brand-blue);
+  --color-brand-cyan: var(--kc-brand-cyan);
 
   --color-calm-bg: var(--kc-calm-bg);
   --color-calm-line: var(--kc-calm-border);
@@ -53,4 +55,24 @@ body {
   color: var(--kc-text);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* A soft, slow levitation for the landing hero mark only — small enough to
+ * read as "gently alive," never enough to distract from the page's actual
+ * content. app/ui/tokens.css's blanket `prefers-reduced-motion: reduce` rule
+ * already forces every animation's duration to ~0 and its iteration count to
+ * 1, so this needs no reduced-motion override of its own: that global rule
+ * covers it automatically. */
+@keyframes kc-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.kc-animate-float {
+  animation: kc-float 6s ease-in-out infinite;
 }

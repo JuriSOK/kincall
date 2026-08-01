@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ButtonLink } from "@/app/ui/button";
+import { KinCallMark } from "@/app/ui/kincall-mark";
 
 // The public landing page (Stage B). Deliberately separate from the
 // application shell under app/(app)/ — this page has no Nav, no profile
@@ -9,23 +10,28 @@ import { ButtonLink } from "@/app/ui/button";
 // frozen spec originally described) is recorded as a scope note in
 // docs/DECISION_LOG.md: every element §14.1 requires is still present, just
 // on /dashboard instead of "/".
+//
+// UI/UX cleanup pass (see docs/DECISION_LOG.md's latest entry): the icon is
+// a redrawn vector mark (app/ui/kincall-mark.tsx), replacing the earlier
+// raster logo — crisp at any size, themes correctly in dark mode via
+// --kc-brand-blue/--kc-brand-cyan, and never needs cropping. No separate
+// top-left/top-right text or CTA sits alongside it — the mark and wordmark
+// alone identify the page, and the one call to action lives in the centred
+// hero below.
 export default function LandingPage() {
   return (
     <main className="flex flex-1 flex-col">
-      {/* A lightweight header, not the full app Nav (@/app/ui/nav.tsx) — this
-          page is reachable by a visitor with no profiles yet. The brand link
-          and the primary action here are the one place a future "Sign in"
-          control would be added; nothing below assumes a signed-in user. */}
-      <header className="border-b border-line">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4 sm:px-8">
-          <span className="text-base font-semibold tracking-tight">KinCall</span>
-          <ButtonLink href="/dashboard" variant="secondary" size="sm">
-            Get started
-          </ButtonLink>
-        </div>
-      </header>
-
       <section className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 px-5 py-16 text-center sm:px-8 sm:py-24">
+        {/* The floating animation is decorative and is neutralised entirely
+            by app/ui/tokens.css's blanket prefers-reduced-motion rule — no
+            separate override needed here. */}
+        <div className="kc-animate-float flex flex-col items-center gap-3">
+          <KinCallMark className="h-20 w-20 sm:h-24 sm:w-24" />
+          <span className="text-2xl font-semibold tracking-tight text-brand-blue sm:text-3xl">
+            KinCall
+          </span>
+        </div>
+
         <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
           A familiar phone call, watching over the people you love.
         </h1>
@@ -77,17 +83,6 @@ export default function LandingPage() {
               recorded on the dashboard.
             </Step>
           </ol>
-        </div>
-      </section>
-
-      <section className="mx-auto w-full max-w-3xl px-5 py-16 sm:px-8">
-        <div className="rounded-kc border border-line bg-surface p-6 text-sm text-muted">
-          <p className="font-medium text-ink">What KinCall is not</p>
-          <p className="mt-2">
-            KinCall does not diagnose, does not offer medical advice, and does not contact emergency
-            services. It helps a trusted circle stay present and coordinated — it does not replace
-            family, caregivers, or professional care.
-          </p>
         </div>
       </section>
 

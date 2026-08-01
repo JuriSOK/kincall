@@ -11,10 +11,7 @@ export default function NewPersonPage() {
         <Link href="/dashboard" className="w-fit text-sm text-muted hover:text-accent">
           ← Dashboard
         </Link>
-        <PageHeader
-          title="Add a loved one"
-          lead="You can add their trusted circle on the next screen."
-        />
+        <PageHeader title="Add a loved one" />
       </div>
 
       <Card>

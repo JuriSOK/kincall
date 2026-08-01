@@ -5,39 +5,50 @@
  * scales live here as custom properties and are exposed to utilities through
  * globals.css's `@theme inline` block.
  *
- * Direction: warm, luminous, calm. A family-coordination product, not a
- * developer dashboard. Deliberately not dark-by-default, not neon, not
- * glassmorphic.
+ * Direction (global UI/UX pass): clean, modern, warm-premium, aligned with
+ * the KinCall logo's soft blue/turquoise identity — deep blue paired with a
+ * cyan/turquoise accent over a light, airy canvas. Deliberately not
+ * dark-by-default, not neon, not glassmorphic. This replaces the earlier
+ * warm-terracotta palette; the SHAPE, SPACING, MOTION and STATUS-TONE systems
+ * below are unchanged, since only the brand palette was in scope for this
+ * pass.
  *
- * Status semantics are unchanged from the pre-existing interface: amber means
- * attention, emerald means calm/resolved. `unresolved` is a third, heavier tone
- * added for ATTENTION_UNRESOLVED (DEC-011), which must read as distinct from
- * both "all is well" and "we are working on it" — without implying medical
- * severity, which KinCall never assesses.
+ * Status semantics are UNCHANGED from the pre-existing interface, and
+ * deliberately not touched by this rebrand: amber means attention, emerald
+ * means calm/resolved, a heavier rose/red means unresolved. Recoloring those
+ * would be changing product meaning, not a visual refresh — see each tone's
+ * own section further down, which keeps its previous hues exactly.
  */
 
 :root {
   /* ── Surfaces ─────────────────────────────────────────────────────────── */
-  /* Warm off-white page, plainer white cards layered on top of it. The slight
-   * warmth is what stops the interface reading as a blank admin panel. */
-  --kc-canvas: #fdfbf8;
+  /* A soft, cool off-white page — a hint of the logo's blue rather than a
+   * neutral grey — with plain white cards layered on top of it. */
+  --kc-canvas: #f5f9fb;
   --kc-surface: #ffffff;
-  --kc-surface-sunken: #f7f3ee;
-  --kc-border: #e8e0d6;
-  --kc-border-strong: #d6cabb;
+  --kc-surface-sunken: #eef5f7;
+  --kc-border: #dbe7eb;
+  --kc-border-strong: #c1d5da;
 
   /* ── Text ─────────────────────────────────────────────────────────────── */
-  --kc-text: #2a2320;
-  --kc-text-muted: #6b5f56;
-  --kc-text-subtle: #8d8078;
+  --kc-text: #172a37;
+  --kc-text-muted: #57707c;
+  --kc-text-subtle: #7e929c;
 
   /* ── Accent (primary actions, links) ──────────────────────────────────── */
-  /* Terracotta. Warm and reassuring, and distinct from both status tones so a
-   * primary button can never be mistaken for a status signal. */
-  --kc-accent: #b4552d;
-  --kc-accent-hover: #9a4525;
-  --kc-accent-soft: #fbeee7;
+  /* A deep turquoise-teal, sampled from the logo's blue-to-cyan gradient —
+   * dark enough for accessible text/icon contrast on white, distinct from
+   * every status tone below so a primary button can never be mistaken for a
+   * status signal. --kc-brand-blue/--kc-brand-cyan are the wider gradient
+   * pair the landing hero and other decorative gradients draw from; ordinary
+   * UI (buttons, links, focus rings) uses --kc-accent alone for consistency
+   * and contrast, never a live gradient on text. */
+  --kc-accent: #0f7a8c;
+  --kc-accent-hover: #0c6472;
+  --kc-accent-soft: #e3f4f6;
   --kc-accent-text: #ffffff;
+  --kc-brand-blue: #163f6b;
+  --kc-brand-cyan: #2fc6c6;
 
   /* ── Status tones ─────────────────────────────────────────────────────── */
   --kc-calm-bg: #ecf7f0;
@@ -63,11 +74,11 @@
   --kc-radius-full: 999px;
 
   /* ── Depth ────────────────────────────────────────────────────────────── */
-  /* Low-contrast and warm-tinted rather than neutral grey, so surfaces feel
+  /* Low-contrast and blue-tinted rather than neutral grey, so surfaces feel
    * lit rather than outlined. */
-  --kc-shadow-sm: 0 1px 2px rgb(74 52 38 / 0.05);
-  --kc-shadow: 0 1px 3px rgb(74 52 38 / 0.06), 0 6px 16px -6px rgb(74 52 38 / 0.10);
-  --kc-shadow-lg: 0 2px 6px rgb(74 52 38 / 0.06), 0 18px 40px -12px rgb(74 52 38 / 0.16);
+  --kc-shadow-sm: 0 1px 2px rgb(16 40 56 / 0.05);
+  --kc-shadow: 0 1px 3px rgb(16 40 56 / 0.06), 0 6px 16px -6px rgb(16 40 56 / 0.10);
+  --kc-shadow-lg: 0 2px 6px rgb(16 40 56 / 0.06), 0 18px 40px -12px rgb(16 40 56 / 0.16);
 
   /* ── Focus ────────────────────────────────────────────────────────────── */
   --kc-focus-ring: var(--kc-accent);
@@ -78,22 +89,24 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Warm-tinted dark, not pure black, so the same product identity survives
-     * the theme switch. */
-    --kc-canvas: #191512;
-    --kc-surface: #221d19;
-    --kc-surface-sunken: #14100e;
-    --kc-border: #392f28;
-    --kc-border-strong: #4d4038;
+    /* Deep blue-tinted dark, not pure black, so the same brand identity
+     * survives the theme switch. */
+    --kc-canvas: #0f1a22;
+    --kc-surface: #16242e;
+    --kc-surface-sunken: #0b141b;
+    --kc-border: #26404c;
+    --kc-border-strong: #375666;
 
-    --kc-text: #f4eee8;
-    --kc-text-muted: #bcaea3;
-    --kc-text-subtle: #9a8b80;
+    --kc-text: #eaf3f5;
+    --kc-text-muted: #a6bdc6;
+    --kc-text-subtle: #83a0aa;
 
-    --kc-accent: #e08558;
-    --kc-accent-hover: #eb9a70;
-    --kc-accent-soft: #33231b;
-    --kc-accent-text: #1b120d;
+    --kc-accent: #3fd0d0;
+    --kc-accent-hover: #5cdcdc;
+    --kc-accent-soft: #10333a;
+    --kc-accent-text: #062226;
+    --kc-brand-blue: #2c5c94;
+    --kc-brand-cyan: #3fd0d0;
 
     --kc-calm-bg: #16291f;
     --kc-calm-border: #2f5540;

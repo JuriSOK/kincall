@@ -44,3 +44,54 @@ export function periodSince(period: PeriodKey, now: Date = new Date()): string {
   const { days } = periodOption(period);
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 }
+
+// ── Profile-page period filter (UI/UX cleanup pass) ─────────────────────────
+// A separate, deliberately shorter-grained vocabulary from PeriodKey above:
+// the dashboard's 7d/30d/3m strip is about a cross-person KPI window, while
+// this is "how much of ONE person's own history to show right now" — Day
+// through Year, including a same-day option the dashboard never offered. Kept
+// in this file (not a new module) because the parsing/URL/since pattern is
+// identical, per the brief's "use the existing filtering/query architecture
+// where possible" — only the option vocabulary differs.
+export type ProfilePeriodKey = "day" | "week" | "month" | "year";
+
+export interface ProfilePeriodOption {
+  key: ProfilePeriodKey;
+  label: string;
+  days: number;
+}
+
+export const PROFILE_PERIOD_OPTIONS: readonly ProfilePeriodOption[] = [
+  { key: "day", label: "Day", days: 1 },
+  { key: "week", label: "Week", days: 7 },
+  { key: "month", label: "Month", days: 30 },
+  { key: "year", label: "Year", days: 365 },
+];
+
+export const DEFAULT_PROFILE_PERIOD: ProfilePeriodKey = "month";
+
+function isProfilePeriodKey(value: string): value is ProfilePeriodKey {
+  return PROFILE_PERIOD_OPTIONS.some((option) => option.key === value);
+}
+
+// Same tampered/malformed-URL fallback behaviour as parsePeriod above: never
+// guesses, always falls back to the documented default.
+export function parseProfilePeriod(value: string | string[] | undefined): ProfilePeriodKey {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return candidate !== undefined && isProfilePeriodKey(candidate)
+    ? candidate
+    : DEFAULT_PROFILE_PERIOD;
+}
+
+export function profilePeriodOption(period: ProfilePeriodKey): ProfilePeriodOption {
+  return PROFILE_PERIOD_OPTIONS.find((option) => option.key === period) ?? PROFILE_PERIOD_OPTIONS[2];
+}
+
+// The inclusive lower bound, as an ISO instant — used to filter an
+// already-fetched, single-person event list in memory (the person page reads
+// this person's own event history in one bounded-by-that-person's-own-count
+// call, same as before this pass; no new unbounded read is introduced).
+export function profilePeriodSince(period: ProfilePeriodKey, now: Date = new Date()): string {
+  const { days } = profilePeriodOption(period);
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+}

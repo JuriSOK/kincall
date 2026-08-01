@@ -13,7 +13,8 @@ import { controlClasses, FormField } from "@/app/ui/form-field";
 import { Notice } from "@/app/ui/surfaces";
 import { AvatarPicker } from "@/app/ui/avatars/avatar-picker";
 import { WEEKDAYS } from "@/lib/schedule/format-schedule";
-import { COMMON_TIMEZONES, PROFILE_LABELS } from "../../profile-form-constants";
+import { describeConversationProfile, describeLanguage } from "@/lib/presentation/labels";
+import { COMMON_TIMEZONES } from "../../profile-form-constants";
 import { submitPersonEdit } from "./person-edit-submit";
 
 export function PersonEditForm({ person }: { person: VulnerablePerson }) {
@@ -103,7 +104,7 @@ export function PersonEditForm({ person }: { person: VulnerablePerson }) {
             >
               {PREFERRED_LANGUAGES.map((language) => (
                 <option key={language} value={language}>
-                  {language}
+                  {describeLanguage(language)}
                 </option>
               ))}
             </select>
@@ -165,11 +166,7 @@ export function PersonEditForm({ person }: { person: VulnerablePerson }) {
           ) : null}
         </fieldset>
 
-        <FormField
-          label="Schedule state"
-          error={errors.scheduleState}
-          hint="Stored for a future scheduler — nothing calls automatically yet. Use Launch demo / Call now to check in today."
-        >
+        <FormField label="Schedule state" error={errors.scheduleState}>
           {(field) => (
             <select
               {...field}
@@ -200,7 +197,7 @@ export function PersonEditForm({ person }: { person: VulnerablePerson }) {
             >
               {CONVERSATION_PROFILES.map((profile) => (
                 <option key={profile} value={profile}>
-                  {PROFILE_LABELS[profile] ?? profile}
+                  {describeConversationProfile(profile)}
                 </option>
               ))}
             </select>

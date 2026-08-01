@@ -121,10 +121,7 @@ export default async function HistoryPage({
 
   return (
     <PageShell>
-      <PageHeader
-        title="History"
-        lead="Every check-in, grouped by day, with a calendar overview."
-      />
+      <PageHeader title="History" />
 
       <Card
         title="Calendar"
@@ -159,10 +156,7 @@ export default async function HistoryPage({
         </p>
       </Card>
 
-      <Card
-        title="Detailed history"
-        description="Operational activity only — not a health assessment."
-      >
+      <Card title="Detailed history">
         <div className="flex flex-col gap-4">
           <HistoryFilters
             action="/history"
@@ -184,9 +178,7 @@ export default async function HistoryPage({
           ) : null}
 
           {groups.length === 0 ? (
-            <EmptyState title="No check-ins match these filters">
-              Try a wider period, a different profile, or clearing the search.
-            </EmptyState>
+            <EmptyState title="No check-ins match these filters" />
           ) : (
             groups.map((group) => (
               <div key={group.dayKey} className="flex flex-col gap-2">

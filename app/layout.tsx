@@ -19,11 +19,11 @@ export const metadata: Metadata = {
 };
 
 // Matches ui/tokens.css's canvas in both schemes, so the browser chrome and any
-// overscroll area do not flash white against a warm page.
+// overscroll area do not flash white against the page.
 export const viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fdfbf8" },
-    { media: "(prefers-color-scheme: dark)", color: "#191512" },
+    { media: "(prefers-color-scheme: light)", color: "#f5f9fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f1a22" },
   ],
 };
 

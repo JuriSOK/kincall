@@ -17,7 +17,7 @@ export function KpiCard({ label, value, sampleSize, caption }: KpiCardProps) {
     <div className="flex flex-col gap-1 rounded-kc border border-line bg-surface p-4 shadow-kc-sm">
       <p className="text-xs font-medium uppercase tracking-wide text-subtle">{label}</p>
       <p className="text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
-      {sampleSize !== undefined ? (
+      {sampleSize !== undefined && sampleSize > 0 ? (
         <p className="text-xs text-subtle">n = {sampleSize}</p>
       ) : null}
       {caption ? <p className="text-xs text-subtle">{caption}</p> : null}

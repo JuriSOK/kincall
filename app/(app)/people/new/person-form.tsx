@@ -13,7 +13,8 @@ import { controlClasses, FormField } from "@/app/ui/form-field";
 import { Notice } from "@/app/ui/surfaces";
 import { AvatarPicker } from "@/app/ui/avatars/avatar-picker";
 import { WEEKDAYS } from "@/lib/schedule/format-schedule";
-import { COMMON_TIMEZONES, PROFILE_LABELS } from "../profile-form-constants";
+import { describeConversationProfile, describeLanguage } from "@/lib/presentation/labels";
+import { COMMON_TIMEZONES } from "../profile-form-constants";
 
 export function PersonForm() {
   const router = useRouter();
@@ -138,18 +139,12 @@ export function PersonForm() {
             <select {...field} name="preferredLanguage" defaultValue="fr-FR" className={controlClasses}>
               {PREFERRED_LANGUAGES.map((language) => (
                 <option key={language} value={language}>
-                  {language}
+                  {describeLanguage(language)}
                 </option>
               ))}
             </select>
           )}
         </FormField>
-
-        <p className="rounded-kc border border-line bg-sunken p-4 text-sm text-muted">
-          The phone number is stored on the server only and masked wherever it is shown. An
-          environment-variable override can still redirect this profile&apos;s live number if one is
-          set.
-        </p>
       </section>
 
       <section className="flex flex-col gap-5">
@@ -200,11 +195,7 @@ export function PersonForm() {
           ) : null}
         </fieldset>
 
-        <FormField
-          label="Schedule state"
-          error={errors.scheduleState}
-          hint="Stored for a future scheduler — nothing calls automatically yet. Use Launch demo / Call now to check in."
-        >
+        <FormField label="Schedule state" error={errors.scheduleState}>
           {(field) => (
             <select {...field} name="scheduleState" defaultValue="active" className={controlClasses}>
               <option value="active">Active</option>
@@ -225,7 +216,7 @@ export function PersonForm() {
             <select {...field} name="conversationProfile" defaultValue="standard" className={controlClasses}>
               {CONVERSATION_PROFILES.map((profile) => (
                 <option key={profile} value={profile}>
-                  {PROFILE_LABELS[profile] ?? profile}
+                  {describeConversationProfile(profile)}
                 </option>
               ))}
             </select>

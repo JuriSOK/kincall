@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { KinCallMark } from "./kincall-mark";
 
 interface NavLink {
   href: string;
@@ -32,7 +33,16 @@ export function Nav() {
   return (
     <header className="border-b border-line bg-surface">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-5 py-3 sm:px-8">
-        <Link href="/dashboard" className="text-base font-semibold tracking-tight hover:text-accent">
+        {/* One accessible name for the whole lockup ("KinCall dashboard"),
+            not "KinCall" pieced together from the icon plus the text — the
+            icon is marked decorative so it is never announced a second
+            time alongside the visible "KinCall" text. */}
+        <Link
+          href="/dashboard"
+          aria-label="KinCall dashboard"
+          className="flex items-center gap-2 text-base font-semibold tracking-tight hover:text-accent"
+        >
+          <KinCallMark decorative className="h-7 w-7 shrink-0" />
           KinCall
         </Link>
 

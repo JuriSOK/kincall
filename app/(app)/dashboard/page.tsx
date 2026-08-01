@@ -1,20 +1,23 @@
 import Link from "next/link";
 import { getRepository } from "@/lib/database/store";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
+import { computeDailyRecapStatus } from "@/lib/dashboard/daily-recap-status";
 import { detectConfigurationGaps, type ConfigurationGap } from "@/lib/dashboard/configuration-gaps";
 import { groupByDay } from "@/lib/dashboard/group-by-day";
-import { partitionUnresolvedEvents } from "@/lib/dashboard/partition-unresolved";
 import { computeUpcomingCheckIns } from "@/lib/dashboard/upcoming-check-ins";
 import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
 import { parsePeriod, periodSince } from "@/lib/kpi/period";
 import { describeAction } from "@/lib/presentation/event-summary";
 import { buildHistoryEventView } from "@/lib/presentation/history-view";
+import { formatTime } from "@/lib/presentation/format-date";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
 import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
 import { formatNextCheckIn, formatOccurrence } from "@/lib/schedule/format-schedule";
+import { ActivityPersonFilter } from "@/app/ui/activity-person-filter";
 import { ActivityRow } from "@/app/ui/activity-row";
 import { Avatar } from "@/app/ui/avatars/avatar";
 import { ButtonLink } from "@/app/ui/button";
+import { DailyRecapRow, type DailyRecapItem } from "@/app/ui/daily-recap";
 import { KpiCard } from "@/app/ui/kpi-card";
 import { PeriodSelector } from "@/app/ui/period-selector";
 import { ProfileCard } from "@/app/ui/profile-card";
@@ -34,6 +37,16 @@ const RECENT_ACTIVITY_DISPLAY_LIMIT = 20;
 // glanceable preview, not the full schedule; every profile still has its own
 // computed next check-in on its person page.
 const UPCOMING_CHECK_INS_LIMIT = 8;
+// How far back the Daily recap looks per person to find "today's" check-in
+// (§1 of the UX correction brief). More than 1: a person can be checked in
+// on more than once in a day (e.g. a manual re-launch), and the row must
+// reflect the LATEST of those, not just whichever the repository happens to
+// return first. Still a small, explicit bound — never an unbounded read.
+const DAILY_RECAP_EVENT_LOOKBACK = 10;
+
+function firstString(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 export default async function DashboardPage({
   searchParams,
@@ -42,6 +55,11 @@ export default async function DashboardPage({
 }) {
   const params = await searchParams;
   const period = parsePeriod(params.period);
+  // UI/UX pass: narrows the "Operational activity" KPI strip only — every
+  // other dashboard section (recent activity, the daily recap, people)
+  // keeps showing every person, unaffected by this filter. Absent means the
+  // existing "all people" behaviour, unchanged.
+  const activityPersonId = firstString(params.person);
   const repository = getRepository();
 
   const people = await repository.listPeople();
@@ -58,7 +76,7 @@ export default async function DashboardPage({
   const perPerson = await Promise.all(
     people.map(async (person) => {
       const [latestEvents, activeContacts] = await Promise.all([
-        repository.listEvents(person.id, 1),
+        repository.listEvents(person.id, DAILY_RECAP_EVENT_LOOKBACK),
         repository.getActiveTrustedContacts(person.id),
       ]);
       const personReadiness = describeCallReadiness(person);
@@ -74,7 +92,12 @@ export default async function DashboardPage({
       );
       return {
         person,
+        // The single most recent event ever — correct for the "People"
+        // profile cards below, which intentionally show history rather than
+        // resetting daily. The Daily recap uses the full `latestEvents`
+        // lookback instead; see computeDailyRecapStatus.
         latestEvent: latestEvents[0],
+        latestEvents,
         activeContacts,
         personReadiness,
         contactReadiness,
@@ -87,20 +110,6 @@ export default async function DashboardPage({
     ({ person, personReadiness, activeContacts, contactReadiness }) =>
       detectConfigurationGaps(person, personReadiness, activeContacts, contactReadiness)
   );
-
-  // Schedule configuration counts (§7 of the Stage D brief) — current
-  // configuration snapshots, NOT metrics over the selected KPI period, which
-  // is exactly why they are rendered in their own card rather than folded
-  // into the "Operational activity" strip below. Partitioned directly from
-  // each person's own computeNextCheckIn `kind`, so this can never disagree
-  // with what that person's own page or profile card shows: "scheduled" is
-  // active-with-valid-config, "paused" is a deliberate pause, and both
-  // "inactive" and "no_days_selected" mean the schedule is not fully set up.
-  const activeScheduleCount = perPerson.filter((p) => p.nextCheckIn.kind === "scheduled").length;
-  const pausedScheduleCount = perPerson.filter((p) => p.nextCheckIn.kind === "paused").length;
-  const incompleteScheduleCount = perPerson.filter(
-    (p) => p.nextCheckIn.kind === "inactive" || p.nextCheckIn.kind === "no_days_selected"
-  ).length;
 
   // "Upcoming check-ins" (§4 of the Stage D brief) — sorted chronologically
   // and bounded, via the pure lib/dashboard/upcoming-check-ins.ts helper.
@@ -129,7 +138,13 @@ export default async function DashboardPage({
   const recentEvents = await repository.listRecentEvents({ since, limit: RECENT_EVENTS_LIMIT });
   const callEvents = await repository.listCallEventsForEvents(recentEvents.map((event) => event.id));
   const callEventsByEvent = groupCallEventsByEvent(callEvents);
-  const kpis = computeCheckInKpis(recentEvents, callEventsByEvent);
+  // UI/UX pass: "Operational activity" narrows to one person when selected —
+  // every other section below (recent activity, the daily recap, people)
+  // keeps reading the full, unfiltered `recentEvents`/`callEventsByEvent`.
+  const kpiEvents = activityPersonId
+    ? recentEvents.filter((event) => event.personId === activityPersonId)
+    : recentEvents;
+  const kpis = computeCheckInKpis(kpiEvents, callEventsByEvent);
 
   // Name + avatar for every event in the window, including a person not in
   // the active `people` list (archived) — DEC-009 requires an archived
@@ -167,8 +182,56 @@ export default async function DashboardPage({
       contactsByPerson.get(event.personId) ?? []
     );
   });
-  const { unresolved: unresolvedViews, rest: otherViews } = partitionUnresolvedEvents(views);
-  const recentActivityGroups = groupByDay(otherViews.slice(0, RECENT_ACTIVITY_DISPLAY_LIMIT));
+  // UI/UX pass: shows every event again, unresolved included — the previous
+  // exclusion existed only to avoid double-showing an unresolved event
+  // against the old "Needs attention now" list. The Daily Recap block below
+  // is a per-person status summary, not a per-event list, so that
+  // double-display concern no longer applies.
+  const recentActivityGroups = groupByDay(views.slice(0, RECENT_ACTIVITY_DISPLAY_LIMIT));
+
+  // UI/UX pass: "Daily recap" replaces the old alert-only "Needs attention
+  // now" block — one row per person, always (not only those needing
+  // attention), so the section reads as an overview of the day rather than a
+  // warning list. Detail is not removed, only moved one click away: each row
+  // expands (native <details>, see app/ui/daily-recap.tsx) to the event's own
+  // decision reason and a link to the full event page. Unresolved cases still
+  // sort first and keep their own distinct badge tone (DEC-011) — the
+  // reframing changes how this reads, not whether an unresolved case is easy
+  // to find.
+  //
+  // UX correction pass (§1): each row's status now comes from
+  // computeDailyRecapStatus, not describePersonStatus(latestEvent) directly —
+  // the latter answers "what happened most recently, ever" and would let a
+  // calm result from yesterday keep reading as calm all day today. The
+  // recap must instead reset to "Not checked in yet" at each person's own
+  // local midnight, using their persisted timezone — never a rolling
+  // 24-hour window, never the server's or browser's zone.
+  const RECAP_TONE_PRIORITY: Record<string, number> = { unresolved: 0, attention: 1, unknown: 2, calm: 3 };
+  const dailyRecapItems: DailyRecapItem[] = [...perPerson]
+    .sort(
+      (a, b) =>
+        (RECAP_TONE_PRIORITY[computeDailyRecapStatus(a.latestEvents, a.person.timezone, now).tone] ?? 4) -
+        (RECAP_TONE_PRIORITY[computeDailyRecapStatus(b.latestEvents, b.person.timezone, now).tone] ?? 4)
+    )
+    .map(({ person, latestEvents }) => {
+      const daily = computeDailyRecapStatus(latestEvents, person.timezone, now);
+      const event = daily.todaysEvent;
+      return {
+        personId: person.id,
+        personName: person.firstName,
+        avatarKey: person.avatarKey,
+        statusLabel: daily.label,
+        statusTone: STATUS_TONE[daily.tone],
+        summary: daily.summary,
+        // `event` is always today's own event by construction, so this is
+        // always "Today, HH:MM" — never a past date, which would contradict
+        // the daily-reset guarantee above.
+        timeLabel: event ? `Today, ${formatTime(event.createdAt)}` : null,
+        decisionReason: event?.decisionReason ?? null,
+        eventHref: event ? `/events/${event.id}` : null,
+        profileHref: `/people/${person.id}`,
+      };
+    });
 
   return (
     <PageShell>
@@ -182,19 +245,22 @@ export default async function DashboardPage({
         }
       />
 
-      {/* A — Needs attention now (§7A). Always first, regardless of period:
-          an autonomous dead end (DEC-011) should never be hidden behind a
-          "last 7 days" filter a visitor happened to leave selected. */}
-      <Card title="Needs attention now">
-        {unresolvedViews.length === 0 ? (
-          <EmptyState title="Nothing currently needs attention.">
-            Every check-in either closed normally or is still being worked through the trusted
-            circle.
+      {/* A — Daily recap (UI/UX pass, replacing "Needs attention now"). Always
+          first, regardless of period: this is deliberately NOT limited to the
+          selected KPI window — "the day at a glance" should not depend on a
+          filter a visitor happened to leave set. Every person gets a row;
+          unresolved cases sort first and keep their own distinct tone, so
+          nothing DEC-011 requires stays visible is lost — only the framing
+          changed, from an alert list to a recap everyone appears in. */}
+      <Card title="Daily recap">
+        {dailyRecapItems.length === 0 ? (
+          <EmptyState title="No profiles yet">
+            Add a loved one to see their daily recap here.
           </EmptyState>
         ) : (
           <div className="flex flex-col gap-2">
-            {unresolvedViews.map((view) => (
-              <ActivityRow key={view.eventId} view={view} />
+            {dailyRecapItems.map((item) => (
+              <DailyRecapRow key={item.personId} item={item} />
             ))}
           </div>
         )}
@@ -224,8 +290,21 @@ export default async function DashboardPage({
           for exactly what is and is not computed, and why. */}
       <Card
         title="Operational activity"
-        description="Operational activity only — not a health assessment."
-        actions={<PeriodSelector current={period} basePath="/dashboard" />}
+        actions={
+          <div className="flex flex-wrap items-end gap-3">
+            <ActivityPersonFilter
+              action="/dashboard"
+              people={people}
+              selectedPersonId={activityPersonId}
+              preserveParams={{ period }}
+            />
+            <PeriodSelector
+              current={period}
+              basePath="/dashboard"
+              preserveParams={{ person: activityPersonId }}
+            />
+          </div>
+        }
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           <KpiCard label="Check-ins" value={String(kpis.totalCheckIns)} />
@@ -268,23 +347,14 @@ export default async function DashboardPage({
           />
           <KpiCard
             label="No active circle"
-            value={String(perPerson.filter((p) => p.activeContacts.length === 0).length)}
+            value={String(
+              perPerson.filter(
+                (p) =>
+                  (!activityPersonId || p.person.id === activityPersonId) &&
+                  p.activeContacts.length === 0
+              ).length
+            )}
           />
-        </div>
-      </Card>
-
-      {/* Schedule configuration (Stage D / DEC-016). Current configuration
-          snapshots, not metrics over the period selected above — kept in its
-          own card, visually separate from "Operational activity", so the two
-          are never mistaken for the same kind of number. */}
-      <Card
-        title="Schedule configuration"
-        description="Current configuration only — not an event-period metric."
-      >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <KpiCard label="Active schedules" value={String(activeScheduleCount)} />
-          <KpiCard label="Paused schedules" value={String(pausedScheduleCount)} />
-          <KpiCard label="Incomplete configuration" value={String(incompleteScheduleCount)} />
         </div>
       </Card>
 
@@ -369,9 +439,7 @@ export default async function DashboardPage({
       {/* E — Recent activity (§7E). */}
       <Card title="Recent activity">
         {recentActivityGroups.length === 0 ? (
-          <EmptyState title="No recent activity in this period">
-            Widen the period above, or launch a check-in from a profile page.
-          </EmptyState>
+          <EmptyState title="No recent activity in this period" />
         ) : (
           <div className="flex flex-col gap-4">
             {recentActivityGroups.map((group) => (

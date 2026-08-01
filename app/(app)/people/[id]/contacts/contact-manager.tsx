@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { ConsentStatus } from "@/lib/database/types";
-import type { MeanMetric, RateMetric } from "@/lib/kpi/dashboard-kpis";
+import { describeConsentStatus, describeContactTimezone } from "@/lib/presentation/labels";
 import type { FieldErrors } from "@/lib/validation/profile";
 import { Button } from "@/app/ui/button";
 import { controlClasses, FormField } from "@/app/ui/form-field";
@@ -17,18 +17,17 @@ import { DeleteContactButton } from "./delete-contact-button";
 
 // Deliberately NOT TrustedContact: the real, unmasked phone must never cross
 // into a Client Component's props, since those are serialized into the page
-// payload sent to the browser. The server computes `maskedPhone` and
-// pre-formatted stats; this is the only phone-shaped thing this component
-// ever sees.
-export interface ContactStatsSummary {
-  answerRate: RateMetric;
-  acceptanceRate: RateMetric;
-  declineRate: RateMetric;
-  meanAttemptWhenAnswering: MeanMetric;
-  latestParticipationLabel: string | null;
-  confirmedInterventions: number;
-}
-
+// payload sent to the browser. The server computes `maskedPhone`; this is the
+// only phone-shaped thing this component ever sees.
+//
+// UI/UX cleanup pass: callableFrom/callableTo/timezone/maxAttempts stay on
+// this type (ContactEditPanel below still edits them) but are no longer
+// rendered on the default card — availability, timezone and maximum attempts
+// live in the edit panel only now, not in the at-a-glance summary. The
+// per-contact statistics block (answer/acceptance/decline rate, mean
+// attempt, confirmed interventions, latest participation) was removed
+// entirely from this view; lib/kpi/contact-stats.ts itself is untouched and
+// still available if a future stage wants that detail back.
 export interface ContactSummary {
   id: string;
   firstName: string;
@@ -42,29 +41,17 @@ export interface ContactSummary {
   callableTo: string | null;
   timezone: string | null;
   maxAttempts: number;
-  stats: ContactStatsSummary;
 }
 
 interface Props {
   personId: string;
-  personTimezone: string;
+  personName: string;
   contacts: ContactSummary[];
   // Precomputed on the server, where CALLE_MODE and the environment live.
   readiness: Record<string, { kind: string; message?: string }>;
 }
 
-function formatRate(rate: RateMetric): string {
-  return rate.total === 0 ? "Not enough data" : `${rate.count}/${rate.total} (${rate.percentage}%)`;
-}
-
-// Never the raw HH:MM pair without context, and never claims a window
-// excludes anyone — see this page's own lead text for the "orders, never
-// excludes" guarantee.
-function formatWindow(from: string | null, to: string | null): string {
-  return from === null || to === null ? "Always available" : `${from}–${to}`;
-}
-
-export function ContactManager({ personId, personTimezone, contacts, readiness }: Props) {
+export function ContactManager({ personId, personName, contacts, readiness }: Props) {
   const router = useRouter();
   const [order, setOrder] = useState(contacts.map((contact) => contact.id));
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -276,7 +263,6 @@ export function ContactManager({ personId, personTimezone, contacts, readiness }
 
       <Card
         title="Cascade order"
-        description="KinCall calls the circle in this order and stops as soon as someone confirms. Availability only reorders who is tried first — see the guarantee above."
         actions={
           dirty ? (
             <Button onClick={saveOrder} disabled={busy} size="sm">
@@ -341,7 +327,7 @@ export function ContactManager({ personId, personTimezone, contacts, readiness }
                       <span className="ml-2 font-mono text-xs text-subtle">{contact.maskedPhone}</span>
                     </span>
                     <Badge tone={contact.consentStatus === "confirmed" ? "calm" : "attention"}>
-                      Consent: {contact.consentStatus}
+                      Consent: {describeConsentStatus(contact.consentStatus)}
                     </Badge>
                     <Badge tone={contact.enabled ? "calm" : "neutral"}>
                       {contact.enabled ? "Enabled" : "Disabled"}
@@ -349,26 +335,6 @@ export function ContactManager({ personId, personTimezone, contacts, readiness }
                     {state && state.kind !== "ready" && state.kind !== "fake_mode" ? (
                       <span className="text-xs text-attention-ink">{state.message}</span>
                     ) : null}
-                  </div>
-
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-subtle">
-                    <span>Callable window: {formatWindow(contact.callableFrom, contact.callableTo)}</span>
-                    <span>Timezone: {contact.timezone ?? `Inherits ${personTimezone}`}</span>
-                    <span>Maximum attempts: {contact.maxAttempts}</span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-subtle">
-                    <span>Answered: {formatRate(contact.stats.answerRate)}</span>
-                    <span>Accepted (of answered): {formatRate(contact.stats.acceptanceRate)}</span>
-                    <span>Declined (of answered): {formatRate(contact.stats.declineRate)}</span>
-                    <span>
-                      Mean attempt when answering:{" "}
-                      {contact.stats.meanAttemptWhenAnswering.mean === null
-                        ? "Not enough data"
-                        : contact.stats.meanAttemptWhenAnswering.mean.toFixed(1)}
-                    </span>
-                    <span>Confirmed interventions: {contact.stats.confirmedInterventions}</span>
-                    <span>Last participation: {contact.stats.latestParticipationLabel ?? "Never"}</span>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -412,7 +378,7 @@ export function ContactManager({ personId, personTimezone, contacts, readiness }
                   {editingId === id ? (
                     <ContactEditPanel
                       personId={personId}
-                      personTimezone={personTimezone}
+                      personName={personName}
                       contact={contact}
                       onClose={() => setEditingId(null)}
                     />
@@ -445,11 +411,7 @@ export function ContactManager({ personId, personTimezone, contacts, readiness }
             )}
           </FormField>
 
-          <FormField
-            label="Phone (E.164)"
-            error={errors.phone}
-            hint="Stored on the server, masked wherever it is shown. An environment-variable override can still redirect this contact's live number if one is set."
-          >
+          <FormField label="Phone (E.164)" error={errors.phone}>
             {(field) => (
               <input
                 {...field}
@@ -600,12 +562,12 @@ function ContactEnabledToggle({ personId, contact }: { personId: string; contact
 // a value a lightweight, single-purpose toggle also controls.
 function ContactEditPanel({
   personId,
-  personTimezone,
+  personName,
   contact,
   onClose,
 }: {
   personId: string;
-  personTimezone: string;
+  personName: string;
   contact: ContactSummary;
   onClose: () => void;
 }) {
@@ -676,7 +638,7 @@ function ContactEditPanel({
           onChange={(event) => setHasWindow(!event.target.checked)}
           className="accent-accent"
         />
-        Always available (no usual callable window)
+        Always available
       </label>
 
       {hasWindow ? (
@@ -703,15 +665,14 @@ function ContactEditPanel({
               />
             )}
           </FormField>
-          <p className="w-full text-xs text-subtle">
-            An end time earlier than the start (e.g. 22:00–07:00) means overnight, crossing midnight.
-            This only decides who is tried FIRST — nobody is ever excluded for being outside it, and
-            the cascade never waits for it to open.
-          </p>
         </div>
       ) : null}
 
-      <FormField label="Timezone" error={errors.timezone} hint={`Leave as "Inherit" to use ${personTimezone}, the same zone this person's own schedule uses.`}>
+      <FormField
+        label="Timezone"
+        error={errors.timezone}
+        hint={`Defaults to "${describeContactTimezone(null, personName)}" unless a different zone is set.`}
+      >
         {(field) => (
           <select
             {...field}
@@ -719,7 +680,7 @@ function ContactEditPanel({
             onChange={(event) => setTimezone(event.target.value)}
             className={controlClasses}
           >
-            <option value="">Inherit from person ({personTimezone})</option>
+            <option value="">{describeContactTimezone(null, personName)}</option>
             {COMMON_TIMEZONES.map((zone) => (
               <option key={zone} value={zone}>
                 {zone}
@@ -729,11 +690,7 @@ function ContactEditPanel({
         )}
       </FormField>
 
-      <FormField
-        label="Maximum attempts"
-        error={errors.maxAttempts}
-        hint="Never more than 2 — the platform-wide safety bound. Lower it to 1 to never retry this contact."
-      >
+      <FormField label="Maximum attempts" error={errors.maxAttempts}>
         {(field) => (
           <select
             {...field}

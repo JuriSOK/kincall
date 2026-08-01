@@ -1,19 +1,14 @@
 // Shared between the create form (people/new/person-form.tsx) and the edit
 // form (people/[id]/edit/person-edit-form.tsx), so the two never drift apart
-// on what a "conversation profile" label reads or which timezones are
-// offered.
+// on which timezones are offered.
 //
 // The weekday list, day/state formatting (WEEKDAYS, formatCheckInDays,
-// SCHEDULE_STATE_LABEL) moved to lib/schedule/format-schedule.ts in Stage D:
-// those are schedule DOMAIN presentation, needed by the dashboard and person
-// page too, not merely form-specific constants — see that module for the
-// single source of truth.
-
-export const PROFILE_LABELS: Record<string, string> = {
-  standard: "Standard — warm and open-ended",
-  cognitive_friendly: "Cognitive-friendly — short sentences, one question at a time",
-  speech_difficulty: "Speech difficulty — longer pauses, no interruptions",
-};
+// SCHEDULE_STATE_LABEL) moved to lib/schedule/format-schedule.ts in Stage D,
+// and the conversation-profile/language display labels (formerly
+// PROFILE_LABELS here) moved to lib/presentation/labels.ts in the UI/UX
+// cleanup pass — both are presentation DOMAIN concerns needed by read-only
+// pages too, not merely these two forms. See those modules for the single
+// source of truth.
 
 // A small, practical set of common zones — not the full IANA database. The
 // server accepts any valid IANA identifier (lib/validation/profile.ts's
