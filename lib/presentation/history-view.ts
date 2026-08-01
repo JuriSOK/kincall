@@ -1,6 +1,7 @@
 import { readCompanionResult } from "@/lib/calle/schemas";
-import type { CallEventRecord, EventRecord } from "@/lib/database/types";
+import type { CallEventRecord, EventRecord, TrustedContact } from "@/lib/database/types";
 import { describeAction } from "@/lib/presentation/event-summary";
+import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
 import { formatDayKey } from "@/lib/presentation/format-date";
 import { describePersonStatus } from "@/lib/orchestration/person-status";
 import type { EventStatus } from "@/lib/orchestration/states";
@@ -49,6 +50,19 @@ export interface HistoryEventView {
   // summary when a usable one exists, falling back to the plain-language
   // action description (never a raw enum, never fabricated detail).
   summary: string;
+  // Stage F (DEC-019): the one-line confirmed-intervention sentence ("Marc
+  // will visit at 17:30."), or null when this event has no valid
+  // trusted-contact confirmation — which is every case where a card must not
+  // appear either. Built by the SAME model the event page's card uses, so a
+  // row and the page it links to can never describe the intervention
+  // differently.
+  //
+  // When the caller passes no contact records (see `contacts` below) a
+  // confirmed event still yields a line, using the same neutral "A trusted
+  // contact …" wording the event page's card falls back to — the commitment
+  // genuinely happened, and reporting it without a name is honest, whereas
+  // suppressing it would hide a real fact.
+  interventionSummary: string | null;
   href: string;
 }
 
@@ -56,7 +70,12 @@ export function buildHistoryEventView(
   event: EventRecord,
   personName: string,
   callEvents: CallEventRecord[],
-  avatarKey: string | null = null
+  avatarKey: string | null = null,
+  // Optional so every pre-Stage-F caller keeps compiling and behaving
+  // identically (they simply get interventionSummary: null). Callers that can
+  // resolve this person's circle without an extra query — the dashboard
+  // already fetches it per person — pass it and get the intervention line.
+  contacts: TrustedContact[] = []
 ): HistoryEventView {
   const status = describePersonStatus(event);
   const companionCalls = callEvents.filter((call) => call.agentType === "companion");
@@ -78,6 +97,8 @@ export function buildHistoryEventView(
     statusTone: STATUS_TONE[status.tone],
     category: categorizeEventOutcome(event),
     summary: attention?.neutralSummary || lastCompanion?.summary || describeAction(event),
+    interventionSummary:
+      buildInterventionSummary(event, callEvents, contacts)?.concise ?? null,
     href: `/events/${event.id}`,
   };
 }

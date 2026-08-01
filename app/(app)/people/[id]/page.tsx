@@ -6,6 +6,7 @@ import { maskPhone } from "@/lib/phone";
 import type { CallReadiness } from "@/lib/orchestration/person-status";
 import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
 import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
+import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
 import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
 import { formatCheckInDays, formatNextCheckIn, SCHEDULE_STATE_LABEL } from "@/lib/schedule/format-schedule";
 import { formatDateTime } from "@/lib/presentation/format-date";
@@ -33,11 +34,14 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
     notFound();
   }
 
-  // Active-only (DEC-009): an archived contact must disappear from this
-  // display. Historical resolution (app/(app)/events/[id]/page.tsx) uses the
-  // unfiltered getTrustedContacts instead.
-  const [trustedCircle, events] = await Promise.all([
+  // Active-only (DEC-009) for the circle DISPLAY: an archived contact must
+  // disappear from it. `historicalContacts` is the unfiltered list, used only
+  // to resolve the accepting contact's name on a past event — a contact
+  // archived after the fact must still resolve there (the same rule
+  // app/(app)/events/[id]/page.tsx follows).
+  const [trustedCircle, historicalContacts, events] = await Promise.all([
     repository.getActiveTrustedContacts(person.id),
+    repository.getTrustedContacts(person.id),
     repository.listEvents(person.id),
   ]);
 
@@ -45,7 +49,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   // uses, over this person's own (unbounded) event history, so the two can
   // never silently disagree about what "normal" or "a cascade" means.
   const callEvents = await repository.listCallEventsForEvents(events.map((event) => event.id));
-  const kpis = computeCheckInKpis(events, groupCallEventsByEvent(callEvents));
+  const callEventsByEvent = groupCallEventsByEvent(callEvents);
+  const kpis = computeCheckInKpis(events, callEventsByEvent);
 
   // Stage D: the deterministic next-check-in calculation (DEC-016) — stored
   // configuration only, never a claim that a scheduler will actually place
@@ -326,6 +331,16 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <ol className="flex flex-col gap-2">
             {events.slice(0, EVENT_HISTORY_DISPLAY_LIMIT).map((event) => {
               const eventStatus = describePersonStatus(event);
+              // Stage F (DEC-019): the same one-line sentence the event page's
+              // card leads with, so this list and that page never describe the
+              // same intervention differently. Null — and therefore absent —
+              // whenever no trusted contact actually confirmed. The full card,
+              // the timeline and the per-call detail stay on the event page.
+              const intervention = buildInterventionSummary(
+                event,
+                callEventsByEvent.get(event.id) ?? [],
+                historicalContacts
+              );
               return (
                 <li key={event.id}>
                   <Link
@@ -337,7 +352,9 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                     </span>
                     <span className="flex flex-wrap items-center gap-2 text-sm">
                       <Badge tone={STATUS_TONE[eventStatus.tone]}>{eventStatus.label}</Badge>
-                      {event.decisionReason ? (
+                      {intervention ? (
+                        <span className="font-medium text-calm-ink">{intervention.concise}</span>
+                      ) : event.decisionReason ? (
                         <span className="text-muted">{event.decisionReason}</span>
                       ) : null}
                     </span>

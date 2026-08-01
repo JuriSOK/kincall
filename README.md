@@ -279,6 +279,40 @@ own KPIs, there is deliberately no duration metric and no "reliable"/
 "unreliable" label — a number is shown with its sample size and left for a
 human to read, never a verdict this interface renders.
 
+### Confirmed interventions: a recorded commitment, never a verified action
+
+When a trusted contact tells KinCall they will step in, the event page leads
+with a **confirmed-intervention card**: who accepted, their relationship, what
+they said they would do ("Will visit" / "Will call"), the estimated time they
+gave, and what they said in their own words. The same one-line sentence —
+"Marc will visit at 17:30." — appears in the dashboard's recent activity, the
+history list and the person page's event list, all built from one shared model
+(`lib/presentation/intervention-summary.ts`), so no two screens can describe the
+same intervention differently.
+
+**Every card carries a fixed disclaimer: _"KinCall recorded this commitment but
+has not verified that the action took place."_** This is the distinction the
+whole feature is built around. KinCall observed one thing — a person on a phone
+call saying what they intended to do — and has no way to observe what followed.
+It does not call back, does not check, and never reports that a visit happened,
+that a situation was resolved, or that anyone is safe. Every sentence it
+produces is future ("will visit") or reported speech ("told KinCall they would
+visit"); none is a past-tense claim about the action itself.
+
+The card appears **only** when the persisted data proves a trusted contact
+actually confirmed (`can_intervene === "yes"` on a family call KinCall itself
+placed). A closed event with no cascade, a contact who merely answered, or an
+unresolved event never produces one — `buildInterventionSummary` returns `null`
+in those cases, so there is structurally nothing to render. `ATTENTION_UNRESOLVED`
+keeps its own distinct, unweakened treatment: KinCall exhausted the eligible
+circle, nobody confirmed, and the event stays visible on the dashboard and in
+history.
+
+The estimated time stays **unparsed free text** exactly as the contact expressed
+it ("17:30", "this afternoon", "within the hour"). KinCall adds a preposition
+where grammar needs one and nothing else: it is never turned into an appointment,
+never stored as a timestamp, and lateness is never computed from it.
+
 ## Before a public deployment
 
 Every mutating route (`POST /api/people`, `POST .../contacts`, both

@@ -15,8 +15,10 @@ import {
   describeWorkflowStep,
   findConfirmation,
 } from "@/lib/presentation/event-summary";
+import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
 import { formatTime } from "@/lib/presentation/format-date";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
+import { InterventionCard } from "@/app/ui/intervention-card";
 import { Badge, Card, PageHeader, PageShell } from "@/app/ui/surfaces";
 import { EventPollIndicator } from "./event-poll-indicator";
 import { SafetyNotice } from "./safety-notice";
@@ -40,6 +42,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   ]);
 
   const confirmation = findConfirmation(callEvents, contacts);
+  // Stage F (DEC-019). Null unless a family call's PERSISTED result actually
+  // says can_intervene === "yes", so the card below is structurally
+  // unreachable for a CASE_CLOSED event with no cascade, for an event where a
+  // contact merely answered, and for ATTENTION_UNRESOLVED.
+  const intervention = buildInterventionSummary(event, callEvents, contacts);
   const companionCalls = callEvents.filter((call) => call.agentType === "companion");
   const familyCalls = callEvents.filter((call) => call.agentType === "family");
 
@@ -86,7 +93,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
       <SafetyNotice />
 
-      {/* Summary first: this is what a family member actually came to read. The
+      {/* Stage F (DEC-019): the single most important thing a family member
+          came to read, so it sits directly under the outcome and above the
+          evidence. Rendered only when a confirmation genuinely exists — see
+          buildInterventionSummary. */}
+      {intervention ? <InterventionCard summary={intervention} /> : null}
+
+      {/* Summary next: this is what a family member actually came to read. The
           per-call detail below is the evidence for it. */}
       <Card title="Summary">
         <dl className="flex flex-col gap-3 text-sm">
@@ -102,8 +115,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           </div>
           <div>
             <dt className="font-medium">Who is taking care of it?</dt>
+            {/* The intervention model's own sentence, not the raw CALL-E free
+                text — that is shown verbatim inside the card above, under
+                "What they said", where it is clearly attributed. */}
             <dd className="text-muted">
-              {confirmation ? confirmation.result.summary : describeOwnership(event)}
+              {intervention ? intervention.detailed : describeOwnership(event)}
             </dd>
           </div>
         </dl>

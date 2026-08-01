@@ -79,13 +79,28 @@ export default async function HistoryPage({
     if (archived) personById.set(archived.id, { firstName: archived.firstName, avatarKey: archived.avatarKey });
   }
 
+  // Stage F (DEC-019): the accepting contact's name for the intervention line
+  // on a confirmed event. Unfiltered getTrustedContacts, not the active-only
+  // view — a contact archived after the fact must still resolve to a name for
+  // the call that was actually placed (DEC-009). Bounded by the number of
+  // people appearing in this window, and fetched in one Promise.all, matching
+  // the archived-person lookup just above.
+  const personIdsInWindow = [...new Set(events.map((event) => event.personId))];
+  const contactLists = await Promise.all(
+    personIdsInWindow.map((id) => repository.getTrustedContacts(id))
+  );
+  const contactsByPerson = new Map(
+    personIdsInWindow.map((id, index) => [id, contactLists[index]])
+  );
+
   const allViews = events.map((event) => {
     const resolved = personById.get(event.personId);
     return buildHistoryEventView(
       event,
       resolved?.firstName ?? "Unknown profile",
       callEventsByEvent.get(event.id) ?? [],
-      resolved?.avatarKey ?? null
+      resolved?.avatarKey ?? null,
+      contactsByPerson.get(event.personId) ?? []
     );
   });
 

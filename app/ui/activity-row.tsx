@@ -18,7 +18,18 @@ export function ActivityRow({ view }: { view: HistoryEventView }) {
       <Avatar avatarKey={view.avatarKey} name={view.personName} size="sm" />
       <span className="text-sm font-medium">{view.personName}</span>
       <Badge tone={view.statusTone}>{view.statusLabel}</Badge>
-      <span className="min-w-0 flex-1 truncate text-sm text-muted">{view.summary}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm text-muted">{view.summary}</span>
+        {/* Stage F (DEC-019): the confirmed-intervention line, when one
+            genuinely exists. Its own line rather than replacing the summary
+            above — "what happened" and "who is handling it" are different
+            questions, and a family member scanning this list needs both. */}
+        {view.interventionSummary ? (
+          <span className="truncate text-sm font-medium text-calm-ink">
+            {view.interventionSummary}
+          </span>
+        ) : null}
+      </span>
     </Link>
   );
 }

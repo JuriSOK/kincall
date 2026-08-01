@@ -1802,6 +1802,114 @@ Project owner approval: approved. Stage G will not be implemented in any form.
 
 ---
 
+## DEC-019 — Rich intervention-confirmation presentation: displaying a recorded commitment, never a verified action
+
+**Date:** 1 August 2026
+**Status:** Approved
+
+### Context
+
+Everything needed to describe a confirmed trusted-contact intervention has been persisted since
+DEC-005: `call_events.structured_result` holds a `FamilyStructuredResult` with `can_intervene`,
+`intervention_type`, `estimated_time` and `summary`, and `call_events.contact_id` records which
+contact KinCall itself chose to call. `findConfirmation` (DEC-014, `lib/presentation/
+event-summary.ts`) already located the confirming call correctly. None of it was presented well: the
+event page showed CALL-E's raw `summary` free text under "Who is taking care of it?", the planned
+action and estimated time were never surfaced at all, and no screen stated that KinCall has not
+checked whether the commitment was honoured.
+
+This is the final functional stage. It is presentation and interpretation of already-persisted
+data — no new field, no new workflow, no new database object.
+
+### Decision
+
+**1. One shared presentation model** — `lib/presentation/intervention-summary.ts`'s
+`buildInterventionSummary(event, callEvents, contacts)`. Every screen that mentions an intervention
+reads from it: the event page's card, the dashboard's recent activity, the history list, and the
+person page's event list. Route components never interpret a raw `FamilyStructuredResult`
+themselves, so the same event cannot be described two different ways on two screens (a property
+`tests/intervention-scenarios.test.ts` asserts directly by comparing the row's line to the card's
+own sentence).
+
+**2. It returns `InterventionSummary | null`, not a model with a `confirmed: false` flag.** This is
+the safety property the module is built around, and a deliberate divergence from a literal reading
+of the brief's field list: a caller structurally *cannot* render a confirmed-intervention card for
+an unconfirmed event, because there is no model to render. A boolean field would depend on every
+call site remembering to check it. It also matches `findConfirmation`'s own `Confirmation | null`
+shape, which this delegates its entire validity judgement to: a summary exists only when a FAMILY
+call's persisted result parses AND says `can_intervene === "yes"`. Therefore no summary — and so no
+card — for a `CASE_CLOSED` event with no cascade, a contact who merely answered, a contact record
+merely existing, an `intervention_type` present without confirmation, a normally-ended companion
+call, or `ATTENTION_UNRESOLVED` (which the cascade only reaches when nobody confirmed).
+
+**3. Raw enum values are never rendered.** `visit` → "Will visit", `call` → "Will call". `other` —
+which is also the schema's no-answer sentinel and therefore carries no commitment of its own —
+becomes the neutral "Confirmed they would help", and is reported in `missingFields` as a missing
+planned action. It deliberately does **not** derive a verb from the free-text `summary`: inferring
+"visit" from prose would put a promise in somebody's mouth. The persisted summary is surfaced
+verbatim beside it, clearly attributed as what the contact said.
+
+**4. `estimated_time` stays unparsed free text.** `withTimePreposition` adds "at" only when the
+value opens with a clock-like token ("17:30", "6pm", "18h00") and does not already begin with its
+own preposition or qualifier in either language CALL-E may answer in ("this afternoon", "within the
+hour", "vers 18h00"). That is a grammar decision, not a parse: nothing is converted to a `Date`, no
+timestamp is stored, no lateness is computed, and any value the heuristic does not recognise is
+rendered exactly as stored. Absent time is omitted cleanly rather than defaulted.
+
+**5. A fixed, unconditional verification disclaimer.** `VERIFICATION_DISCLAIMER` — "KinCall recorded
+this commitment but has not verified that the action took place." — is returned on every summary and
+rendered on every card, never conditionally and never abbreviated. The card ties it to itself via
+`aria-describedby`, so a screen-reader user meets the caveat on reaching the region rather than only
+if they read to the end. No sentence this module produces is past-tense about the action: every one
+is future ("will visit") or reported speech ("told KinCall they would visit").
+
+**6. Historical and incomplete events degrade safely.** An unresolvable contact record yields "A
+trusted contact" (never an internal contact id, never a phone number); an archived or disabled
+accepting contact is still named, with a neutral note about its *current* state that says nothing
+about the intervention; a result predating `voicemail_left` still renders; a malformed result yields
+no summary at all rather than a partial claim. `missingFields` states plainly which facts a sparse
+record did not carry, instead of inventing values for them.
+
+**7. Nothing about orchestration changed.** A confirmation still transitions
+`FAMILY_CONFIRMED → CONTACT_CONFIRMED → CASE_CLOSED` exactly as before. No new event status, no
+automatic follow-up, no verification job, no event reopening, no cron, no migration. Stage G remains
+cancelled (DEC-018) and is not referenced in any user-facing text.
+
+### Product-scope check
+
+No feature is added, removed or reinterpreted. §11.5's "un proche a confirmé une intervention" is
+what already closes the event and still does; this phase only describes that outcome properly.
+`git diff` on `lib/orchestration/*`, `lib/calle/*`, `prompts/*`, `lib/kpi/*`, `lib/database/*` and
+`supabase/migrations/*` is empty — the only non-presentation edits are two page-level data fetches
+(the history page and the person page now also read the unfiltered trusted-contact list, so a past
+event's accepting contact resolves by name per DEC-009).
+
+### Consequences
+
+- New: `lib/presentation/intervention-summary.ts`, `app/ui/intervention-card.tsx`,
+  `tests/intervention-summary.test.ts`, `tests/intervention-scenarios.test.ts`.
+- `HistoryEventView` gained `interventionSummary: string | null`;
+  `buildHistoryEventView` gained an optional trailing `contacts` parameter, so every pre-Stage-F
+  caller keeps compiling and simply gets `null`.
+- The event page leads with the card, directly under the outcome badge and above the evidence.
+- The dashboard's and history's shared `ActivityRow` shows the intervention sentence on its own
+  second line — "what happened" and "who is handling it" are different questions and a family member
+  scanning the list needs both.
+- The person page's event list shows the same one-line sentence in place of the raw
+  `decisionReason`, and links to the full card; the timeline and per-call detail stay on the event
+  page only.
+- Test count grows from 711 to (reported in the final verification below), including an end-to-end
+  net that runs all five fake scenarios through the real engine and asserts both the displayed
+  sentence and the unchanged call order, attempts and terminal status.
+
+### Approval
+
+Project owner approval: approved for exactly this scope — presentation of already-persisted
+intervention data — with the global UX/UI correction phase to follow separately, and Stage G
+remaining cancelled.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

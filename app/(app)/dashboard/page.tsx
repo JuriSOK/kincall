@@ -147,13 +147,24 @@ export default async function DashboardPage({
     if (archived) personById.set(archived.id, { firstName: archived.firstName, avatarKey: archived.avatarKey });
   }
 
+  // Built from the circles perPerson already loaded, so the intervention line
+  // below costs no additional query.
+  const contactsByPerson = new Map(
+    perPerson.map(({ person, activeContacts }) => [person.id, activeContacts])
+  );
+
   const views = recentEvents.map((event) => {
     const resolved = personById.get(event.personId);
     return buildHistoryEventView(
       event,
       resolved?.firstName ?? "Unknown profile",
       callEventsByEvent.get(event.id) ?? [],
-      resolved?.avatarKey ?? null
+      resolved?.avatarKey ?? null,
+      // Stage F (DEC-019): resolves the accepting contact's name for the
+      // intervention line. Reuses the circle `perPerson` already fetched
+      // above — no extra query. An archived person's events resolve to no
+      // contacts here, and the line is simply omitted rather than guessed.
+      contactsByPerson.get(event.personId) ?? []
     );
   });
   const { unresolved: unresolvedViews, rest: otherViews } = partitionUnresolvedEvents(views);

@@ -57,6 +57,7 @@ function view(overrides: Partial<HistoryEventView> = {}): HistoryEventView {
     statusTone: "calm",
     category: "normal",
     summary: "Marie is doing fine.",
+    interventionSummary: null,
     href: "/events/event_001",
     ...overrides,
   };
