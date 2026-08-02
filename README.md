@@ -16,13 +16,13 @@
 
 ## Overview
 
-KinCall places a check-in phone call to a monitored person. A voice agent has an ordinary
-conversation and returns a constrained, factual summary. Deterministic TypeScript rules —
-not a model — then decide one of two things: close the check-in, or contact the trusted
-circle. If the circle is contacted, KinCall works down it in order, retrying within a
-bounded policy, until somebody confirms they can help or the circle is exhausted. Either
-way it calls the monitored person back with the outcome, and the whole sequence is recorded
-on a dashboard the family can read.
+KinCall places a check-in phone call to a monitored person. A voice agent has an ordinary,
+warm conversation and reports back exactly what was said. What happens next is never left
+to a mood or a guess: a fixed, promise-kept policy decides whether to close the check-in or
+reach the trusted circle. If the circle is contacted, KinCall works down it in order,
+retrying within a bounded policy, until somebody confirms they can help or the circle is
+exhausted. Either way it calls the monitored person back with the outcome, and the whole
+sequence is recorded on a dashboard the family can read.
 
 KinCall is **not** a medical device and **not** an emergency service. It never diagnoses,
 never rates severity, and never contacts emergency services.
@@ -70,6 +70,29 @@ flowchart TD
     K --> L["Recorded on the dashboard"]
     D --> L
 ```
+
+---
+
+## Why you can trust the outcome
+
+Talking is easy. Deciding correctly, every single time, is the part that actually matters
+— and it's the part KinCall never leaves to chance.
+
+Every check-in is judged against the exact same promise, whether it's 3am or noon, the
+tenth call this month or the first:
+
+- **A cry for help always wins.** If the person asks for help, KinCall acts on it — even
+  if the rest of the conversation sounded perfectly calm.
+- **Silence is never mistaken for reassurance.** If something is unclear, or the person
+  couldn't be reached after one honest retry, the family finds out. Uncertainty is never
+  quietly closed as "all fine."
+- **A quiet close takes everything lining up — no exceptions.** The check-in only ends
+  without reaching the family when every single signal agrees: reached, calm, nothing
+  said. One thing off, and someone finds out.
+- **Nothing is a black box.** Every outcome comes with a plain-language reason, written
+  down the moment it happens, visible right there on the dashboard.
+
+The conversation is warm. The judgment behind it never wavers.
 
 ---
 
