@@ -21,6 +21,11 @@ export function isWaitingStatus(status: EventStatus): boolean {
 
 export interface PollController {
   stop(): void;
+  // Runs a poll now unless one is already in flight, then resumes the normal
+  // cadence from this moment. Used when a hidden tab becomes visible again, so
+  // a user coming back to a backgrounded page sees fresh state immediately
+  // rather than after another full interval.
+  pollNow(): void;
 }
 
 export interface StartPollingOptions {
@@ -36,7 +41,11 @@ export interface StartPollingOptions {
   // failure here must not be read as, or turned into, HUMAN_REVIEW_REQUIRED
   // or any other terminal state. Only a later successful poll (which runs
   // the real, unmodified orchestration logic server-side) can change status.
-  onError?: (error: unknown) => void;
+  //
+  // `consecutiveFailures` lets the caller show a proportionate inline message
+  // (nothing on a single blip, a visible warning once it persists) without
+  // having to track that count itself.
+  onError?: (error: unknown, consecutiveFailures: number) => void;
   // Optional: defaults to defaultFetch below. If you DO supply one, it must
   // be a plain wrapper function — never the bare `fetch`/`window.fetch`
   // reference itself. Native fetch is a "legacy platform object" method:
@@ -49,7 +58,26 @@ export interface StartPollingOptions {
   fetchImpl?: typeof fetch;
 }
 
-const DEFAULT_INTERVAL_MS = 5000;
+// DEC-022. Previously 5000ms with NO immediate first poll, which meant up to
+// 5s of dead time on mount — and again after every status change, because the
+// React effect re-creates the poller on each new status and so restarted the
+// clock. A live test reported the event page "feels slow to update"; that dead
+// time is the controllable half of it.
+//
+// 2000ms is deliberately not the fastest possible value: the brief sets a hard
+// "never more than once per second" floor, and every poll costs a real CALL-E
+// status request server-side, so halving this again would double that external
+// load for a barely perceptible gain.
+const DEFAULT_INTERVAL_MS = 2000;
+
+// The hard floor, enforced here rather than trusted to callers so no future
+// caller can accidentally hammer CALL-E.
+const MIN_INTERVAL_MS = 1000;
+
+// Bounded exponential backoff on consecutive failures: ×1, ×2, ×4, then capped.
+// Bounded rather than unbounded so a transient outage cannot permanently starve
+// an event that is still progressing server-side.
+const MAX_BACKOFF_MULTIPLIER = 4;
 
 // The safe default. This arrow function's body performs its own fresh, direct
 // call to the literal `fetch` identifier every time it runs, so native
@@ -58,11 +86,17 @@ const DEFAULT_INTERVAL_MS = 5000;
 // through a wrapper like this one is exactly the mistake to never repeat.
 const defaultFetch: typeof fetch = (input, init) => fetch(input, init);
 
-// Framework-agnostic poller for app/api/events/[id]/poll. Ticks every
-// intervalMs; a tick is skipped entirely (not queued) while the previous
-// request is still in flight, so requests never overlap. Stops itself the
-// moment a successful response reports a non-waiting status. Does nothing at
-// all if `status` isn't a waiting status to begin with.
+// Framework-agnostic poller for app/api/events/[id]/poll.
+//
+// Guarantees, each covered by tests/event-poller.test.ts:
+//   * polls IMMEDIATELY on start, then every intervalMs;
+//   * never overlaps — a tick arriving while a request is in flight is dropped,
+//     not queued, so a slow poll can never pile requests up;
+//   * stops permanently the moment a successful poll reports a non-waiting
+//     status, and does nothing at all if `status` was not waiting to begin with;
+//   * backs off (bounded) after consecutive failures, and resets on success;
+//   * NEVER starts a call and NEVER creates an event — the only request it can
+//     issue is POST /api/events/{id}/poll, a resume-only route.
 export function startPolling(options: StartPollingOptions): PollController {
   const {
     eventId,
@@ -74,43 +108,74 @@ export function startPolling(options: StartPollingOptions): PollController {
   } = options;
 
   if (!isWaitingStatus(status)) {
-    return { stop() {} };
+    return { stop() {}, pollNow() {} };
   }
+
+  const baseInterval = Math.max(intervalMs, MIN_INTERVAL_MS);
 
   let stopped = false;
   let inFlight = false;
+  let consecutiveFailures = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   function stop(): void {
     if (stopped) return;
     stopped = true;
-    clearInterval(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 
-  const timer = setInterval(() => {
+  // A self-scheduling setTimeout rather than setInterval: the delay varies
+  // between ticks under backoff, which an interval cannot express without
+  // being torn down and rebuilt.
+  function scheduleNext(): void {
+    if (stopped) return;
+    const multiplier = Math.min(2 ** consecutiveFailures, MAX_BACKOFF_MULTIPLIER);
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(tick, baseInterval * multiplier);
+  }
+
+  function tick(): void {
+    // A tick that lands while a request is still in flight is dropped. The
+    // in-flight request's own `finally` reschedules, so the cadence is never
+    // lost by skipping.
     if (stopped || inFlight) return;
     inFlight = true;
 
     fetchImpl(`/api/events/${eventId}/poll`, { method: "POST" })
       .then(async (response) => {
         if (!response.ok) {
-          onError?.(new Error(`Poll failed with status ${response.status}`));
+          consecutiveFailures += 1;
+          onError?.(new Error(`Poll failed with status ${response.status}`), consecutiveFailures);
           return;
         }
         const body = (await response.json()) as { status?: EventStatus };
         if (!body.status) return;
 
+        consecutiveFailures = 0;
         onPollSuccess?.(body.status);
         if (!isWaitingStatus(body.status)) {
           stop();
         }
       })
       .catch((error: unknown) => {
-        onError?.(error);
+        consecutiveFailures += 1;
+        onError?.(error, consecutiveFailures);
       })
       .finally(() => {
         inFlight = false;
+        scheduleNext();
       });
-  }, intervalMs);
+  }
 
-  return { stop };
+  function pollNow(): void {
+    if (stopped || inFlight) return;
+    if (timer !== undefined) clearTimeout(timer);
+    tick();
+  }
+
+  // The immediate first poll: an event's status can already have advanced
+  // server-side between the page being rendered and this mounting.
+  tick();
+
+  return { stop, pollNow };
 }

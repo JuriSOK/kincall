@@ -47,7 +47,13 @@ describe("buildFamilyTask", () => {
     const task = buildFamilyTask(marie, julie, ["mentioned a fall"]);
     expect(task).toContain("mentioned a fall");
     expect(task).not.toContain("difficulty moving around");
-    expect(task).toMatch(/do not repeat the rest of the conversation/i);
+    // DEC-022 reworded this boundary from a blanket "do not repeat the rest of
+    // the conversation" to "beyond what is written above, do not repeat
+    // anything else from that conversation" — the old wording predated the
+    // context brief and would have instructed the agent to suppress the very
+    // sentence the prompt now asks it to say. The constraint that matters is
+    // unchanged: nothing beyond what the task text itself contains.
+    expect(task).toMatch(/do not repeat anything else from that conversation/i);
   });
 
   it("never contains the contact's phone number", () => {

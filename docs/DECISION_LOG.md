@@ -2021,6 +2021,117 @@ Project owner approval: approved.
 
 ---
 
+## DEC-022 — Factual Companion context in Family calls, faster event polling, and bounded voicemail behaviour
+
+**Date:** 2 August 2026  
+**Status:** Approved
+
+### Context
+
+The first controlled live tests (8 scenarios, 5 passing) surfaced three separate defects.
+
+**1. The Family agent lost the specific context.** In two scenarios the monitored person explicitly
+asked for help with an administrative document, and both trusted contacts were told only that she
+"asked for help" — true, and useless for deciding whether they could help. Tracing the path found
+the cause precisely: `collectInformationToShare` (engine.ts) derives a closed vocabulary of short
+canned phrases from the Companion result's yes/no/unknown fields, and `explicit_help_requested:
+"yes"` maps to the literal string `"asked for help"`. The actual detail was never lost or
+unpersisted — it was in `neutral_summary`, a required free-text field CALL-E is explicitly
+instructed to fill with "what the person actually said", written to `call_events.structured_result`
+*and* `call_events.summary` before the cascade starts, and already rendered on the event page. The
+cascade simply never read it. **No migration was needed; the context was already durable.**
+
+**2. The event page felt slow.** The poller used a 5000 ms interval with no immediate first poll, so
+a mount cost up to 5 s of dead time — and again after every status change, because the React effect
+rebuilds the poller on each new status and restarted the clock. It also called `router.refresh()`
+on every poll regardless of whether anything changed, and had no backoff and no visible failure
+state.
+
+**3. The Companion introduction repeated ~3× into one voicemail.** `MAX_COMPANION_ATTEMPTS` is 2, so
+three repetitions cannot have been three attempts — it happened inside a single call. The prompt's
+only closing instruction was "End the call calmly once you have a clear sense of how they are
+doing", a condition that never becomes true when nobody answers, leaving the no-reply path with no
+termination rule at all.
+
+Measured for comparison: a complete fake-mode cascade (4 calls, 13 timeline entries) runs in
+**0.15 ms mean** against the in-memory repository. KinCall's own orchestration contributes
+essentially nothing to the observed latency.
+
+### Decision
+
+**Context brief.** New pure module `lib/orchestration/family-context-brief.ts` turns the already
+validated, already persisted Companion result into ONE attributed sentence, with a strict source
+precedence: a usable `neutral_summary` → "person was not reached" → a generic explicit-help
+sentence → a generic no-detail sentence. It is passed as a new, optional `contextBrief` field on
+`FamilyCallInput`, kept deliberately separate from `informationToShare` (whose closed vocabulary,
+wording and ordering are unchanged) so free text can never leak into a list documented as closed.
+`buildFamilyTask` renders it and the surrounding instructions were reworded — the old blanket "do
+not repeat the rest of the conversation" predated the brief and would have suppressed the very
+sentence the prompt now asks for.
+
+There is **no list of known situations anywhere**, and a test asserts the module's executable code
+names none: an administrative document, a broken boiler and a flooded kitchen all work through the
+same single path, because the sentence is the person's own reported words rather than a lookup.
+
+**Polling.** Immediate first poll, 2000 ms interval (hard floor of 1000 ms enforced in the module),
+bounded exponential backoff on consecutive failures capped at ×4, `pollNow()` on tab-visible,
+refresh only when the status actually changed, and a visible inline failure state after three
+consecutive failures.
+
+**Voicemail.** Two conservative Companion prompt rules: say the introduction once, and if nobody
+replies give at most one short closing line and end the call. Deliberately phrased around what the
+agent can hear on the line, never around a platform voicemail signal.
+
+**Latency instrumentation.** New `lib/observability/timing.ts`, off unless `KINCALL_TIMING=1`. It
+takes an event id, a stage name and a duration — there is no free-form payload parameter, so no
+phone number, transcript or structured result can be logged through it even by accident. Nothing it
+produces is persisted or branched on, so replay-stability is unaffected.
+
+**Click-to-call.** `startDemoEvent` now passes the person and event records it already holds into
+`placeCallForIntent` rather than having it re-read them, saving two round trips on the one path a
+human waits on. The parameter is optional and defaults to fetching, so every recovery-path caller is
+byte-identical. `processCompanionResult` is still awaited inside `startDemoEvent`: deferring it
+would mean responding before the event is known to be durably advanced, which is exactly the
+unsafe fire-and-forget the brief forbids.
+
+### Product-scope check
+
+No feature is added, removed or reinterpreted, and no deterministic rule changes. `when` attention
+is triggered, `decideCompanionAction`'s evaluation order, `can_intervene` semantics, contact order,
+availability ordering, retries, attempt limits, idempotency keys, leases, and every terminal status
+are untouched — the brief is built strictly downstream of the decision and informs the conversation
+only. Verified by the full orchestration suite (140 tests across engine, crash-recovery,
+concurrency, autonomous-cascade, contact-order-cascade and intervention-scenarios) passing
+unchanged, including the five fake scenarios' exact call order, attempt numbers and terminal
+statuses. No migration; no schema change.
+
+### Consequences
+
+- New: `lib/orchestration/family-context-brief.ts`, `lib/observability/timing.ts`,
+  `tests/family-context-brief.test.ts`, `tests/family-context-propagation.test.ts`,
+  `tests/companion-agent.test.ts`.
+- `FamilyCallInput.contextBrief` is optional, so every pre-DEC-022 caller and fixture keeps
+  compiling and renders the previous prompt exactly.
+- The raw transcript is still **never** stored, fetched or transmitted — `neutral_summary` remains
+  the single durable record of what was said, and the brief is one sentence derived from it.
+- `tests/event-poller.test.ts`'s "does not poll immediately — waits a full interval first" was
+  deliberately reversed; it had encoded the dead time as intended behaviour.
+- Maximum expected UI staleness drops from ~5 s (up to 10 s across a status change) to ~2 s.
+
+### Known limitation, not solved
+
+CALL-E exposes no answering-machine detection: `LiveCalleAdapter.capabilities.voicemail` is `false`
+(DEC-011), `CallStatus` has no voicemail state, and `failure_code` is untyped free text. The prompt
+rules above **bound the repetition** by giving the no-reply path an ending, but KinCall still cannot
+*detect* or *confirm* a voicemail, and must not claim to. Whether the fix holds in practice can only
+be established by rerunning the live voicemail scenario.
+
+### Approval
+
+Project owner approval: approved.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

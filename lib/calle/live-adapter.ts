@@ -172,13 +172,21 @@ export class LiveCalleAdapter implements CalleAdapter {
     }
 
     const body: Record<string, unknown> = {
-      task: buildFamilyTask(input.person, input.contact, input.informationToShare, {
-        // Always false here in practice: `capabilities.voicemail` is false, so
-        // the orchestrator never sets this. Passed through rather than
-        // hardcoded so the decision stays in one place.
-        mayLeaveVoicemail: input.mayLeaveVoicemail,
-        attemptNumber: input.attemptNumber,
-      }),
+      task: buildFamilyTask(
+        input.person,
+        input.contact,
+        input.informationToShare,
+        {
+          // Always false here in practice: `capabilities.voicemail` is false, so
+          // the orchestrator never sets this. Passed through rather than
+          // hardcoded so the decision stays in one place.
+          mayLeaveVoicemail: input.mayLeaveVoicemail,
+          attemptNumber: input.attemptNumber,
+        },
+        // DEC-022. Undefined for a caller that predates the brief; the prompt
+        // then renders exactly as it did before.
+        input.contextBrief
+      ),
       recipients: [recipient],
       result_schema: buildFamilyResultSchema(input.contact.id),
       metadata: {

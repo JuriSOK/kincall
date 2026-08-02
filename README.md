@@ -114,6 +114,45 @@ contact's result either closes the case or triggers the next call — so a full
 run takes several deliveries, one per call. Poll repeatedly until the status
 stops changing.
 
+### What a trusted contact is told (DEC-022)
+
+Each Family call carries two different things, both derived from the **validated**
+Companion result and nothing else:
+
+- a **context brief** — one attributed sentence built from the Companion result's own
+  `neutral_summary` (`lib/orchestration/family-context-brief.ts`), e.g. *"Claire told KinCall that
+  she would like help completing an administrative document."* It generalises to any situation
+  because it is the person's own reported words, not a lookup — there is no list of known
+  situations in the code;
+- the **fact list** — the closed vocabulary of categorical signals ("mentioned a fall", "asked for
+  help"), unchanged.
+
+Every contact in one cascade receives the identical brief. The raw transcript is never stored,
+fetched or transmitted. When no usable summary exists the brief degrades to a generic sentence
+rather than inventing a reason, and it never diagnoses, never claims KinCall verified anything, and
+never contains an internal field name or enum.
+
+### Timing instrumentation
+
+Set `KINCALL_TIMING=1` to print one structured line per measured stage
+(`[kincall:timing] {"eventId":…,"stage":…,"elapsedMs":…}`). Off by default. It records only an
+event id, a stage name and a duration — never a phone number, transcript, structured result or
+conversation note — and nothing it produces is persisted or used in any decision.
+
+For reference, a full fake-mode cascade (4 calls, 13 timeline entries) runs in **~0.15 ms** against
+the in-memory repository: the orchestration itself is not a meaningful source of latency. Observed
+delay in live mode is dominated by Supabase round trips, the two CALL-E HTTP requests, and — after
+CALL-E accepts the call — the telephone carrier's own delay before the phone rings, which KinCall
+neither sees nor controls.
+
+### Event-page updates
+
+The event page polls `POST /api/events/[id]/poll` immediately on mount and then every 2 s while a
+call is in flight, stopping the moment the event reaches a terminal status. Failures back off
+(bounded, capped at ×4) and surface an inline warning after three consecutive failures rather than
+showing "Updating…" forever. Polling never starts a call and never creates an event — the poll
+route only resumes an existing one.
+
 ## Checks
 
 ```bash

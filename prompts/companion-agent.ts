@@ -48,6 +48,20 @@ export function buildCompanionTask(person: VulnerablePerson): string {
     "You are not an emergency service and you must never say or imply that you will contact one. If they may be in immediate danger, tell them plainly to contact their local emergency number themselves, or to ask someone with them to do it.",
     "Never promise that a specific person will visit or call — you can only say that KinCall will try to let their trusted circle know.",
     `If you reach voicemail, an answering machine, or anyone other than ${person.firstName}, leave a short message saying KinCall called for a check-in and will try again — do not ask any wellbeing questions and do not leave any detail about their situation.`,
+    // A live test found the Companion introduction being repeated about three
+    // times into a voicemail on a single call. The prompt had no termination
+    // condition for that case: the only closing instruction was the one below,
+    // which is conditioned on learning how the person is — something that never
+    // happens when nobody answers. These two rules give the no-response path its
+    // own explicit ending.
+    //
+    // Deliberately phrased around what the agent can HEAR on the line (no reply,
+    // a recorded greeting), never around a platform voicemail signal: CALL-E
+    // exposes no answering-machine detection (LiveCalleAdapter.capabilities
+    // .voicemail is false, DEC-011), so KinCall must not imply it can confirm
+    // one. This bounds the repetition; it does not claim to detect voicemail.
+    "Say your introduction once. Do not repeat it, and do not start the check-in again from the beginning.",
+    `If nobody replies to you — silence, a recorded greeting, or only your own voice — say at most one short closing line and end the call. Do not keep talking, do not ask again whether ${person.firstName} is there, and do not wait for a reply that is not coming.`,
     "End the call calmly once you have a clear sense of how they are doing.",
   ].join(" ");
 }

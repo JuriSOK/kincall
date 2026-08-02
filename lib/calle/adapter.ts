@@ -28,6 +28,16 @@ export interface FamilyCallInput {
   idempotencyKey: string;
   // The complete set of facts this call is allowed to mention (§17.3).
   informationToShare: string[];
+  // One already-attributed factual sentence describing WHY KinCall is calling,
+  // derived from the Companion result's own `neutral_summary`
+  // (lib/orchestration/family-context-brief.ts, DEC-022). Deliberately separate
+  // from `informationToShare`: that array is a closed vocabulary of categorical
+  // facts, while this is the person's own reported words, and conflating the
+  // two would let free text leak into a list documented as closed.
+  //
+  // Optional so every pre-DEC-022 caller and fixture keeps compiling; both
+  // adapters treat an absent brief exactly as they behaved before it existed.
+  contextBrief?: string;
   // 1 for the first call to this contact, 2 for the bounded retry (DEC-011).
   attemptNumber: number;
   // Whether this call may leave a voicemail if it reaches one. True only on the

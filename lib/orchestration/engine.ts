@@ -21,10 +21,17 @@ import type {
 import { phoneEnvVarFor } from "../database/seed";
 import { getRepository } from "../database/store";
 import { describeUnusablePhone } from "../phone";
-import type { CallEventRecord, EventRecord, TrustedContact } from "../database/types";
+import type {
+  CallEventRecord,
+  EventRecord,
+  TrustedContact,
+  VulnerablePerson,
+} from "../database/types";
 import { orderContactsForCascade } from "./contact-order";
 import { decideCompanionAction } from "./decide-companion-action";
+import { buildFamilyContextBrief } from "./family-context-brief";
 import { handleFamilyResult } from "./handle-family-result";
+import { record, timed } from "../observability/timing";
 import { attemptDiscriminator, operationKey } from "./operation-keys";
 import { isTerminalEventStatus, type TransitionEvent } from "./states";
 import { nextStatus } from "./transitions";
@@ -119,11 +126,29 @@ async function applyTransitionWithCallIntent(
   });
 }
 
-// The complete set of facts a Family call may mention (§17.3: transmit only
-// what is necessary; §9.2's `information_to_share`). Derived from the validated
-// Companion result so a family member is never told something the check-in did
-// not actually establish.
-async function collectInformationToShare(deps: EngineDeps, eventId: string): Promise<string[]> {
+// Everything a Family call is allowed to say about why it is calling.
+//
+// Two deliberately different kinds of content, built from ONE read of the same
+// validated Companion result so they can never describe different check-ins:
+//
+//   * `informationToShare` — the closed vocabulary of categorical facts
+//     (§17.3: transmit only what is necessary; §9.2's `information_to_share`).
+//     Unchanged by DEC-022, including its exact wording and ordering.
+//   * `contextBrief` — one attributed sentence in the person's own reported
+//     words (DEC-022), which is the only thing that can express WHAT they
+//     asked for. See lib/orchestration/family-context-brief.ts.
+interface FamilyCallContext {
+  informationToShare: string[];
+  contextBrief: string;
+}
+
+// Derived from the validated Companion result so a family member is never told
+// something the check-in did not actually establish.
+async function collectFamilyCallContext(
+  deps: EngineDeps,
+  eventId: string,
+  personName: string
+): Promise<FamilyCallContext> {
   const calls = await deps.repository.listCallEvents(eventId);
   // The LAST companion call, not the first: after a bounded retry there are two,
   // and what a relative is told must come from the attempt that actually
@@ -139,7 +164,10 @@ async function collectInformationToShare(deps: EngineDeps, eventId: string): Pro
     // A result KinCall cannot read at all. It says nothing rather than
     // guessing — but the call still happens, because the cascade was triggered
     // precisely because this could not be validated.
-    return ["could not be checked in on successfully"];
+    return {
+      informationToShare: ["could not be checked in on successfully"],
+      contextBrief: buildFamilyContextBrief(null, personName).sentence,
+    };
   }
 
   const facts: Array<[boolean, string]> = [
@@ -158,7 +186,10 @@ async function collectInformationToShare(deps: EngineDeps, eventId: string): Pro
     ],
   ];
 
-  return facts.filter(([present]) => present).map(([, fact]) => fact);
+  return {
+    informationToShare: facts.filter(([present]) => present).map(([, fact]) => fact),
+    contextBrief: buildFamilyContextBrief(result, personName).sentence,
+  };
 }
 
 // Whether this contact may be called at all, and why not.
@@ -187,14 +218,25 @@ function contactBlockedReason(contact: TrustedContact): string | null {
 // the repository offers no other way to create one.
 export async function placeCallForIntent(
   deps: EngineDeps,
-  callEvent: CallEventRecord
+  callEvent: CallEventRecord,
+  // DEC-022, latency only. Every caller on the recovery path (the poll route,
+  // the webhook, a retry) has only a call-event id in hand and must fetch, so
+  // these stay optional and the fetch remains the default. `startDemoEvent`
+  // alone already holds both records, and passing them saves two Supabase
+  // round trips on the one path a human is actively waiting on.
+  //
+  // Behaviour-preserving by construction: the values passed are the same rows
+  // these reads would return, so nothing downstream can observe the
+  // difference. The await ORDER is unchanged for every existing caller, which
+  // is what tests/crash-recovery.test.ts pins.
+  preloaded?: { event: EventRecord; person: VulnerablePerson }
 ): Promise<CallEventRecord> {
   if (callEvent.calleCallId !== null) return callEvent;
 
-  const event = await deps.repository.getEvent(callEvent.eventId);
+  const event = preloaded?.event ?? (await deps.repository.getEvent(callEvent.eventId));
   if (!event) throw new UnknownRecordError("event", callEvent.eventId);
 
-  const person = await deps.repository.getPerson(event.personId);
+  const person = preloaded?.person ?? (await deps.repository.getPerson(event.personId));
   if (!person) throw new Error(`Engine: unknown person "${event.personId}".`);
 
   let contact: TrustedContact | undefined;
@@ -228,7 +270,10 @@ export async function placeCallForIntent(
             person,
             contact: contact!,
             idempotencyKey: callEvent.idempotencyKey,
-            informationToShare: await collectInformationToShare(deps, event.id),
+            // Built fresh per family call from the SAME persisted Companion
+            // result, so every contact in one cascade — Julie, then Marc, then
+            // the next — is told the identical situation (DEC-022).
+            ...(await collectFamilyCallContext(deps, event.id, person.firstName)),
             attemptNumber: callEvent.attemptNumber,
             // A voicemail is only ever attempted on the FINAL attempt to this
             // contact, and only when the integration can genuinely leave and
@@ -1107,26 +1152,38 @@ export async function startDemoEvent(
   const key = (transitionEvent: TransitionEvent) =>
     companionStartKey(created.runId, transitionEvent, 1);
 
+  // Timing only (DEC-022): measured, printed under KINCALL_TIMING=1, never
+  // persisted and never branched on, so replay-stability is unaffected. The
+  // await order below is unchanged and is pinned by tests/crash-recovery.test.ts.
+  record(created.id, "start_event_created", 0);
+
   // Transition and Companion intent in one transaction, so the event can never
   // sit at CALLING_PERSON with no intent to drive. Key derived from runId, not
   // the restart-unstable sequential id (DEC-004).
-  const started = await applyTransitionWithCallIntent(
-    deps,
-    created,
-    "COMPANION_CALL_STARTED",
-    key("COMPANION_CALL_STARTED"),
-    {
-      messages: ["Check-in call started"],
-      intent: {
-        agentType: "companion",
-        contactId: null,
-        attemptNumber: 1,
-        idempotencyKey: `${created.runId}_companion_attempt_1`,
-      },
-    }
+  const started = await timed(created.id, "start_transition_committed", () =>
+    applyTransitionWithCallIntent(
+      deps,
+      created,
+      "COMPANION_CALL_STARTED",
+      key("COMPANION_CALL_STARTED"),
+      {
+        messages: ["Check-in call started"],
+        intent: {
+          agentType: "companion",
+          contactId: null,
+          attemptNumber: 1,
+          idempotencyKey: `${created.runId}_companion_attempt_1`,
+        },
+      }
+    )
   );
 
-  const callEvent = await placeCallForIntent(deps, started.callEvent!);
+  // The stage that actually makes the phone ring — everything after it happens
+  // with a call already in flight. `person` and `started.event` are already in
+  // hand here, so they are passed rather than re-read (DEC-022).
+  const callEvent = await timed(created.id, "start_calle_request", () =>
+    placeCallForIntent(deps, started.callEvent!, { event: started.event, person })
+  );
 
   const inProgress = await applyTransition(
     deps,
@@ -1137,5 +1194,14 @@ export async function startDemoEvent(
 
   // processCompanionResult starts the cascade itself when it reaches
   // ATTENTION_REQUIRED, so there is nothing to chain here.
-  return processCompanionResult(deps, inProgress.event, callEvent.id);
+  //
+  // Deliberately still awaited (DEC-022): in live mode this is one CALL-E
+  // status read that returns `queued` and changes nothing, but deferring it
+  // would mean responding before the event is known to be durably advanced,
+  // and tests/engine.test.ts pins that startDemoEvent returns
+  // CONVERSATION_IN_PROGRESS in exactly this case. The cost is measured rather
+  // than removed.
+  return timed(created.id, "start_companion_processed", () =>
+    processCompanionResult(deps, inProgress.event, callEvent.id)
+  );
 }

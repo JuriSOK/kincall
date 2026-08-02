@@ -34,12 +34,33 @@ export function buildFamilyTask(
   person: VulnerablePerson,
   contact: TrustedContact,
   informationToShare: string[],
-  options: FamilyCallAttemptOptions = { attemptNumber: 1, mayLeaveVoicemail: false }
+  options: FamilyCallAttemptOptions = { attemptNumber: 1, mayLeaveVoicemail: false },
+  // DEC-022: one already-attributed sentence describing WHY KinCall is calling,
+  // built by lib/orchestration/family-context-brief.ts from the Companion
+  // result's own `neutral_summary`. Optional, and an absent/blank brief renders
+  // exactly the prompt this function produced before it existed — a live test
+  // showed that the categorical facts alone ("asked for help") cannot express
+  // WHAT the person asked for, which is the single thing a relative needs to
+  // decide whether they can help.
+  contextBrief?: string
 ): string {
   const facts =
     informationToShare.length > 0
       ? informationToShare.map((fact) => `- ${fact}`).join("\n")
       : "- no specific detail was recorded";
+
+  const brief = contextBrief?.trim();
+
+  // The brief is presented as the situation, and the categorical facts as the
+  // signals recorded alongside it — two different kinds of statement, so the
+  // agent is never left to guess which to lead with.
+  const situationLines = brief
+    ? [
+        `Explain briefly why you are calling, using exactly this: ${brief}`,
+        "Say that in your own natural words without adding, guessing at, or embellishing any detail it does not contain — in particular do not invent a cause, a diagnosis, or a level of urgency.",
+        `These are the only other facts the check-in established about ${person.firstName}, and you may mention them if they are relevant:`,
+      ]
+    : [`Explain that you have just spoken with ${person.firstName}, and share only these facts:`];
 
   // Two mutually exclusive instructions, never both: either leave the fixed
   // message, or leave nothing at all. Never a paraphrase, and never the facts
@@ -54,12 +75,21 @@ export function buildFamilyTask(
     "Introduce yourself immediately and clearly as KinCall, an automated assistant that regularly checks in on " +
       `${person.firstName} — do not claim to be a family member, a doctor, a nurse, an emergency operator or any human service.`,
     "Be brief, factual and calm. This is not a long conversation: the goal is to share the situation and find out whether they can help today.",
-    `Explain that you have just spoken with ${person.firstName}, and share only these facts:`,
+    ...situationLines,
     facts,
     "Report each fact as something the person said or indicated, never as a diagnosis or a certainty. " +
       `For example say "${person.firstName} told me she is having difficulty walking", not "${person.firstName} cannot walk".`,
-    "Do not repeat the rest of the conversation, do not speculate about causes, do not give medical advice, and do not promise that anyone will intervene.",
+    // Rewritten for DEC-022: the old blanket "do not repeat the rest of the
+    // conversation" was written when the facts list was the only content, and
+    // would have suppressed the brief itself. The boundary that actually
+    // matters is unchanged — nothing beyond what is written above.
+    "Beyond what is written above, do not repeat anything else from that conversation, do not speculate about causes, do not give medical advice, and do not promise that anyone will intervene.",
+    "Never describe an internal field name, a code, or a data format — speak only in ordinary language.",
+    // §7.5: KinCall never asserts safety, and never claims an action happened.
+    `Do not say that ${person.firstName} is safe or fine, do not exaggerate how urgent this is, and do not claim that KinCall has already done anything beyond making these calls.`,
     `Then ask clearly whether they are able to check on ${person.firstName} today, for example by visiting or by calling her.`,
+    "If they have not understood the situation, ask one short clarifying question and then move on — do not re-explain repeatedly.",
+    "Before ending, make sure you have a clear yes or no about whether they can help today; if they stay vague or non-committal, record that as unknown rather than assuming either answer.",
     "If they can, find out what they intend to do and roughly at what time. If they cannot, ask whether you should contact the next person in the trusted circle.",
     // KinCall reaches a trusted circle, never an emergency service, and must
     // never let a relative believe otherwise (§9.4's Limite critique).

@@ -100,8 +100,21 @@ export function LaunchDemoButton({
         disabled={isLaunching || Boolean(blockedReason)}
         className="w-fit"
       >
-        {isLaunching ? "Launching demo…" : "Launch demo"}
+        {isLaunching ? "Preparing call…" : "Launch demo"}
       </Button>
+      {/* DEC-022. The request genuinely does take a while: it is not returned
+          until the event is durably created AND CALL-E has accepted the call,
+          which is the honest thing to wait for. What was missing was telling
+          the user that, so a multi-second wait read as a frozen button. This
+          says what is happening without promising when the phone will ring —
+          the delay between CALL-E accepting and the network ringing is the
+          carrier's, and KinCall cannot see or control it. */}
+      {isLaunching ? (
+        <p aria-live="polite" className="text-xs text-subtle">
+          Creating the check-in and asking CALL-E to place the call. The phone may take a few
+          seconds more to ring.
+        </p>
+      ) : null}
       {blockedReason ? <Notice tone="attention">{blockedReason}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
     </div>

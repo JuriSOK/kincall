@@ -87,7 +87,13 @@ describe("startPolling — starts only for waiting states", () => {
     controller.stop();
   });
 
-  it("does not poll immediately — waits a full interval first", async () => {
+  // DEC-022 REVERSED THIS. The previous version of this test asserted "does
+  // not poll immediately — waits a full interval first", which meant the page
+  // showed stale state for up to a full interval on mount, and again after
+  // every status change (the React effect rebuilds the poller on each new
+  // status, restarting the clock). A live test reported the event page felt
+  // slow to update; that dead time was the controllable half of it.
+  it("polls immediately on start, then on the interval", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "ATTENTION_REQUIRED" }));
     const controller = startPolling({
       eventId: "event_001",
@@ -95,11 +101,33 @@ describe("startPolling — starts only for waiting states", () => {
       fetchImpl,
     });
 
-    await vi.advanceTimersByTimeAsync(4999);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    // Before any timer has advanced at all.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    controller.stop();
+  });
+
+  it("never polls faster than once per second, however small the requested interval", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "ATTENTION_REQUIRED" }));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "ATTENTION_REQUIRED",
+      intervalMs: 10,
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // the immediate one
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
 
     controller.stop();
   });
@@ -114,10 +142,11 @@ describe("startPolling — no overlapping requests", () => {
       fetchImpl,
     });
 
-    // Three interval ticks elapse before the first request ever resolves.
-    await vi.advanceTimersByTimeAsync(5000);
-    await vi.advanceTimersByTimeAsync(5000);
-    await vi.advanceTimersByTimeAsync(5000);
+    // The immediate poll fires and never resolves; several intervals elapse.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
@@ -125,8 +154,147 @@ describe("startPolling — no overlapping requests", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     // Now that the first request settled, the next tick may fire.
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(2000);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    controller.stop();
+  });
+
+  it("pollNow() does not start a second overlapping request", async () => {
+    const { fetchImpl, calls } = deferredFetch();
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "CALLING_TRUSTED_CONTACT",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    controller.pollNow();
+    controller.pollNow();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    calls[0].resolve(jsonResponse({ status: "CALLING_TRUSTED_CONTACT" }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Once settled, an explicit pollNow runs straight away rather than
+    // waiting out the interval — this is the tab-became-visible path.
+    controller.pollNow();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    controller.stop();
+  });
+
+  it("pollNow() is inert once the poller has stopped", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "CASE_CLOSED" }));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "CALLING_TRUSTED_CONTACT",
+      fetchImpl,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // terminal, so it stopped itself
+
+    controller.pollNow();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("startPolling — bounded backoff after failures (DEC-022)", () => {
+  it("widens the delay on consecutive failures and reports the running count", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("offline"));
+    const onError = vi.fn();
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "CALLING_PERSON",
+      fetchImpl,
+      onError,
+    });
+
+    // Immediate poll fails → 1st failure, next delay ×2 = 4000ms.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenLastCalledWith(expect.anything(), 1);
+
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenLastCalledWith(expect.anything(), 2);
+
+    controller.stop();
+  });
+
+  it("caps the backoff rather than growing without bound", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("offline"));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "CALLING_PERSON",
+      fetchImpl,
+      onError: vi.fn(),
+    });
+
+    // Drive well past the cap (×4 → 8000ms).
+    for (let i = 0; i < 8; i += 1) await vi.advanceTimersByTimeAsync(8000);
+    const callsAfter = fetchImpl.mock.calls.length;
+
+    // Still polling at the capped rate, not stalled forever.
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(fetchImpl.mock.calls.length).toBeGreaterThan(callsAfter);
+
+    controller.stop();
+  });
+
+  it("resets the backoff as soon as a poll succeeds", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(jsonResponse({ status: "CALLING_PERSON" }));
+    const onError = vi.fn();
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "CALLING_PERSON",
+      fetchImpl,
+      onError,
+    });
+
+    await vi.advanceTimersByTimeAsync(0); // fail 1
+    await vi.advanceTimersByTimeAsync(4000); // fail 2
+    expect(onError).toHaveBeenLastCalledWith(expect.anything(), 2);
+
+    await vi.advanceTimersByTimeAsync(8000); // success — resets
+    const afterSuccess = fetchImpl.mock.calls.length;
+
+    // Back to the base 2000ms cadence.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchImpl.mock.calls.length).toBe(afterSuccess + 1);
+
+    controller.stop();
+  });
+});
+
+describe("startPolling — never starts a call or creates an event (DEC-022)", () => {
+  it("only ever issues POST to the resume-only poll route", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "CALLING_PERSON" }));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "CALLING_PERSON",
+      fetchImpl,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    for (const [url, init] of fetchImpl.mock.calls) {
+      expect(url).toBe("/api/events/event_001/poll");
+      expect(init).toEqual({ method: "POST" });
+      // Structurally incapable of reaching the endpoints that create work.
+      expect(url).not.toContain("/api/events/start");
+      expect(url).not.toContain("/api/people");
+    }
 
     controller.stop();
   });
@@ -203,9 +371,10 @@ describe("startPolling — stops at terminal statuses", () => {
       fetchImpl,
     });
 
-    await vi.advanceTimersByTimeAsync(5000);
-    await vi.advanceTimersByTimeAsync(5000);
-    await vi.advanceTimersByTimeAsync(5000);
+    // One immediate poll (DEC-022), then one per interval.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(2000);
 
     expect(fetchImpl).toHaveBeenCalledTimes(3);
 
@@ -223,7 +392,7 @@ describe("startPolling — cleanup", () => {
       fetchImpl,
     });
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(0);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     controller.stop();
@@ -232,7 +401,10 @@ describe("startPolling — cleanup", () => {
   });
 
   it("stop() is safe to call more than once", () => {
-    const fetchImpl = vi.fn();
+    // Resolves, because the immediate first poll (DEC-022) fires during
+    // startPolling itself — a bare vi.fn() returning undefined would make the
+    // poller's own `.then` throw before this test could reach `stop()`.
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "ATTENTION_REQUIRED" }));
     const controller = startPolling({ eventId: "event_001", status: "ATTENTION_REQUIRED", fetchImpl });
     expect(() => {
       controller.stop();
@@ -255,12 +427,14 @@ describe("startPolling — temporary errors never terminate the workflow", () =>
       onPollSuccess,
     });
 
-    await vi.advanceTimersByTimeAsync(5000);
+    // The immediate poll (DEC-022) fails right away.
+    await vi.advanceTimersByTimeAsync(0);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onPollSuccess).not.toHaveBeenCalled();
 
     // The next tick still fires — a transient failure never stops the poller.
-    await vi.advanceTimersByTimeAsync(5000);
+    // It arrives one backoff step later (×2), not at the base interval.
+    await vi.advanceTimersByTimeAsync(4000);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
     controller.stop();
@@ -279,11 +453,11 @@ describe("startPolling — temporary errors never terminate the workflow", () =>
       onPollSuccess,
     });
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(0);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onPollSuccess).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(4000);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
     controller.stop();
