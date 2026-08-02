@@ -8,6 +8,7 @@ import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration
 import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
 import { parseProfilePeriod, profilePeriodSince } from "@/lib/kpi/period";
 import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
+import { displayCount, displayRate } from "@/lib/presentation/kpi-display";
 import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
 import { formatCheckInDays, formatNextCheckIn, SCHEDULE_STATE_LABEL } from "@/lib/schedule/format-schedule";
 import { formatDateTime } from "@/lib/presentation/format-date";
@@ -315,35 +316,14 @@ export default async function PersonPage({
         }
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <KpiCard label="Check-ins" value={String(kpis.totalCheckIns)} />
+          <KpiCard label="Check-ins" value={displayCount(kpis.totalCheckIns).text} />
+          <KpiCard label="Normal" value={displayRate(kpis.normalCheckIns).text} />
+          <KpiCard label="Reached the circle" value={displayRate(kpis.cascadesTriggered).text} />
           <KpiCard
-            label="Normal"
-            value={
-              kpis.normalCheckIns.percentage === null
-                ? "Not enough data"
-                : `${kpis.normalCheckIns.count} (${kpis.normalCheckIns.percentage}%)`
-            }
-            sampleSize={kpis.normalCheckIns.total}
+            label="No confirmed support"
+            value={displayCount(kpis.attentionUnresolvedCount).text}
           />
-          <KpiCard
-            label="Reached the circle"
-            value={
-              kpis.cascadesTriggered.percentage === null
-                ? "Not enough data"
-                : `${kpis.cascadesTriggered.count} (${kpis.cascadesTriggered.percentage}%)`
-            }
-            sampleSize={kpis.cascadesTriggered.total}
-          />
-          <KpiCard label="No confirmed support" value={String(kpis.attentionUnresolvedCount)} />
-          <KpiCard
-            label="Answered"
-            value={
-              kpis.personReached.percentage === null
-                ? "Not enough data"
-                : `${kpis.personReached.count} (${kpis.personReached.percentage}%)`
-            }
-            sampleSize={kpis.personReached.total}
-          />
+          <KpiCard label="Answered" value={displayRate(kpis.personReached).text} />
         </div>
       </Card>
 

@@ -9,6 +9,7 @@ import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-
 import { parsePeriod, periodSince } from "@/lib/kpi/period";
 import { describeAction } from "@/lib/presentation/event-summary";
 import { buildHistoryEventView } from "@/lib/presentation/history-view";
+import { displayAverage, displayCount, displayRate } from "@/lib/presentation/kpi-display";
 import { formatTime } from "@/lib/presentation/format-date";
 import { STATUS_TONE } from "@/lib/presentation/status-tone";
 import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
@@ -307,53 +308,29 @@ export default async function DashboardPage({
         }
       >
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          <KpiCard label="Check-ins" value={String(kpis.totalCheckIns)} />
+          <KpiCard label="Check-ins" value={displayCount(kpis.totalCheckIns).text} />
+          <KpiCard label="Normal" value={displayRate(kpis.normalCheckIns).text} />
+          <KpiCard label="Reached the circle" value={displayRate(kpis.cascadesTriggered).text} />
           <KpiCard
-            label="Normal"
-            value={
-              kpis.normalCheckIns.percentage === null
-                ? "Not enough data"
-                : `${kpis.normalCheckIns.count} (${kpis.normalCheckIns.percentage}%)`
-            }
-            sampleSize={kpis.normalCheckIns.total}
+            label="No confirmed support"
+            value={displayCount(kpis.attentionUnresolvedCount).text}
           />
-          <KpiCard
-            label="Reached the circle"
-            value={
-              kpis.cascadesTriggered.percentage === null
-                ? "Not enough data"
-                : `${kpis.cascadesTriggered.count} (${kpis.cascadesTriggered.percentage}%)`
-            }
-            sampleSize={kpis.cascadesTriggered.total}
-          />
-          <KpiCard label="No confirmed support" value={String(kpis.attentionUnresolvedCount)} />
-          <KpiCard
-            label="Person answered"
-            value={
-              kpis.personReached.percentage === null
-                ? "Not enough data"
-                : `${kpis.personReached.count} (${kpis.personReached.percentage}%)`
-            }
-            sampleSize={kpis.personReached.total}
-          />
+          <KpiCard label="Person answered" value={displayRate(kpis.personReached).text} />
           <KpiCard
             label="Attempts before confirmation"
-            value={
-              kpis.meanFamilyAttemptsBeforeConfirmation.mean === null
-                ? "Not enough data"
-                : kpis.meanFamilyAttemptsBeforeConfirmation.mean.toFixed(1)
-            }
-            sampleSize={kpis.meanFamilyAttemptsBeforeConfirmation.sampleSize}
+            value={displayAverage(kpis.meanFamilyAttemptsBeforeConfirmation).text}
           />
           <KpiCard
             label="No active circle"
-            value={String(
-              perPerson.filter(
-                (p) =>
-                  (!activityPersonId || p.person.id === activityPersonId) &&
-                  p.activeContacts.length === 0
-              ).length
-            )}
+            value={
+              displayCount(
+                perPerson.filter(
+                  (p) =>
+                    (!activityPersonId || p.person.id === activityPersonId) &&
+                    p.activeContacts.length === 0
+                ).length
+              ).text
+            }
           />
         </div>
       </Card>

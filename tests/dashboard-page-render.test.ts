@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import DashboardPage from "@/app/(app)/dashboard/page";
+import { KpiCard } from "@/app/ui/kpi-card";
+import { collectElements } from "./support/element-tree";
 import { renderServerComponent } from "./support/render";
 
 async function renderDashboard(searchParams: Record<string, string | string[] | undefined> = {}) {
@@ -29,5 +31,35 @@ describe("Dashboard page", () => {
     // (exhaustively covered separately in tests/daily-recap-status.test.ts).
     const html = await renderDashboard();
     expect(html).toContain("Not checked in yet");
+  });
+
+  describe("Operational activity zero-value display", () => {
+    // The seeded in-memory fixture (lib/database/seed.ts) has zero events for
+    // anyone, so every count here is a genuine, correctly-computed zero, and
+    // every rate's denominator is genuinely zero too — this proves the page
+    // actually calls the shared kpi-display helper (lib/presentation/
+    // kpi-display.ts) rather than reintroducing an inline ternary that could
+    // drift from it. The "0% with a positive denominator" and "positive
+    // average" cases are exercised directly against the helper itself in
+    // tests/kpi-display.test.ts, since this fixture cannot produce them.
+    async function kpiCardValues() {
+      const element = await DashboardPage({ searchParams: Promise.resolve({}) });
+      const cards = collectElements(element as never).filter((node) => node.type === KpiCard);
+      return new Map(cards.map((card) => [card.props.label as string, card.props.value as string]));
+    }
+
+    it("shows a genuine numeric 0 for count metrics, never 'Not enough data'", async () => {
+      const values = await kpiCardValues();
+      expect(values.get("Check-ins")).toBe("0");
+      expect(values.get("No confirmed support")).toBe("0");
+    });
+
+    it("shows 'Not enough data' for a rate whose denominator is genuinely zero (no check-ins at all)", async () => {
+      const values = await kpiCardValues();
+      expect(values.get("Normal")).toBe("Not enough data");
+      expect(values.get("Reached the circle")).toBe("Not enough data");
+      expect(values.get("Person answered")).toBe("Not enough data");
+      expect(values.get("Attempts before confirmation")).toBe("Not enough data");
+    });
   });
 });

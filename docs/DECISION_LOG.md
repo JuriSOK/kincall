@@ -1961,6 +1961,66 @@ Project owner approval: approved.
 
 ---
 
+## DEC-021 — Permanent removal of the legacy Marie demo dataset before controlled live testing
+
+**Date:** 2 August 2026  
+**Status:** Approved
+
+### Context
+
+`person_marie` and her trusted circle (Julie, Marc, Nicole) were the original fictional demo
+person seeded by `0005_seed.sql`, used throughout fake-mode and early live-mode development.
+DEC-020 fixed `archive_person()` so she could be soft-archived, but archival alone leaves the row
+in place. Before the first controlled live CALL-E test against the new
+`person_live_test_claire`/`henri`/`sophie` profiles (`scripts/seed-live-test-data.ts`), the project
+owner asked for Marie to be permanently removed, so a legacy demo person can never be confused
+with — or accidentally shown alongside — a real live-test subject.
+
+A full read-only audit before writing anything confirmed: `person_marie` had 9 events, all
+terminal (7 `CASE_CLOSED`, 2 `ATTENTION_UNRESOLVED`, 0 non-terminal); 3 trusted contacts, each
+structurally owned by her alone (`trusted_contacts.person_id` is a single, non-nullable foreign
+key — there is no join table a contact could be shared through); 33 `call_events`, 95
+`event_operations`, 104 `timeline_entries`, all reachable only from her own events.
+`person_live_test_claire/henri/sophie` and every other pre-existing profile were confirmed
+unaffected before and after.
+
+### Decision
+
+Add `supabase/migrations/0013_remove_legacy_marie_demo_data.sql` — an additive migration that
+permanently deletes every row owned by `person_marie`, in explicit leaf-to-root order
+(`timeline_entries` → `event_operations` → `call_events` → `events` → `trusted_contacts` →
+`vulnerable_people`), scoped exclusively by her stable id or by events/contacts owned through her
+id — never by phone number or name. `0005_seed.sql` is not edited: it remains a true historical
+record and stays re-runnable against a fresh database, which now seeds Marie via `0005` and
+immediately removes her via `0013` when migrations run in order — ending with no Marie either way,
+on the currently linked project or on a brand-new one.
+
+### Product-scope check
+
+No feature is added, removed, or reinterpreted, and no orchestration, cascade, retry, transition,
+prompt, or fake-scenario code is touched — `lib/calle/fake-adapter.ts`'s demo scenarios are a
+separate, in-memory-only fixture never persisted to this database, and are unaffected. This does
+not change `archive_person()`/`archive_trusted_contact()` semantics from DEC-020, or any table
+structure: it is a data-only removal, permanently deleting rows that were already both terminal and
+already soft-archived.
+
+### Consequences
+
+- New: `supabase/migrations/0013_remove_legacy_marie_demo_data.sql`.
+- The currently linked Supabase project no longer contains `person_marie`, her trusted circle, or
+  any of her events/calls/timeline/operation-ledger rows.
+- A fresh database applying `0001`..`0013` in order also ends with no Marie, since `0013` runs
+  immediately after `0005` seeds her.
+- `person_live_test_claire/henri/sophie` and their trusted circles, and every unrelated
+  pre-existing profile, are unaffected — confirmed by an explicit read-only count comparison
+  before and after applying this migration.
+
+### Approval
+
+Project owner approval: approved.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.
