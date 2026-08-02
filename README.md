@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/assets/kincall-logo.svg" alt="KinCall" width="240" />
+</p>
+
 <h1 align="center">KinCall</h1>
 
 <p align="center">
