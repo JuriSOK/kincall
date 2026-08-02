@@ -20,7 +20,7 @@ const HISTORY_EVENTS_LIMIT = 500;
 const CATEGORY_OPTIONS: { value: EventOutcomeCategory; label: string }[] = [
   { value: "normal", label: "No attention needed" },
   { value: "cascade", label: "Trusted circle contacted" },
-  { value: "unresolved", label: "Attention unresolved" },
+  { value: "unresolved", label: "No confirmed support" },
 ];
 
 function firstString(value: string | string[] | undefined): string | undefined {
@@ -151,7 +151,7 @@ export default async function HistoryPage({
             <span className="h-1.5 w-1.5 rounded-full bg-attention-line" /> Trusted circle contacted
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-unresolved-line" /> Attention unresolved
+            <span className="h-1.5 w-1.5 rounded-full bg-unresolved-line" /> No confirmed support
           </span>
         </p>
       </Card>

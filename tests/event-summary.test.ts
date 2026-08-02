@@ -90,12 +90,13 @@ describe("event summary — after a decision exists", () => {
     expect(describeOwnership(e)).toContain("trying again");
   });
 
-  it("states the unresolved outcome plainly, with no suggestion KinCall is still working", () => {
+  it("states the unresolved outcome plainly, with no suggestion KinCall is still working, and never implying every contact simply failed to answer", () => {
     const e = event({ status: "ATTENTION_UNRESOLVED", decision: "CONTACT_TRUSTED_PERSON" });
-    expect(describeAction(e)).toContain("Nobody was able to confirm");
+    expect(describeAction(e)).toContain("nobody confirmed they could help");
     expect(describeAction(e)).not.toBe(REASSURING_ACTION);
-    expect(describeOwnership(e)).toContain("Nobody");
-    expect(describeOwnership(e)).toContain("finished trying");
+    expect(describeAction(e)).not.toContain("No answer");
+    expect(describeOwnership(e)).toContain("No one");
+    expect(describeOwnership(e)).toContain("nobody confirmed they could help");
     expect(describeOwnership(e)).not.toBe(REASSURING_OWNERSHIP);
   });
 
@@ -369,9 +370,9 @@ describe("describeAttentionOutcome — the binary operational outcome (DEC-011, 
     }
   });
 
-  it('shows "Attention unresolved" when every eligible contact has been exhausted', () => {
+  it('shows "The trusted circle could not take over" when every eligible contact has been exhausted', () => {
     const e = event({ status: "ATTENTION_UNRESOLVED", decision: "CONTACT_TRUSTED_PERSON" });
-    expect(describeAttentionOutcome(e)).toBe("Attention unresolved");
+    expect(describeAttentionOutcome(e)).toBe("The trusted circle could not take over");
   });
 
   it("shows nothing yet for an event with no decision, rather than guessing", () => {

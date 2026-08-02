@@ -334,7 +334,7 @@ export default async function PersonPage({
             }
             sampleSize={kpis.cascadesTriggered.total}
           />
-          <KpiCard label="Unresolved" value={String(kpis.attentionUnresolvedCount)} />
+          <KpiCard label="No confirmed support" value={String(kpis.attentionUnresolvedCount)} />
           <KpiCard
             label="Answered"
             value={

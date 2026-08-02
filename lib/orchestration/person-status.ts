@@ -12,10 +12,12 @@ import { describeUnusablePhone } from "../phone";
 // message it was never checked against.
 // "unresolved" is deliberately its own tone rather than a shade of "attention".
 // ATTENTION_UNRESOLVED is the one terminal outcome where KinCall finished its
-// configured cascade without reaching anybody (DEC-011), and it must not read
-// as interchangeable with "we are currently contacting the circle". It is still
-// an operational distinction, not a severity one — KinCall assesses no medical
-// severity in either direction (§7.5).
+// configured cascade with nobody confirming they could help (DEC-011) — that
+// can mean nobody answered, or that someone answered and declined, so the
+// label must never say only "no answer". It must not read as interchangeable
+// with "we are currently contacting the circle". It is still an operational
+// distinction, not a severity one — KinCall assesses no medical severity in
+// either direction (§7.5).
 export type StatusTone = "calm" | "attention" | "unresolved" | "unknown";
 
 export interface PersonStatus {
@@ -47,7 +49,7 @@ export function describePersonStatus(event: EventRecord | undefined): PersonStat
     case "HUMAN_REVIEW_REQUIRED":
       return { label: "Human review required", tone: "attention" };
     case "ATTENTION_UNRESOLVED":
-      return { label: "Unresolved — nobody could be reached", tone: "unresolved" };
+      return { label: "No confirmed support", tone: "unresolved" };
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
       return event.decision === "CONTACT_TRUSTED_PERSON"

@@ -536,7 +536,7 @@ async function startNextFamilyCall(
       {
         messages: [
           ...skipMessages,
-          "No trusted contact could be reached — attention unresolved",
+          "No trusted contact confirmed they could help.",
         ],
       }
     );

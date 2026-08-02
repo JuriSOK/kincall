@@ -326,7 +326,7 @@ export default async function DashboardPage({
             }
             sampleSize={kpis.cascadesTriggered.total}
           />
-          <KpiCard label="Unresolved" value={String(kpis.attentionUnresolvedCount)} />
+          <KpiCard label="No confirmed support" value={String(kpis.attentionUnresolvedCount)} />
           <KpiCard
             label="Person answered"
             value={

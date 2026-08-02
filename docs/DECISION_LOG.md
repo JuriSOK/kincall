@@ -1910,6 +1910,57 @@ remaining cancelled.
 
 ---
 
+## DEC-020 — `archive_person()` recognises `ATTENTION_UNRESOLVED` as terminal
+
+**Date:** 2 August 2026  
+**Status:** Approved
+
+### Context
+
+Attempting to archive `person_marie` through the interface failed with `PersonHasActiveEventError`
+even though her most recent events (`event_008`, `event_009`) had both already reached
+`ATTENTION_UNRESOLVED` — a fully finished cascade (every trusted contact tried, nobody could help),
+with no open call, no held lease, and nothing left that will happen to it automatically.
+
+`archive_person()` (`supabase/migrations/0007_archive_entities.sql`) refuses while any event's
+status is outside `('CASE_CLOSED', 'HUMAN_REVIEW_REQUIRED')`. That list was correct when 0007 was
+written. DEC-011 (30 July 2026) later introduced `ATTENTION_UNRESOLVED` as a third terminal status
+and updated `lib/orchestration/states.ts`'s `isTerminalEventStatus()` to include it — but 0007
+predates DEC-011 and was never revisited, so the SQL guard silently fell out of sync with the
+TypeScript one. The practical effect: a person whose history includes an `ATTENTION_UNRESOLVED`
+event could never be archived at all, with no workaround — not a deliberate safety rule, a gap
+between two places that both claim to define "terminal."
+
+### Decision
+
+Redefine `archive_person()` (migration `0012_archive_person_terminal_statuses.sql`,
+`create or replace function`, same signature) so its refusal condition excludes all three terminal
+statuses — `CASE_CLOSED`, `ATTENTION_UNRESOLVED`, `HUMAN_REVIEW_REQUIRED` — matching
+`isTerminalEventStatus()` exactly. Every other rule is unchanged: still refuses for a genuinely open
+event, still idempotent on an already-archived person, still a no-op read for an unknown id.
+
+### Product-scope check
+
+No feature is added, removed or reinterpreted. Archival is optional interface administration
+(DEC-009), not core orchestration; this only fixes which statuses count as "finished" for that one
+guard. Nothing about the cascade, retries, consent, or `ATTENTION_UNRESOLVED` itself changes —
+`git diff` on `lib/orchestration/*`, `lib/calle/*`, `prompts/*` and every table definition is empty.
+No existing row's `archived_at` changes when this migration is applied; it only changes what a
+future `archive_person()` call is allowed to do.
+
+### Consequences
+
+- New: `supabase/migrations/0012_archive_person_terminal_statuses.sql`.
+- A person whose latest event is `ATTENTION_UNRESOLVED` can now be archived like any other person
+  with a terminal outcome. `archive_trusted_contact()` was not affected — it already keys off
+  `call_events.result_processed_at`, not event status.
+
+### Approval
+
+Project owner approval: approved.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

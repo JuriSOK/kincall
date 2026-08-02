@@ -438,7 +438,7 @@ describe("crash recovery — the full injection matrix", () => {
     expect(event.status).not.toBe("HUMAN_REVIEW_REQUIRED");
     const messages = await timeline(deps, event.id);
     expect(messages).toContain("Could not start the call to Julie — network unreachable");
-    expect(messages).toContain("No trusted contact could be reached — attention unresolved");
+    expect(messages).toContain("No trusted contact confirmed they could help.");
     // Everyone was genuinely attempted rather than the cascade stopping at Julie.
     expect(
       (await deps.repository.listCallEvents(event.id)).some(

@@ -126,7 +126,7 @@ describe("buildHistoryEventView", () => {
   it("never renders a raw status enum in statusLabel", () => {
     const v = buildHistoryEventView(event({ status: "ATTENTION_UNRESOLVED" }), "Marie", []);
     expect(v.statusLabel).not.toBe("ATTENTION_UNRESOLVED");
-    expect(v.statusLabel.toLowerCase()).toContain("unresolved");
+    expect(v.statusLabel).toBe("No confirmed support");
   });
 
   it("carries the correct href and person association", () => {

@@ -32,7 +32,7 @@ export interface Confirmation {
 // decision, not the decision itself. This is not a medical or severity
 // judgement, only which of the two things KinCall's cascade did.
 export function describeAttentionOutcome(event: EventRecord): string | null {
-  if (event.status === "ATTENTION_UNRESOLVED") return "Attention unresolved";
+  if (event.status === "ATTENTION_UNRESOLVED") return "The trusted circle could not take over";
   if (event.decision === "CONTACT_TRUSTED_PERSON") return "Trusted circle contacted";
   if (event.decision === "LOG_AND_CLOSE" || event.decision === "NO_ACTION") {
     return "No attention needed";
@@ -112,7 +112,7 @@ export function describeWorkflowStep(status: EventStatus): string {
     case "NO_ACTION_REQUIRED":
       return "No action required";
     case "ATTENTION_UNRESOLVED":
-      return "Unresolved — nobody could be reached";
+      return "No confirmed support";
     // DEC-011: no new event reaches this. Historical events still do.
     case "HUMAN_REVIEW_REQUIRED":
       return "Human review required";
@@ -224,9 +224,11 @@ export function describeAction(event: EventRecord): string {
     case "CONTACT_CONFIRMED":
       return "KinCall contacted the trusted circle.";
     // DEC-011's autonomous dead end: everybody eligible was tried, nobody could
-    // help. Stated plainly, with no suggestion that KinCall is still working on it.
+    // help — whether because they did not answer or because they answered and
+    // declined. Stated plainly, with no suggestion that KinCall is still
+    // working on it, and never implying every contact simply failed to answer.
     case "ATTENTION_UNRESOLVED":
-      return "KinCall contacted everyone it could in the trusted circle. Nobody was able to confirm they would check in.";
+      return "KinCall contacted the trusted circle, but nobody confirmed they could help.";
     case "HUMAN_REVIEW_REQUIRED":
       return "Human review is required.";
     case "NO_ACTION_REQUIRED":
@@ -264,7 +266,7 @@ export function describeOwnership(event: EventRecord): string {
     case "CONTACT_CONFIRMED":
       return "Not confirmed yet — KinCall is still contacting the trusted circle.";
     case "ATTENTION_UNRESOLVED":
-      return "Nobody. KinCall has finished trying and no trusted contact confirmed they would check in.";
+      return "No one — KinCall contacted the trusted circle, but nobody confirmed they could help.";
     case "HUMAN_REVIEW_REQUIRED":
       return "No contact confirmed yet — flagged for human review.";
     case "NO_ACTION_REQUIRED":

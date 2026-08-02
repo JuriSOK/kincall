@@ -362,7 +362,7 @@ describe("startDemoEvent — orchestration rules", () => {
     expect(event.closedAt).toBeNull();
 
     const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
-    expect(messages).toContain("No trusted contact could be reached — attention unresolved");
+    expect(messages).toContain("No trusted contact confirmed they could help.");
   });
 
   it("keeps ATTENTION_UNRESOLVED terminal — the whole attempt history is preserved", async () => {
@@ -767,7 +767,7 @@ describe("family cascade — live-shaped async behaviour", () => {
     expect(event.status).toBe("ATTENTION_UNRESOLVED");
     const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toContain("Could not reach Julie — Invalid recipient number.");
-    expect(messages).toContain("No trusted contact could be reached — attention unresolved");
+    expect(messages).toContain("No trusted contact confirmed they could help.");
   });
 
   it("disregards a result naming the wrong contact, and continues the cascade without acting on it", async () => {
@@ -919,7 +919,7 @@ describe("family cascade — unusable contact phone numbers", () => {
     expect(event.status).toBe("ATTENTION_UNRESOLVED");
     const messages = (await deps.repository.listTimeline(event.id)).map((entry) => entry.message);
     expect(messages).toContain("Could not start the call to Julie — network unreachable");
-    expect(messages).toContain("No trusted contact could be reached — attention unresolved");
+    expect(messages).toContain("No trusted contact confirmed they could help.");
   });
 });
 
