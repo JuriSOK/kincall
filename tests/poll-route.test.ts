@@ -60,8 +60,10 @@ describe("POST /api/events/[id]/poll", () => {
       "No answer from Julie (attempt 2)",
       "Voicemail left",
       "Calling Marc",
-      "Marc answered",
+      "Marc confirmed they could help.",
       "Visit confirmed — 17:30",
+      "KinCall called Marie to share Marc's commitment.",
+      "The follow-up message was delivered.",
       "Case closed",
     ]);
   });

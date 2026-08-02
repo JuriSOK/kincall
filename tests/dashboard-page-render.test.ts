@@ -68,5 +68,18 @@ describe("Dashboard page", () => {
       const html = await renderDashboard();
       expect(html).not.toContain("Not enough data");
     });
+
+    // Removed deliberately: it is a configuration fact, not operational
+    // activity, and the Configuration gaps card already reports it per person
+    // with a link to fix it.
+    it("no longer shows the 'No active circle' metric, in any capitalisation", async () => {
+      const html = await renderDashboard();
+      expect(html).not.toMatch(/no active circle/i);
+
+      const values = await kpiCardValues();
+      expect([...values.keys()]).not.toContain("No active circle");
+      // The six operational metrics that remain.
+      expect(values.size).toBe(6);
+    });
   });
 });

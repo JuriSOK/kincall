@@ -111,6 +111,8 @@ export function describeWorkflowStep(status: EventStatus): string {
       return "A trusted contact confirmed";
     case "NO_ACTION_REQUIRED":
       return "No action required";
+    case "NOTIFYING_PERSON":
+      return "Calling back with the outcome";
     case "ATTENTION_UNRESOLVED":
       return "No confirmed support";
     // DEC-011: no new event reaches this. Historical events still do.
@@ -231,6 +233,9 @@ export function describeAction(event: EventRecord): string {
       return "KinCall contacted the trusted circle, but nobody confirmed they could help.";
     case "HUMAN_REVIEW_REQUIRED":
       return "Human review is required.";
+    // DEC-023. The outcome is already decided; this call only reports it.
+    case "NOTIFYING_PERSON":
+      return "KinCall is calling back to share the outcome.";
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
       // The specific "Julie did not answer, so KinCall contacted Marc" narrative
@@ -269,6 +274,11 @@ export function describeOwnership(event: EventRecord): string {
       return "No one — KinCall contacted the trusted circle, but nobody confirmed they could help.";
     case "HUMAN_REVIEW_REQUIRED":
       return "No contact confirmed yet — flagged for human review.";
+    case "NOTIFYING_PERSON":
+      // Deliberately does not assert who is helping: the confirmed path has a
+      // contact and the unresolved path has none, and this function cannot see
+      // which. The event page renders the intervention card for the former.
+      return "KinCall is calling back to share the outcome.";
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
       // In practice CASE_CLOSED with CONTACT_TRUSTED_PERSON always has a
@@ -320,4 +330,34 @@ export function describeFamilyAttempt(
     outcome,
     voicemail: describeVoicemailFromResult(result, callEvent.attemptNumber, MAX_CONTACT_ATTEMPTS),
   };
+}
+
+// DEC-023. One plain sentence about the informational callback to the monitored
+// person, for the event page's secondary card.
+//
+// Never claims a delivery that was not reported: a no-answer, a technical
+// failure and an unreadable result all read as "could not confirm", because
+// from the person's point of view KinCall genuinely cannot tell them apart.
+// Never implies the callback changed anything — it cannot.
+export function describePersonNotification(callEvent: CallEventRecord): string {
+  if (callEvent.resultProcessedAt === null) {
+    return "KinCall is calling back to share the outcome.";
+  }
+
+  const result = callEvent.structuredResult;
+  const delivered =
+    isRecord(result) && result.message_delivered === "yes";
+  const reached = isRecord(result) && result.person_reached === "yes";
+
+  if (delivered) {
+    return "KinCall called back and passed on the outcome.";
+  }
+  if (reached) {
+    return "KinCall called back and reached them, but could not confirm the whole message was passed on.";
+  }
+  return "KinCall called back, but could not confirm that the message was delivered. The outcome above is unaffected.";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

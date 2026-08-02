@@ -32,8 +32,10 @@ const EXPECTED_TIMELINE = [
   "No answer from Julie (attempt 2)",
   "Voicemail left",
   "Calling Marc",
-  "Marc answered",
+  "Marc confirmed they could help.",
   "Visit confirmed — 17:30",
+  "KinCall called Marie to share Marc's commitment.",
+  "The follow-up message was delivered.",
   "Case closed",
 ];
 
@@ -411,11 +413,16 @@ describe("crash recovery — the full injection matrix", () => {
       expect((await deps.repository.getEvent("event_001"))!.status).toBe("CASE_CLOSED");
       expect(await timeline(deps, "event_001")).toEqual(EXPECTED_TIMELINE);
       // No duplicate outbound call, whichever point the crash happened at.
-      // One companion call + two to Julie (the bounded retry) + one to Marc.
-      // The count is what proves no crash produced a DUPLICATE outbound call;
-      // DEC-011 raised it from 3 to 4 by adding the per-contact retry.
-      expect([...w.adapter.distinctCallIds]).toHaveLength(4);
+      // One companion call + two to Julie (the bounded retry) + one to Marc +
+      // one informational callback to Marie. The count is what proves no crash
+      // produced a DUPLICATE outbound call; DEC-011 raised it from 3 to 4 by
+      // adding the per-contact retry, and DEC-023 to 5 by adding the callback.
+      expect([...w.adapter.distinctCallIds]).toHaveLength(5);
       expect(w.adapter.contactsCalled()).not.toContain("contact_nicole");
+      // DEC-023's central crash-safety property: however the worker died and
+      // replayed, the person was called back exactly once — never twice, and
+      // never not at all.
+      expect(w.adapter.notificationMessages()).toHaveLength(1);
     }
   );
 

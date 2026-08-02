@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="112" height="112" role="img" aria-label="KinCall">
+  <title>KinCall</title>
+  <!--
+    The approved KinCall mark, geometry identical to app/ui/kincall-mark.tsx.
+
+    Two differences, both forced by this being a standalone file GitHub renders
+    inside an <img>:
+      * the gradient stops are the literal brand values from app/ui/tokens.css
+        (--kc-brand-blue #163f6b, --kc-brand-cyan #2fc6c6) rather than the CSS
+        custom properties, which do not resolve outside the app;
+      * the gradient id is namespaced, so it cannot collide if this file is
+        ever inlined next to the component's own <defs>.
+
+    Transparent background on purpose: the blue-to-cyan gradient reads on both
+    GitHub's light and dark themes. No font is referenced — the wordmark is the
+    README heading directly beneath it, so nothing here depends on a typeface
+    being installed.
+  -->
+  <defs>
+    <linearGradient id="kincall-readme-mark" x1="0" y1="0" x2="100" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#163f6b" />
+      <stop offset="100%" stop-color="#2fc6c6" />
+    </linearGradient>
+  </defs>
+  <path
+    d="M50,90 C15,66 0,41 0,25 C0,10 12,0 25,0 C35,0 45,6 50,18 C55,6 65,0 75,0 C88,0 100,10 100,25 C100,41 85,66 50,90 Z"
+    fill="url(#kincall-readme-mark)"
+  />
+  <path
+    d="M50,18 L50,90"
+    stroke="#ffffff"
+    stroke-opacity="0.35"
+    stroke-width="2"
+    stroke-linecap="round"
+    fill="none"
+  />
+</svg>

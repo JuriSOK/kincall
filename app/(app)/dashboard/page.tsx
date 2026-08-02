@@ -307,7 +307,15 @@ export default async function DashboardPage({
           </div>
         }
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {/* Six metrics, so a 3-column grid divides evenly at every breakpoint —
+            the previous 4-column layout left a single orphaned card on its own
+            row once "No active circle" was removed. That metric was a
+            CONFIGURATION fact, not operational activity, and it is already
+            reported (per person, with a link to fix it) by the Configuration
+            gaps card above; showing it here duplicated it in a place where it
+            could not be acted on. `detectConfigurationGaps` itself is
+            unchanged. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <KpiCard label="Check-ins" value={displayCount(kpis.totalCheckIns).text} />
           <KpiCard label="Normal" value={displayRate(kpis.normalCheckIns).text} />
           <KpiCard label="Reached the circle" value={displayRate(kpis.cascadesTriggered).text} />
@@ -319,18 +327,6 @@ export default async function DashboardPage({
           <KpiCard
             label="Attempts before confirmation"
             value={displayAverage(kpis.meanFamilyAttemptsBeforeConfirmation).text}
-          />
-          <KpiCard
-            label="No active circle"
-            value={
-              displayCount(
-                perPerson.filter(
-                  (p) =>
-                    (!activityPersonId || p.person.id === activityPersonId) &&
-                    p.activeContacts.length === 0
-                ).length
-              ).text
-            }
           />
         </div>
       </Card>

@@ -5,6 +5,7 @@ import type {
   CallResult,
   CompanionCallInput,
   FamilyCallInput,
+  PersonNotificationCallInput,
 } from "@/lib/calle/adapter";
 import type { CompanionStructuredResult, FamilyStructuredResult } from "@/lib/calle/schemas";
 import { InMemoryRepository } from "@/lib/database/in-memory-repository";
@@ -45,7 +46,33 @@ class ContextCapturingAdapter implements CalleAdapter {
     };
   }
 
+  // DEC-023. Recorded so the informational callback is observable, but the
+  // assertions in this file are about the FAMILY calls' context.
+  notificationCalls: PersonNotificationCallInput[] = [];
+
+  async startPersonNotificationCall(
+    input: PersonNotificationCallInput
+  ): Promise<CallReference> {
+    this.notificationCalls.push(input);
+    this.counter += 1;
+    return { callId: `notify_${this.counter}`, idempotencyKey: input.idempotencyKey };
+  }
+
   async getCallResult(callId: string): Promise<CallResult> {
+    if (callId.startsWith("notify_")) {
+      return {
+        callId,
+        agentType: "person_notification",
+        status: "completed",
+        structuredResult: {
+          person_reached: "yes",
+          message_delivered: "yes",
+          summary: "Message passed on.",
+        },
+        failureCode: null,
+        failureMessage: null,
+      };
+    }
     if (callId.startsWith("companion_")) {
       return {
         callId,

@@ -1,159 +1,226 @@
+<div align="center">
+
+<img src="docs/assets/kincall-logo.svg" alt="KinCall" width="112" height="112" />
+
 # KinCall
 
-> Because every vulnerable person deserves someone who checks in.
+**A familiar phone call, watching over the people you love.**
 
-KinCall is a multi-agent phone care coordinator. A Companion Agent calls a
-vulnerable person for a natural check-in, a deterministic orchestrator analyses
-the structured result, and a Family Agent contacts the trusted circle in order
-until someone confirms they can intervene.
+KinCall calls someone who lives alone, listens to how they are, and — when something
+comes up — reaches their trusted circle until a real person confirms they will help.
+Then it calls back to say who is coming.
 
-KinCall does not replace families, health professionals or emergency services.
+![status](https://img.shields.io/badge/status-working%20MVP-2fc6c6)
+![tests](https://img.shields.io/badge/tests-925%20passing-163f6b)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6)
+![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e)
+![license](https://img.shields.io/badge/license-private-lightgrey)
 
-## Documentation
+</div>
 
-The product and architecture are frozen. Read these before contributing:
+---
 
-- [`docs/PRODUCT_SPECIFICATION.md`](docs/PRODUCT_SPECIFICATION.md) — frozen product scope
-- [`docs/TECHNICAL_ARCHITECTURE.md`](docs/TECHNICAL_ARCHITECTURE.md) — frozen implementation baseline
-- [`docs/DECISION_LOG.md`](docs/DECISION_LOG.md) — approved deviations
-- [`CLAUDE.md`](CLAUDE.md) — Claude Code working rules
+## Overview
 
-## Stack
+KinCall places a check-in phone call to a monitored person — on a stored schedule, or
+started by hand from the dashboard. A voice agent has an ordinary conversation, and
+returns a constrained, factual summary of what was said. Deterministic TypeScript rules,
+not a model, then decide one of two things: close the check-in, or contact the trusted
+circle. If the circle is contacted, KinCall works down it in order, retrying within a
+bounded policy, until somebody confirms they can help or the circle is exhausted. Either
+way it calls the monitored person back to tell them the outcome, and the whole sequence —
+every call, every decision, every skipped contact and why — is recorded on a dashboard
+the family can read.
 
-Next.js App Router, TypeScript, Tailwind CSS, Vitest, Supabase PostgreSQL. The
-CALL-E REST API is wired up for both the Companion Agent and the Family Agent
-cascade (`LiveCalleAdapter`).
+KinCall is **not** a medical device and **not** an emergency service. It never diagnoses,
+never rates severity, and never contacts emergency services.
 
-Persistence has two interchangeable drivers behind one `Repository` interface.
-`KINCALL_PERSISTENCE` selects between them and defaults to `memory`, so fake
-mode and the test suite need no configuration and make no network calls.
+---
+
+## The problem
+
+When someone lives alone, the people who care about them end up improvising a rota of
+phone calls. It works until it doesn't: everyone assumes someone else called today, a
+worrying remark gets mentioned to one person and not the others, and when something does
+come up, the scramble to find whoever is free and nearby starts from scratch — over group
+chats, at whatever hour it happens.
+
+The hard part was never the phone call. It is the coordination around it: noticing that
+something was said, deciding it warrants a call to the family, working through the circle
+in a sensible order, and closing the loop with the person who raised it in the first
+place. KinCall does that part, the same way every time, and writes down what it did.
+
+---
+
+## How it works
+
+1. **KinCall calls the monitored person.** A warm, open-ended conversation — never a
+   symptom questionnaire.
+2. **The conversation is summarized factually.** A constrained result: what was said, plus
+   categorical signals, never an interpretation.
+3. **Deterministic rules decide.** Whether the trusted circle should be contacted is
+   decided in TypeScript from that validated result — an explicit rule order, not a model
+   judgement.
+4. **The trusted circle is contacted in order**, one contact at a time, each told the same
+   factual context, each retried at most once.
+5. **Someone confirms, or the circle is exhausted.** A clear commitment stops the cascade;
+   running out of contacts is a visible outcome, not a silent one.
+6. **KinCall calls the monitored person back** with the result — who is coming and roughly
+   when, or that nobody confirmed and they should contact someone themselves.
+7. **The dashboard records everything**, with the full timeline of each check-in.
+
+```mermaid
+flowchart TD
+    A["Check-in call<br/>to the monitored person"] --> B["Factual summary<br/>of what was said"]
+    B --> C{"Deterministic rules:<br/>does anyone need to check in?"}
+    C -->|"no"| D["Close the check-in"]
+    C -->|"yes"| E["Call trusted contact #1"]
+    E --> F{"Can they help?"}
+    F -->|"yes"| G["Stop the cascade"]
+    F -->|"no, or no answer"| H{"Anyone left?"}
+    H -->|"yes"| I["Call the next contact"]
+    I --> F
+    H -->|"no"| J["No confirmed support"]
+    G --> K["Call the person back<br/>with the outcome"]
+    J --> K
+    K --> L["Recorded on the dashboard"]
+    D --> L
+```
+
+---
+
+## Core features
+
+| | |
+|---|---|
+| **Two CALL-E modes** | A fake adapter drives the whole flow with no keys and no network; a live adapter places real calls behind the same interface. |
+| **Context propagation** | What the person actually said reaches every trusted contact — "help completing an administrative document", not just "asked for help". Generalizes to any situation; no hardcoded list. |
+| **Deterministic cascade** | Contacts called in configured order, one at a time, with bounded retries and no model in the decision path. |
+| **Retries and availability** | Exactly one retry per contact and one for the monitored person. Availability windows re-order who is tried first; nobody is ever excluded by them. |
+| **Primary contact** | At most one per circle, enforced in the database. Informational — it never bypasses consent or retry rules. |
+| **Schedules** | Days, time and timezone per person, with the next planned check-in computed and displayed. |
+| **Informational callback** | One call back to the monitored person after the outcome — never retried, never able to change the outcome. |
+| **Intervention summaries** | Who committed to what and roughly when, always with an explicit "KinCall has not verified this took place" caveat. |
+| **Unresolved outcomes** | An exhausted circle ends visibly as *No confirmed support*, never as a silent close and never waiting on a human. |
+| **Dashboard, profiles, history** | Daily recap per person, operational metrics, a filterable calendar and per-event timelines. |
+| **Supabase persistence** | Full history in PostgreSQL, with row-level security and server-only credentials. |
+| **Crash recovery** | An operation ledger, call intents and processing leases: a crash, a duplicate webhook or two workers cannot duplicate a call. |
+| **Accessibility** | Keyboard-operable controls, visible focus, semantic markup and reduced-motion support. No formal WCAG audit is claimed. |
+| **925 automated tests** | Covering orchestration, crash recovery, concurrency, prompts, presentation and the five fake scenarios. |
+
+> [!NOTE]
+> There is **no automatic production scheduler**. Schedules are stored and displayed;
+> a check-in is started by hand from a profile page.
+
+---
+
+## Architecture
+
+The orchestration engine is the centre of the system, and it is deliberately boring:
+plain TypeScript, an explicit state-transition table, and no model anywhere in the
+decision path. CALL-E sits behind an adapter interface, so the same engine drives fake
+and live runs identically.
+
+```mermaid
+flowchart LR
+    UI["Next.js App Router<br/>dashboard · profiles · history"]
+
+    subgraph CORE["Orchestration engine"]
+        SM["State machine<br/>explicit transition table"]
+        RULES["Decision rules<br/>deterministic, model-free"]
+        SM --- RULES
+    end
+
+    ADP["CalleAdapter<br/>fake · live"]
+    DB[("Supabase / PostgreSQL<br/>events · calls · timeline · ledger")]
+    CALLE[("CALL-E<br/>voice calls")]
+
+    UI --> CORE
+    CORE --> ADP
+    CORE <--> DB
+    ADP --> CALLE
+    CALLE -->|"webhook or poll"| CORE
+```
+
+**Result processing.** A live call returns immediately as *queued*; the terminal result
+arrives later. In a deployment that is a signed webhook; locally it is a poll endpoint the
+event page drives every two seconds. Both run the identical orchestration code.
+
+**Durability.** Every transition is written with an operation key, so a replay is a no-op
+rather than a duplicate. Every outbound call is written as an *intent* before the request
+leaves, so a crash can never leave a placed call KinCall cannot find. Every terminal
+result is processed under a time-bounded lease, so two workers cannot both act on it.
+
+---
+
+## Technology stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 16 (App Router), React 19 |
+| Language | TypeScript 5, strict |
+| Styling | Tailwind CSS v4, CSS-first tokens |
+| Database | Supabase (PostgreSQL), RLS forced, service-role only |
+| Voice | CALL-E REST API behind a `CalleAdapter` interface |
+| Tests | Vitest |
+| Runtime | Node `^20.9.0 || >=22.0.0` |
+
+---
+
+## Project structure
+
+```
+app/
+  (marketing)/        Landing page
+  (app)/              Dashboard, profiles, trusted circles, history, events
+  api/                Event start, poll, webhook, people and contact routes
+  ui/                 Design-system primitives and the KinCall mark
+lib/
+  orchestration/      State machine, engine, decision rules, context briefs
+  calle/              Adapter interface, fake and live adapters, result schemas
+  database/           Repository interface, Supabase and in-memory drivers
+  presentation/       Human-readable labels and summaries
+  schedule/           Deterministic next-check-in computation
+prompts/              Companion, Family and notification agent prompts
+supabase/migrations/  0001 – 0014
+tests/                925 tests
+docs/                 Product specification, technical architecture, decision log
+```
+
+---
 
 ## Getting started
 
-Requires **Node 20.9+ or 22+** (declared in `package.json`'s `engines`). Node 21
-is excluded because Vitest does not support it.
+**Prerequisites** — Node `^20.9.0 || >=22.0.0` and npm. No keys are needed for fake mode.
 
 ```bash
+git clone <your-repository-url>
+cd kincall
 npm install
 cp .env.example .env.local
-npm run dev
 ```
 
-Open the home page, select Marie, pick a **scenario**, and click **Launch demo**.
-In fake mode (the default) this runs the whole scenario synchronously and the
-event page shows the timeline and summary as they're produced.
-
-The scenario selector is fake-mode only — it does not exist in live mode, and the
-API ignores the parameter there, so a real call can never be steered from the UI.
-Five scenarios cover the autonomous paths (DEC-011):
-
-| Scenario | What it exercises |
-|---|---|
-| Marie baseline | Fall and mobility difficulty. Julie does not answer **twice** (voicemail left on the second call), then Marc confirms a visit at 17:30 → case closed |
-| Explicit help request | No fall; Marie asks for someone to be contacted. The deterministic rule contacts the trusted circle regardless of the model's own report |
-| Other incident | Pain and distress with no fall — attention detection beyond falls |
-| Person unreachable | Marie misses both check-in attempts; KinCall stops calling her and contacts the circle |
-| All contacts unavailable | Everyone is tried twice and nobody helps; voicemail is unsupported → the event ends at `ATTENTION_UNRESOLVED` |
-
-KinCall's operational decision is binary — close the check-in, or contact the trusted circle. There
-is no priority tier: an earlier design assigned a High/Medium/Low priority to every escalation, but
-high and medium never triggered different cascade behaviour, so it was removed before shipping (see
-`docs/DECISION_LOG.md` DEC-011, "Priority removed"). This is an operational decision, not medical
-triage — KinCall never assesses severity.
-
-Every trusted contact gets exactly one retry, and the vulnerable person gets
-exactly one. Nothing waits for a human: an event that runs out of eligible
-contacts ends at `ATTENTION_UNRESOLVED`, a visible terminal outcome, rather than
-stalling in a review queue. KinCall never contacts emergency services, in any
-mode.
-
-## Live Companion Agent mode
-
-Set `CALLE_MODE=live`, `CALLE_API_KEY` (from
-`dashboard.heycall-e.com/account/api-keys`) and the phone numbers to place real
-calls. Every number must be the E.164 number of a **consenting test
-participant**:
-
-| Variable | Who it calls |
-|---|---|
-| `KINCALL_DEMO_PHONE` | Marie — the Companion check-in |
-| `KINCALL_JULIE_PHONE` | Julie — trusted contact #1 |
-| `KINCALL_MARC_PHONE` | Marc — trusted contact #2 |
-| `KINCALL_NICOLE_PHONE` | Nicole — trusted contact #3 |
-
-Leaving one unset keeps a reserved-for-fiction default (`+336399800xx`), which
-KinCall refuses to dial: that contact is **skipped** with the missing variable
-named on the timeline, no CALL-E request is made, and the cascade continues to
-the next eligible contact. If none is eligible the event ends at
-`ATTENTION_UNRESOLVED`. The cascade only needs as many contacts configured as you
-intend it to reach.
-
-The API key is a **separate credential** from `calle auth login`'s browser OAuth
-session — that login is for the CALL-E MCP skill, a Claude-Code-only
-development tool (`plan_call`/`run_call`/`get_call_run`), explicitly not the
-production path (CLAUDE.md). Nothing from the MCP/CLI install ships with the
-deployed app.
-
-CALL-E requires an HTTPS `webhook_url` to deliver terminal results — plain
-`http://localhost` cannot receive webhooks. For local development, leave
-`CALLE_WEBHOOK_URL` unset and use the recovery/poll endpoint instead:
+Fake mode is the default, so this already works:
 
 ```bash
-curl -X POST http://localhost:3000/api/events/EVENT_ID/poll
+npm run dev            # http://localhost:3000
 ```
 
-In a deployed environment, set `CALLE_WEBHOOK_URL` to
-`https://<your-domain>/api/webhooks/calle` and `CALLE_WEBHOOK_SECRET` to the
-account's webhook signing secret (exact provisioning to be confirmed — see
-`docs/DECISION_LOG.md` / the Phase 3 plan's open uncertainties).
+Open a profile and press **Launch demo** to run a complete check-in — including the
+trusted-circle cascade and the callback — with no calls placed and no network used.
 
-A live run is asynchronous end to end: each call returns immediately as
-`queued`, and the webhook (or a poll) delivers the result that advances the
-event. A concerning Companion result starts the cascade, and each trusted
-contact's result either closes the case or triggers the next call — so a full
-run takes several deliveries, one per call. Poll repeatedly until the status
-stops changing.
+**With Supabase** (persistent history). Set `KINCALL_PERSISTENCE=supabase`, `SUPABASE_URL`
+and `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`, then apply the schema:
 
-### What a trusted contact is told (DEC-022)
+```bash
+npx supabase link --project-ref <your-project-ref>
+npx supabase migration list        # local and remote should match
+npx supabase db push --dry-run     # preview
+npx supabase db push               # apply
+```
 
-Each Family call carries two different things, both derived from the **validated**
-Companion result and nothing else:
-
-- a **context brief** — one attributed sentence built from the Companion result's own
-  `neutral_summary` (`lib/orchestration/family-context-brief.ts`), e.g. *"Claire told KinCall that
-  she would like help completing an administrative document."* It generalises to any situation
-  because it is the person's own reported words, not a lookup — there is no list of known
-  situations in the code;
-- the **fact list** — the closed vocabulary of categorical signals ("mentioned a fall", "asked for
-  help"), unchanged.
-
-Every contact in one cascade receives the identical brief. The raw transcript is never stored,
-fetched or transmitted. When no usable summary exists the brief degrades to a generic sentence
-rather than inventing a reason, and it never diagnoses, never claims KinCall verified anything, and
-never contains an internal field name or enum.
-
-### Timing instrumentation
-
-Set `KINCALL_TIMING=1` to print one structured line per measured stage
-(`[kincall:timing] {"eventId":…,"stage":…,"elapsedMs":…}`). Off by default. It records only an
-event id, a stage name and a duration — never a phone number, transcript, structured result or
-conversation note — and nothing it produces is persisted or used in any decision.
-
-For reference, a full fake-mode cascade (4 calls, 13 timeline entries) runs in **~0.15 ms** against
-the in-memory repository: the orchestration itself is not a meaningful source of latency. Observed
-delay in live mode is dominated by Supabase round trips, the two CALL-E HTTP requests, and — after
-CALL-E accepts the call — the telephone carrier's own delay before the phone rings, which KinCall
-neither sees nor controls.
-
-### Event-page updates
-
-The event page polls `POST /api/events/[id]/poll` immediately on mount and then every 2 s while a
-call is in flight, stopping the moment the event reaches a terminal status. Failures back off
-(bounded, capped at ×4) and surface an inline warning after three consecutive failures rather than
-showing "Updating…" forever. Polling never starts a call and never creates an event — the poll
-route only resumes an existing one.
-
-## Checks
+**Checks:**
 
 ```bash
 npm run typecheck
@@ -161,287 +228,108 @@ npm test
 npm run build
 ```
 
-## Status
+---
 
-Phases 2–5 of `docs/TECHNICAL_ARCHITECTURE.md` section 11 are implemented: the
-deterministic orchestration state machine, the Marie/Julie/Marc demo flow with
-dashboard timeline, `LiveCalleAdapter` for real Companion **and** Family Agent
-calls with the trusted-contact cascade resumed by webhook or polling, and the
-MVP interface — profile creation, trusted-circle configuration and ordering,
-per-person status and call history.
+## Environment variables
 
-Supabase persistence is not one of section 11's phases: it belongs to the
-section 1 baseline and was delivered ahead of the interface. Both repository
-drivers are implemented and interchangeable.
+All values below are placeholders. Never commit a real key or a real phone number —
+`.env.local` is git-ignored, and `.env.example` is the documented template.
 
-No recurring scheduling, and nothing deployed yet.
+**Fake mode (default)** — nothing is required.
 
-## Interface
-
-| Route | What it is |
+| Variable | Purpose |
 |---|---|
-| `/` | Public marketing landing page — no repository access, no Nav. `Get started` leads to `/dashboard`. |
-| `/dashboard` | The operational home: unresolved cases first, configuration gaps, a count-based KPI strip, schedule configuration counts, upcoming check-ins, every profile, and recent activity grouped by day. |
-| `/history` | A monthly calendar (three neutral outcome categories, no medical-severity colour scale) plus a filterable, day-grouped list of every check-in. |
-| `/people/new` | Create a profile — avatar, identity, check-in preferences, conversation preferences, consent. |
-| `/people/[id]` | The profile page: avatar, language, timezone, masked phone state, consent, interests, conversation preferences and notes, a Schedule card (state, next planned check-in, Pause/Resume, Launch demo), trusted-circle summary, a person-specific KPI panel, and event history. |
-| `/people/[id]/edit` | Edit the profile fields above (not first name or phone — see "Profiles" below). |
-| `/people/[id]/contacts` | The trusted-circle manager: drag-and-drop (plus keyboard and ↑/↓) reordering, primary/enabled/availability/max-attempts configuration per contact, and per-contact statistics — see "Trusted-contact configuration" below. |
-| `/events/[id]` | Unchanged from earlier phases. |
+| `CALLE_MODE` | `fake` (default) or `live`. Only `live` places real calls. |
 
-All of the above share one Nav under `app/(app)/layout.tsx`. `/dashboard` and
-`/history` are read-only: launching a check-in, editing a profile, or
-reordering a trusted circle all still happen on the per-person pages.
+**Supabase persistence**
 
-### Profiles: enriched, editable, never a schedule that runs
+| Variable | Purpose |
+|---|---|
+| `KINCALL_PERSISTENCE` | `memory` (default) or `supabase`. |
+| `SUPABASE_URL` | Project URL. Server-only — never `NEXT_PUBLIC_`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service-role key. Bypasses RLS; server-only. |
+| `KINCALL_PROCESSING_LEASE_SECONDS` | Lease duration; set at or above your platform's function timeout. |
 
-A profile (`vulnerable_people`) now carries, beyond the original identity and
-contact fields: a **preset avatar** (eight abstract, non-photographic marks —
-`lib/avatars.ts` is the canonical key list; never an uploaded image or a URL),
-a **timezone**, **conversation notes** (validated like `interests` — no phone
-number, 280 characters), and a **check-in schedule configuration** (days of
-the week, plus an `active`/`paused`/`inactive` state).
+**Live CALL-E**
 
-**None of this schedule configuration is executed.** `checkInDays` and
-`scheduleState` are stored and displayed so the interface can collect an
-intended schedule; nothing reads them to place a call automatically. The only
-way a check-in happens is `Call now` / `Launch demo`, exactly as before. A
-future phase would add the actual scheduler — see `docs/DECISION_LOG.md`
-DEC-015 and DEC-016.
+| Variable | Purpose |
+|---|---|
+| `CALLE_API_KEY` | API key. Required when `CALLE_MODE=live`. |
+| `CALLE_BASE_URL` | API base URL. Defaults to CALL-E's public endpoint. |
+| `CALLE_WEBHOOK_URL` | Public HTTPS URL of `/api/webhooks/calle`. Leave unset locally and use the poll route. |
+| `CALLE_WEBHOOK_SECRET` | Signing secret used to verify inbound webhooks. |
+| `KINCALL_PHONE_<ID>` | Optional per-entity override of a stored number, for redirecting a test run. |
 
-`conversation_notes` is stored and shown on the profile page, but is **not**
-sent to CALL-E in this phase — the validator can mechanically guarantee "no
-phone number" (the same check `interests` already gets), but not "no medical
-content", so nothing here claims that guarantee to the Companion Agent. See
-DEC-015 for the reasoning and what a future decision adding it would need to
-weigh.
+**Seed and tooling only** — not read by the application.
 
-Editing (`/people/[id]/edit`) covers every field above except first name and
-phone — phone in particular keeps DEC-008's own validation and masking rules,
-which a general-purpose edit would bypass.
+| Variable | Purpose |
+|---|---|
+| `KINCALL_LIVE_TEST_PHONE` | The single consenting number `scripts/seed-live-test-data.ts` writes. |
+| `KINCALL_TIMING` | Set to `1` to print stage timings. Logs an event id, a stage name and a duration — never call content. |
+| `KINCALL_TEST_SUPABASE_*` | Point the opt-in integration lane at a **disposable** project. It truncates tables. |
 
-### KPIs are count-based only
+---
 
-The dashboard's KPI strip (7/30/90-day period, in the URL as `?period=`) shows
-only what persisted data can actually support: check-in counts, the share that
-closed normally, the share that reached the trusted circle, the unresolved
-count, the person-answered rate, and the mean number of Family attempts before
-a confirmation. Every rate shows its own sample size and reads "Not enough
-data" rather than a fabricated 0% when nothing qualifies.
-
-Deliberately **not** shown, in any form:
-
-- **Any duration or response-time metric.** Fake-mode events run their whole
-  cascade synchronously in one request, so a "time to confirmation" would
-  read ~0 ms for every fake-mode event — a real number attached to a
-  meaningless measurement, not an honest "no data".
-- **False-positive rate or unnecessary-escalation rate.** Both would require
-  knowing whether attention was *actually* warranted, which nothing in this
-  product ever learns. See `docs/DECISION_LOG.md` DEC-014.
-
-### Deterministic next-check-in calculation, and Pause/Resume — planned configuration, never an execution
-
-`lib/schedule/next-check-in.ts`'s `computeNextCheckIn(schedule, now)` is a pure
-function that turns a stored `{ timezone, preferredCallTime, checkInDays,
-scheduleState }` into either a "no occurrence" result (`paused`, `inactive`, or
-`no_days_selected`, when no valid day is selected) or the ISO instant of the
-**first scheduled occurrence strictly after `now`**. It always uses the
-**person's own persisted IANA timezone** — never the browser's or the server
-process's default — built entirely from the platform's own `Intl.DateTimeFormat`
-with an explicit `timeZone`; no timezone library was added, since Node's ICU
-build already carries the full IANA database this needs.
-
-DST is handled explicitly, not ignored: a spring-forward request for a
-nonexistent local time (e.g. `02:30` on the night the clock jumps from 02:00 to
-03:00) resolves forward to the first valid instant after the gap; a fall-back
-request for a repeated local time resolves, deterministically, to the
-**earlier** of the two UTC instants. Both are covered by dedicated tests
-against real Europe/Paris 2026 transitions. See `docs/DECISION_LOG.md`
-DEC-016 for the full reasoning.
-
-**This is a calculation, not a scheduler.** Nothing anywhere reads its output
-to place a call — no cron, no background job, no unattended calling exists in
-this codebase. `Call now` / `Launch demo` remain the only trigger, and neither
-one reads or writes any schedule field. The person page's Schedule card adds a
-**Pause/Resume** control that flips `scheduleState` through the exact same
-`PATCH /api/people/[id]` route and validation the full profile-edit form uses
-— a minimal one-field patch, not a second write path — with no optimistic UI:
-the control's label only changes once the server has confirmed the write.
-
-Every date and time shown for **events** (`/dashboard`'s recent activity,
-`/history`, the event page) still uses a fixed `Europe/Paris` display timezone,
-explicitly — never the server's own region-dependent timezone and never the
-visitor's browser timezone; see `lib/presentation/format-date.ts`. Schedule-
-related text (next planned check-in, "Today"/"Tomorrow" wording) is the one
-place that instead uses each **person's own** persisted timezone, since that is
-what the schedule configuration is defined in.
-
-### Trusted-contact configuration: primary, enabled, availability, and per-contact attempt limits
-
-Each trusted contact (`trusted_contacts`) now carries, beyond identity and
-relationship: a **primary flag** (at most one per person, changed only by
-choosing a new one — the previous primary is cleared atomically, never left
-dangling); an **enabled/disabled state**, a reversible exclusion from new
-cascades distinct from archival (permanent) and from missing consent (a
-different reason the interface never blends together); an optional **usual
-callable window** (`callableFrom`/`callableTo`, "HH:MM", both set or both
-null — null means always available, and a window may cross midnight, e.g.
-`22:00`–`07:00`); an optional **contact-specific timezone** (null inherits the
-person's own); and a **maximum-attempts override** (1 or 2 — never higher than
-the platform-wide bound).
-
-**Availability only reorders who is tried first — it never delays or excludes
-anyone.** `lib/orchestration/contact-order.ts`'s `orderContactsForCascade`
-tries every contact currently inside their usual window before any contact
-who is currently outside it, but every disabled-or-archived-excluded contact
-aside, **nobody is ever dropped for being outside their window** — if
-everyone in the circle is unavailable, KinCall calls them anyway, immediately,
-in their configured order. There is no cron, no wait, and no code path that
-delays a call until a window opens. See `docs/DECISION_LOG.md` DEC-017 for
-the full reasoning, including why consent filtering deliberately stays a
-separate, unchanged step from availability ordering.
-
-**Reordering** in `/people/[id]/contacts` supports mouse and touch via Pointer
-Events (chosen over native HTML5 drag-and-drop specifically because that does
-not reliably support touch — no drag library was added), a full keyboard path
-on the same drag handle (Space to lift, arrow keys to move, Enter to drop,
-Escape to cancel, announced through a live region), and the original ↑/↓
-buttons, retained unchanged as the accessible fallback. An order is only
-persisted after **Save order** is pressed.
-
-**Contact statistics** (`lib/kpi/contact-stats.ts`) are calculated only from
-persisted Family call events: answer rate, acceptance/decline rate among
-answered calls, mean attempt number when answering, latest participation, and
-a confirmed-intervention count. Every rate shows its own sample size and reads
-"Not enough data" rather than a fabricated percentage. As with the dashboard's
-own KPIs, there is deliberately no duration metric and no "reliable"/
-"unreliable" label — a number is shown with its sample size and left for a
-human to read, never a verdict this interface renders.
-
-### Confirmed interventions: a recorded commitment, never a verified action
-
-When a trusted contact tells KinCall they will step in, the event page leads
-with a **confirmed-intervention card**: who accepted, their relationship, what
-they said they would do ("Will visit" / "Will call"), the estimated time they
-gave, and what they said in their own words. The same one-line sentence —
-"Marc will visit at 17:30." — appears in the dashboard's recent activity, the
-history list and the person page's event list, all built from one shared model
-(`lib/presentation/intervention-summary.ts`), so no two screens can describe the
-same intervention differently.
-
-**Every card carries a fixed disclaimer: _"KinCall recorded this commitment but
-has not verified that the action took place."_** This is the distinction the
-whole feature is built around. KinCall observed one thing — a person on a phone
-call saying what they intended to do — and has no way to observe what followed.
-It does not call back, does not check, and never reports that a visit happened,
-that a situation was resolved, or that anyone is safe. Every sentence it
-produces is future ("will visit") or reported speech ("told KinCall they would
-visit"); none is a past-tense claim about the action itself.
-
-The card appears **only** when the persisted data proves a trusted contact
-actually confirmed (`can_intervene === "yes"` on a family call KinCall itself
-placed). A closed event with no cascade, a contact who merely answered, or an
-unresolved event never produces one — `buildInterventionSummary` returns `null`
-in those cases, so there is structurally nothing to render. `ATTENTION_UNRESOLVED`
-keeps its own distinct, unweakened treatment: KinCall exhausted the eligible
-circle, nobody confirmed, and the event stays visible on the dashboard and in
-history.
-
-The estimated time stays **unparsed free text** exactly as the contact expressed
-it ("17:30", "this afternoon", "within the hour"). KinCall adds a preposition
-where grammar needs one and nothing else: it is never turned into an appointment,
-never stored as a timestamp, and lateness is never computed from it.
-
-## Before a public deployment
-
-Every mutating route (`POST /api/people`, `POST .../contacts`, both
-`DELETE`s, the contact-reorder route, and — in live mode — `POST
-/api/events/start`) is currently unauthenticated. That is acceptable for local
-development and a supervised demo, but **a public URL needs a write-protection
-gate — a shared token, or real authentication — before any mutating route is
-reachable by an arbitrary visitor.** `app/(app)/layout.tsx` is the one place
-such a check (or full authentication) belongs; nothing about the routes or
-data model needs to change to add it later.
-
-## Persistence
-
-`KINCALL_PERSISTENCE=memory` (the default) keeps everything in-process. It
-needs no setup and is what the test suite runs against, but data is lost on
-every restart — an event mid-cascade is orphaned, and its eventual result
-cannot be matched to anything.
-
-`KINCALL_PERSISTENCE=supabase` persists across restarts, redeploys and Vercel
-instances. Apply **all** the migrations, in order — either with the Supabase CLI
-against a linked project:
+## Testing
 
 ```bash
-npx supabase db push
-npx supabase migration list   # local and remote should match, with no drift
+npm test               # 925 tests
+npm run test:watch
+npm run test:integration   # opt-in; requires a disposable Supabase project
 ```
 
-or directly, which is the full list and the required order:
+The suite covers the deterministic state machine and every transition; the trusted-circle
+cascade, contact ordering and retry bounds; crash recovery at each await boundary, with
+convergence on one timeline; concurrency and lease handling; idempotency against duplicate
+webhooks and polls; consent, archival and phone-safety rules; prompt composition and
+context propagation; presentation helpers; and the five fake scenarios end to end.
 
-```bash
-# 0004 must run after 0002: it revokes EXECUTE on functions that must exist.
-psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql            # schema
-psql "$DATABASE_URL" -f supabase/migrations/0002_functions.sql       # atomic RPCs
-psql "$DATABASE_URL" -f supabase/migrations/0004_security.sql        # RLS + grants
-psql "$DATABASE_URL" -f supabase/migrations/0005_seed.sql            # demo rows
-psql "$DATABASE_URL" -f supabase/migrations/0006_reorder.sql         # cascade reordering
-psql "$DATABASE_URL" -f supabase/migrations/0007_archive_entities.sql # soft deletion
-psql "$DATABASE_URL" -f supabase/migrations/0008_call_attempts.sql   # bounded retries
-psql "$DATABASE_URL" -f supabase/migrations/0009_drop_event_priority.sql
-psql "$DATABASE_URL" -f supabase/migrations/0010_person_profile.sql  # avatar, timezone, schedule config
-psql "$DATABASE_URL" -f supabase/migrations/0011_contact_availability.sql # primary/enabled/availability/max-attempts
-```
+This is a large regression suite, not a proof: no formal verification is claimed.
 
-There is no `0003`: the number was skipped during Phase 5 and the gap is left as
-it is, since renumbering an applied migration would break every project already
-carrying it.
+---
 
-**`0011_contact_availability.sql` is not yet applied to the linked remote
-project** — `npx supabase migration list` will show it as the one pending
-migration until a project owner applies it. It is additive and
-backward-compatible (every new column is nullable or defaulted to the current
-behaviour exactly), reviewed for dependents before being written, and safe to
-apply whenever that's decided; this repository does not apply it on its own.
+## Safety and limitations
 
-Then set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (neither prefixed
-`NEXT_PUBLIC_` — the service-role key bypasses Row Level Security and must
-never reach client code) and set `KINCALL_PERSISTENCE=supabase`.
+Stated plainly, because some of these matter more than the features:
 
-**Rolling back** is the environment variable, not a code change: set it back to
-`memory` and redeploy. The schema is left untouched.
-`supabase/rollback/0000_rollback.sql` is the full teardown, and destroys data —
-it lives outside `migrations/` precisely so `supabase db push` can never pick it
-up.
+- **KinCall is not an emergency service.** It never contacts emergency services, in any
+  mode, and the agents are instructed to say so and to tell the person to call their local
+  emergency number themselves if they believe it is needed.
+- **KinCall does not diagnose.** No condition, no severity, no triage. The decision is
+  operational and binary: close the check-in, or contact the trusted circle.
+- **A confirmed intervention is a recorded commitment, not a verified action.** KinCall
+  has no way to know whether a contact actually visited, and never claims otherwise.
+- **No automatic production scheduler.** Schedules are stored and displayed; a check-in is
+  started manually.
+- **Call latency is external.** The delay between CALL-E accepting a call and the phone
+  ringing belongs to the provider and the carrier. KinCall neither sees nor controls it.
+- **Voicemail cannot be reliably detected.** CALL-E exposes no answering-machine
+  detection, so KinCall never claims a voicemail was left. The agents are instructed not
+  to repeat themselves when nobody replies, which bounds the problem without solving it.
+- **Mutating routes are unauthenticated.** Before any public live deployment, they need
+  protection — see *Project status*.
 
-### How a crash is survived
+---
 
-A worker takes a time-bounded **lease** on a call result and only marks it
-processed once the whole branch has succeeded, so a crash expires rather than
-consumes it. Every transition is recorded under a deterministic operation key,
-so a replay is a no-op instead of a duplicate timeline entry. And the
-`call_events` row is written **before** the CALL-E request, in the same
-transaction as the transition that decided to place the call — so a crash can
-never leave CALL-E holding a call KinCall cannot find. See
-`docs/DECISION_LOG.md` DEC-006.
+## Project status
 
-### Supabase integration tests
+The MVP works. The full flow runs end to end in fake mode, and controlled live tests have
+been carried out with a consenting participant on a single controlled number.
 
-`npm test` never touches a database. The Supabase-backed repository is held to
-the same shared contract suite by an opt-in lane:
+Before a public production deployment, this still needs: authentication and protection of
+the mutating API routes; an automatic scheduler if unattended check-ins are wanted; a
+compliance and data-protection review; and deployment hardening including webhook secret
+provisioning and rate limiting.
 
-```bash
-npm run test:integration
-```
+Architecture decisions, including the ones that were rejected and why, are recorded in
+[`docs/DECISION_LOG.md`](docs/DECISION_LOG.md). The frozen product scope is in
+[`docs/PRODUCT_SPECIFICATION.md`](docs/PRODUCT_SPECIFICATION.md) and the technical
+baseline in [`docs/TECHNICAL_ARCHITECTURE.md`](docs/TECHNICAL_ARCHITECTURE.md).
 
-It requires all four of `KINCALL_TEST_SUPABASE_URL`,
-`KINCALL_TEST_SUPABASE_SERVICE_ROLE_KEY`, `KINCALL_TEST_SUPABASE_ANON_KEY` and
-`KINCALL_TEST_SUPABASE_ALLOW_DESTRUCTIVE=1` — a partially-configured run fails
-loudly rather than skipping and looking green.
+---
 
-Point it at a disposable project or a local `supabase start`. It truncates
-every event table, and it also needs `supabase/testing/9999_test_helpers.sql`,
-which must **never** be applied to production: that file's absence is what
-makes the suite structurally incapable of running there.
+## Origin
+
+KinCall began during the CALL-E hackathon and has continued as an independent product
+project. It is not affiliated with, endorsed by, or sponsored by CALL-E or any other
+organisation.

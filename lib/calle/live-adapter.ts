@@ -1,5 +1,9 @@
 import { buildCompanionTask, companionResultSchema } from "@/prompts/companion-agent";
 import { buildFamilyResultSchema, buildFamilyTask } from "@/prompts/family-agent";
+import {
+  buildPersonNotificationResultSchema,
+  buildPersonNotificationTask,
+} from "@/prompts/person-notification-agent";
 import { phoneEnvVarFor } from "../database/seed";
 import { describeUnusablePhone } from "../phone";
 import type {
@@ -10,6 +14,7 @@ import type {
   CallStatus,
   CompanionCallInput,
   FamilyCallInput,
+  PersonNotificationCallInput,
 } from "./adapter";
 
 export interface LiveCalleAdapterConfig {
@@ -209,11 +214,57 @@ export class LiveCalleAdapter implements CalleAdapter {
     return { callId: callTask.id, idempotencyKey: input.idempotencyKey };
   }
 
+  // DEC-023. The one informational callback to the monitored person. Same
+  // dialability guard, same idempotency-key handling and same webhook wiring as
+  // the other two — this is a normal outbound call that happens to carry a
+  // different purpose and a pre-composed message.
+  async startPersonNotificationCall(
+    input: PersonNotificationCallInput
+  ): Promise<CallReference> {
+    this.assertDialable(
+      input.person.phone,
+      input.person.id,
+      input.person.firstName,
+      "person notification"
+    );
+
+    const region = regionFromLocale(input.person.preferredLanguage);
+    const recipient: Record<string, unknown> = {
+      phones: [input.person.phone],
+      locale: input.person.preferredLanguage,
+    };
+    if (region) {
+      recipient.region = region;
+    }
+
+    const body: Record<string, unknown> = {
+      task: buildPersonNotificationTask(input.person, input.message),
+      recipients: [recipient],
+      result_schema: buildPersonNotificationResultSchema(),
+      metadata: {
+        kincall_event_id: input.eventId,
+        kincall_idempotency_key: input.idempotencyKey,
+        kincall_agent_type: "person_notification",
+      },
+    };
+    if (this.webhookUrl) {
+      body.webhook_url = this.webhookUrl;
+    }
+
+    const callTask = await this.request<CallTaskResponse>(
+      "POST",
+      "/v1/calls",
+      body,
+      input.idempotencyKey
+    );
+    return { callId: callTask.id, idempotencyKey: input.idempotencyKey };
+  }
+
   private assertDialable(
     phone: string,
     subjectId: string,
     firstName: string,
-    agent: "Companion" | "Family"
+    agent: "Companion" | "Family" | "person notification"
   ): void {
     const problem = describeUnusablePhone(phone, phoneEnvVarFor(subjectId));
     if (problem) {
@@ -223,8 +274,17 @@ export class LiveCalleAdapter implements CalleAdapter {
 
   async getCallResult(callId: string): Promise<CallResult> {
     const callTask = await this.request<CallTaskResponse>("GET", `/v1/calls/${callId}`);
+    // Explicit three-way read (DEC-023): defaulting anything unrecognised to
+    // "companion" is deliberate and unchanged — a result KinCall cannot
+    // attribute must never be mistaken for a notification, whose handler
+    // performs no attention decision at all.
+    const rawAgentType = callTask.metadata?.kincall_agent_type;
     const agentType: AgentType =
-      callTask.metadata?.kincall_agent_type === "family" ? "family" : "companion";
+      rawAgentType === "family"
+        ? "family"
+        : rawAgentType === "person_notification"
+          ? "person_notification"
+          : "companion";
 
     return {
       callId: callTask.id,

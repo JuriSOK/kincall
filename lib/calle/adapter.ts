@@ -2,7 +2,12 @@ import { FakeCalleAdapter, type FakeScenarioId } from "./fake-adapter";
 import { LiveCalleAdapter } from "./live-adapter";
 import type { TrustedContact, VulnerablePerson } from "../database/types";
 
-export type AgentType = "companion" | "family";
+// DEC-023 adds a third purpose. It is deliberately its own value rather than a
+// reused "companion": the informational callback asks nothing, decides nothing,
+// and is never retried, so counting it as a check-in would corrupt every KPI
+// and every screen that filters on this. Migration 0014 widens the matching
+// database CHECK constraints.
+export type AgentType = "companion" | "family" | "person_notification";
 
 // Verbatim from CALL-E's CallStatus enum (calle.openapi.yaml v0.2.0).
 export type CallStatus = "queued" | "in_progress" | "completed" | "failed" | "canceled";
@@ -46,6 +51,22 @@ export interface FamilyCallInput {
   mayLeaveVoicemail: boolean;
 }
 
+// DEC-023. The single informational callback to the monitored person after the
+// trusted-circle outcome is settled. Carries the already-composed message
+// rather than the raw facts: lib/orchestration/person-notification-brief.ts is
+// the one place that decides wording, so the adapter and the agent have
+// nothing to assemble, infer, or get subtly different from each other.
+//
+// There is no `attemptNumber`: there is exactly one attempt, never retried
+// (enforced by the operation ledger AND by migration 0014's partial unique
+// index), so a number that could only ever be 1 would be misleading.
+export interface PersonNotificationCallInput {
+  eventId: string;
+  person: VulnerablePerson;
+  idempotencyKey: string;
+  message: string;
+}
+
 // What this CALL-E integration can actually be relied on to do (DEC-011).
 // Deliberately explicit rather than assumed: KinCall must never record that a
 // voicemail was left unless the integration can genuinely establish it.
@@ -81,6 +102,8 @@ export interface CalleAdapter {
   readonly capabilities: CalleCapabilities;
   startCompanionCall(input: CompanionCallInput): Promise<CallReference>;
   startFamilyCall(input: FamilyCallInput): Promise<CallReference>;
+  // DEC-023.
+  startPersonNotificationCall(input: PersonNotificationCallInput): Promise<CallReference>;
   getCallResult(callId: string): Promise<CallResult>;
 }
 

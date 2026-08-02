@@ -29,8 +29,8 @@ export interface KpiDisplay {
   sampleSize?: number;
 }
 
-// A simple count metric (check-ins, unresolved events, "no active circle",
-// …). Zero is always a genuine, displayable result.
+// A simple count metric (check-ins, events with no confirmed support, …).
+// Zero is always a genuine, displayable result.
 export function displayCount(count: number): KpiDisplay {
   return { kind: "count", text: String(count) };
 }

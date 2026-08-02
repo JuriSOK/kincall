@@ -10,6 +10,15 @@ export type EventStatus =
   | "CONTACT_DID_NOT_ANSWER"
   | "CONTACT_DECLINED"
   | "CONTACT_CONFIRMED"
+  // DEC-023. The trusted-circle outcome is settled — a contact confirmed, or
+  // the circle was exhausted — and KinCall is placing the ONE informational
+  // call back to the monitored person to tell them which it was. Deliberately
+  // its own status rather than an overload of an existing one: at
+  // CONTACT_CONFIRMED the outcome is known but the person has not been told,
+  // and those are different facts. Never terminal, and never a decision point:
+  // whatever this call does, the event proceeds to the terminal status the
+  // cascade had already earned.
+  | "NOTIFYING_PERSON"
   // Retained for backward compatibility ONLY (DEC-011). No transition produces
   // this any more: KinCall's workflow must never stall waiting for a human
   // operator. Historical events stored with it must stay readable and
@@ -81,4 +90,15 @@ export type TransitionEvent =
   // event stopping. Retained for historical ledger rows.
   | "FAMILY_CALL_NOT_POSSIBLE"
   | "NO_CONTACTS_REMAINING"
+  // DEC-023. Starts the single informational callback to the monitored person,
+  // from whichever settled trusted-circle outcome the cascade reached.
+  //
+  // There is deliberately NO matching "notification ended" event: the callback
+  // is finished with however it goes (delivered, unanswered, or failed — it is
+  // never retried), and the terminal status that follows is the one the CASCADE
+  // already earned, not one this call decides. So NOTIFYING_PERSON exits
+  // through the SAME two terminal events the cascade would have used without
+  // it — CASE_CLOSED_EVENT and NO_CONTACTS_REMAINING — which keeps the ledger
+  // honest about why the event ended.
+  | "PERSON_NOTIFICATION_STARTED"
   | "CASE_CLOSED_EVENT";

@@ -32,8 +32,10 @@ const EXPECTED_TIMELINE = [
   "No answer from Julie (attempt 2)",
   "Voicemail left",
   "Calling Marc",
-  "Marc answered",
+  "Marc confirmed they could help.",
   "Visit confirmed — 17:30",
+  "KinCall called Marie to share Marc's commitment.",
+  "The follow-up message was delivered.",
   "Case closed",
 ];
 
@@ -75,6 +77,7 @@ describe("concurrency — only one worker may process a result", () => {
       capabilities: { voicemail: true },
       startCompanionCall: w.adapter.startCompanionCall.bind(w.adapter),
       startFamilyCall: w.adapter.startFamilyCall.bind(w.adapter),
+      startPersonNotificationCall: w.adapter.startPersonNotificationCall.bind(w.adapter),
       async getCallResult(callId: string): Promise<CallResult> {
         const result = await w.adapter.getCallResult(callId);
         return result.agentType === "family"
@@ -100,15 +103,18 @@ describe("concurrency — only one worker may process a result", () => {
     const deps = w.open();
     expect((await deps.repository.getEvent(event.id))!.status).toBe("CASE_CLOSED");
     expect(await timeline(deps, event.id)).toEqual(EXPECTED_TIMELINE);
-    // One companion call + two to Julie (her bounded retry) + one to Marc: the
-    // count is what proves the race produced no DUPLICATE outbound call. Each
-    // attempt happens exactly once, and Nicole is untouched.
-    expect([...w.adapter.distinctCallIds]).toHaveLength(4);
+    // One companion call + two to Julie (her bounded retry) + one to Marc +
+    // one informational callback to Marie (DEC-023): the count is what proves
+    // the race produced no DUPLICATE outbound call. Each attempt happens
+    // exactly once, and Nicole is untouched.
+    expect([...w.adapter.distinctCallIds]).toHaveLength(5);
     expect(w.adapter.contactsCalled()).toEqual([
       "contact_julie",
       "contact_julie",
       "contact_marc",
     ]);
+    // Two racing workers, still exactly one callback.
+    expect(w.adapter.notificationMessages()).toHaveLength(1);
   });
 
   it("survives a webhook and a poll racing the same companion result", async () => {
@@ -299,6 +305,7 @@ describe("concurrency — the engine carries no state across a restart", () => {
       capabilities: stalled.calleAdapter.capabilities,
       startCompanionCall: w.adapter.startCompanionCall.bind(w.adapter),
       startFamilyCall: w.adapter.startFamilyCall.bind(w.adapter),
+      startPersonNotificationCall: w.adapter.startPersonNotificationCall.bind(w.adapter),
       async getCallResult(callId: string): Promise<CallResult> {
         const result = await w.adapter.getCallResult(callId);
         return result.agentType === "family"

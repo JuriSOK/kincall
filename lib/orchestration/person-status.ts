@@ -44,6 +44,12 @@ export function describePersonStatus(event: EventRecord | undefined): PersonStat
     case "CONTACT_DECLINED":
     case "CONTACT_CONFIRMED":
       return { label: "Contacting the trusted circle", tone: "attention" };
+    // DEC-023. The trusted-circle outcome is settled and KinCall is calling the
+    // person back to tell them. Still "in progress" from a family member's
+    // point of view — the event has not reached its terminal status yet — so it
+    // deliberately does not borrow either terminal tone.
+    case "NOTIFYING_PERSON":
+      return { label: "Calling back with the outcome", tone: "attention" };
     // DEC-011: no new event reaches this. Retained for the historical ones that
     // still carry it.
     case "HUMAN_REVIEW_REQUIRED":

@@ -5,6 +5,7 @@ import type {
   CallResult,
   CompanionCallInput,
   FamilyCallInput,
+  PersonNotificationCallInput,
 } from "@/lib/calle/adapter";
 import { FakeCalleAdapter, type FakeScenarioId } from "@/lib/calle/fake-adapter";
 
@@ -20,6 +21,9 @@ import { FakeCalleAdapter, type FakeScenarioId } from "@/lib/calle/fake-adapter"
 export class RecordingCalleAdapter implements CalleAdapter {
   readonly startCompanionCallSpy = vi.fn();
   readonly startFamilyCallSpy = vi.fn();
+  // DEC-023. Separate from the other two so a test can assert the informational
+  // callback happened EXACTLY once without disentangling it from the check-in.
+  readonly startPersonNotificationCallSpy = vi.fn();
   readonly distinctCallIds = new Set<string>();
 
   private readonly inner: FakeCalleAdapter;
@@ -53,6 +57,15 @@ export class RecordingCalleAdapter implements CalleAdapter {
     return this.remember(input.idempotencyKey, () => this.inner.startFamilyCall(input));
   }
 
+  async startPersonNotificationCall(
+    input: PersonNotificationCallInput
+  ): Promise<CallReference> {
+    this.startPersonNotificationCallSpy(input);
+    return this.remember(input.idempotencyKey, () =>
+      this.inner.startPersonNotificationCall(input)
+    );
+  }
+
   async getCallResult(callId: string): Promise<CallResult> {
     return this.inner.getCallResult(callId);
   }
@@ -61,6 +74,14 @@ export class RecordingCalleAdapter implements CalleAdapter {
   contactsCalled(): string[] {
     return this.startFamilyCallSpy.mock.calls.map(
       (call) => (call[0] as FamilyCallInput).contact.id
+    );
+  }
+
+  // The messages the informational callback carried (DEC-023). One entry per
+  // real call placed — a replay under the same idempotency key does not add one.
+  notificationMessages(): string[] {
+    return this.startPersonNotificationCallSpy.mock.calls.map(
+      (call) => (call[0] as PersonNotificationCallInput).message
     );
   }
 }

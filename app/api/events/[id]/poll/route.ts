@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCalleAdapter } from "@/lib/calle/adapter";
 import { getRepository } from "@/lib/database/store";
-import { processCompanionResult, processFamilyResult } from "@/lib/orchestration/engine";
+import { startTimer } from "@/lib/observability/timing";
+import {
+  processCompanionResult,
+  processFamilyResult,
+  processPersonNotificationResult,
+} from "@/lib/orchestration/engine";
 
 // Recovery mechanism (TECHNICAL_ARCHITECTURE.md §4): fetches whichever call is
 // currently in flight — Companion or a trusted-contact call — and processes its
@@ -30,10 +35,19 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   }
 
   const deps = { repository, calleAdapter: getCalleAdapter() };
+  // Timing only (DEC-022) — see lib/observability/timing.ts. Off unless
+  // KINCALL_TIMING=1; never persisted, never logs call content.
+  const stopTimer = startTimer(event.id, "poll_result_processed");
+  // DEC-023 adds the third purpose. Dispatched explicitly rather than by an
+  // else-branch, so a value this route does not understand fails loudly at the
+  // type level instead of silently being processed as a family result.
   const updated =
     pending.agentType === "companion"
       ? await processCompanionResult(deps, event, pending.id)
-      : await processFamilyResult(deps, event, pending.id);
+      : pending.agentType === "person_notification"
+        ? await processPersonNotificationResult(deps, event, pending.id)
+        : await processFamilyResult(deps, event, pending.id);
+  stopTimer();
 
   return NextResponse.json({ status: updated.status });
 }

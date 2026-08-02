@@ -80,6 +80,12 @@ class PerAttemptAdapter implements CalleAdapter {
     };
   }
 
+  // DEC-023. Always delivered — this file asserts cascade behaviour, which the
+  // informational callback must leave untouched.
+  async startPersonNotificationCall(input: { idempotencyKey: string }) {
+    return { callId: "pa_notification", idempotencyKey: input.idempotencyKey };
+  }
+
   async startFamilyCall(input: FamilyCallInput) {
     this.familyCalls.push(input);
     return {
@@ -100,6 +106,20 @@ class PerAttemptAdapter implements CalleAdapter {
         agentType: "companion",
         status: "completed",
         structuredResult: this.script.companion(Number(companion[1])),
+        failureCode: null,
+        failureMessage: null,
+      };
+    }
+    if (callId === "pa_notification") {
+      return {
+        callId,
+        agentType: "person_notification",
+        status: "completed",
+        structuredResult: {
+          person_reached: "yes",
+          message_delivered: "yes",
+          summary: "Message passed on.",
+        },
         failureCode: null,
         failureMessage: null,
       };
@@ -288,7 +308,7 @@ describe("trusted-contact retry (DEC-011)", () => {
 
     const messages = await timeline(d, event.id);
     expect(messages).toContain("Calling Julie again (attempt 2)");
-    expect(messages).toContain("Julie answered");
+    expect(messages).toContain("Julie confirmed they could help.");
   });
 
   it("moves to the next contact only after the retry is used up", async () => {

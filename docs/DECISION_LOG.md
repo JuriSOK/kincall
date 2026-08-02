@@ -2132,6 +2132,109 @@ Project owner approval: approved.
 
 ---
 
+## DEC-023 — Informational callback to the monitored person, and the first final README
+
+**Date:** 2 August 2026  
+**Status:** Approved
+
+### Context
+
+After DEC-022's context fix was validated by two successful controlled live tests, one gap
+remained in the product: KinCall told the trusted circle what was happening, but never told the
+monitored person how it ended. Someone who asked for help was left not knowing whether anybody was
+coming.
+
+### Decision
+
+**One informational callback, before the terminal transition.** After the trusted-circle outcome is
+settled, KinCall places exactly ONE call back to the monitored person — either "Marc confirmed that
+they will visit you this afternoon" or "Nobody in your trusted circle confirmed that they were
+available. If you still need help, please contact another person you trust directly."
+
+The standing invariant is preserved rather than bent: no call is created after `CASE_CLOSED` or
+`ATTENTION_UNRESOLVED`. A new non-terminal status, `NOTIFYING_PERSON`, sits between the settled
+outcome and the terminal transition. It has exactly two exits — `CASE_CLOSED_EVENT` and
+`NO_CONTACTS_REMAINING`, the same two the cascade would have used without it — and which one applies
+is re-derived from the PERSISTED family results (`can_intervene === "yes"`), never carried in memory,
+so a replaying worker reaches the identical terminal status.
+
+**Exactly one attempt, enforced three times over:** the operation ledger, an `attemptNumber` fixed at
+1, and migration 0014's partial unique index on `(event_id) where agent_type = 'person_notification'`.
+No retry, no new cascade, no new attention decision, no reopening, and no recursion — the callback's
+own processor cannot place a call.
+
+**The callback cannot change anything.** Delivered, unanswered, technically failed or unreadable, the
+event proceeds to the terminal status the cascade already earned, with a factual timeline entry.
+KinCall never claims a delivery it did not observe: a no-answer, a failure and an unreadable result
+all read as "could not confirm that the follow-up message was delivered", because from the person's
+point of view those are genuinely indistinguishable.
+
+**Skipped, never forced.** The person record is re-read immediately before the call, so a profile
+archived or a consent withdrawn *while the circle was being called* stops it (DEC-007, DEC-009). The
+outcome still reaches its terminal status; only the courtesy call is skipped, and the timeline says
+why.
+
+**Facts only, and no hardcoding.** The message is composed by
+`lib/orchestration/person-notification-brief.ts` from persisted, validated facts: the accepting
+contact (resolved from `callEvent.contactId`, never the model-returned `contact_id`, per DEC-005),
+the intervention type, the free-text estimated time, and — reused unchanged — DEC-022's context
+brief. Every intervention type is handled, including `other`, which falls back to the contact's own
+persisted summary rather than guessing at an action. No situation is enumerated anywhere.
+
+**Migration 0014 was unavoidable.** Two constraints in `0001_init.sql` made a third `agent_type`
+structurally impossible: the inline `check (agent_type in ('companion','family'))`, and
+`call_events_contact_matches_agent`, whose two branches both name one of those literals. 0014 widens
+both and adds the one-per-event index. The agent_type CHECK is found by introspecting its definition
+rather than by guessing Postgres's generated name, and the migration raises loudly if it cannot find
+it — dropping the wrong name would be a silent no-op that broke every notification at runtime. Purely
+widening: every existing row satisfies both replacement constraints unchanged.
+
+**Also in this change.** "No active circle" was removed from the dashboard's Operational activity: it
+is a configuration fact, not operational activity, and the Configuration gaps card already reports it
+per person with a link to fix it. The KPI grid rebalanced from four columns to three so six metrics
+divide evenly. `detectConfigurationGaps` is untouched.
+
+**README finalised.** `README.md` was rewritten as the first final-version README, with a static
+`docs/assets/kincall-logo.svg` built from the approved mark's exact geometry (the CSS custom
+properties are resolved to their literal brand values, since they do not resolve outside the app).
+It states honestly that KinCall is not an emergency service, does not diagnose, does not verify that
+a commitment was kept, has no automatic scheduler, cannot reliably detect voicemail, and still needs
+authentication before a public live deployment.
+
+### Product-scope check
+
+The callback is a new outbound call, so it is genuinely additive to the frozen flow — approved
+explicitly by the project owner for this scope. Nothing else changed: attention triggering,
+`decideCompanionAction`'s evaluation order, `can_intervene` semantics, contact order, availability
+ordering, retry bounds, attempt numbers, idempotency keys, leases, and both terminal statuses are all
+untouched. Verified by the full orchestration suite passing with only the expected additions — the
+five fake scenarios keep their original Companion calls, Family order, attempt numbers, accepting
+contact, decision and terminal status, with one extra call and three extra timeline entries each.
+
+### Consequences
+
+- New: `lib/orchestration/person-notification-brief.ts`, `prompts/person-notification-agent.ts`,
+  `supabase/migrations/0014_person_notification_calls.sql`, `docs/assets/kincall-logo.svg`,
+  `tests/person-notification-brief.test.ts`, `tests/person-notification.test.ts`.
+- `CalleAdapter` gained `startPersonNotificationCall`; `AgentType` gained `person_notification`.
+- The event page shows the callback as a plain secondary card, below the outcome, the intervention
+  card and the trusted-circle detail. No KPI was added for delivery.
+- Every fake scenario now ends with one extra call. Scenario 1 (normal close, no cascade) correctly
+  produces no callback at all.
+
+### Known limitation, unchanged
+
+The voicemail limitation from DEC-022 still applies to this call too: CALL-E exposes no
+answering-machine detection, so an unanswered callback and a voicemail are indistinguishable. The
+notification prompt carries the same bounded-ending rules, and the timeline says only that delivery
+could not be confirmed.
+
+### Approval
+
+Project owner approval: approved.
+
+---
+
 ## Decision template
 
 Copy this section for future approved decisions.

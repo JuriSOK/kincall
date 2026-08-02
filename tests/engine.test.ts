@@ -6,6 +6,7 @@ import type {
   CallStatus,
   CompanionCallInput,
   FamilyCallInput,
+  PersonNotificationCallInput,
 } from "@/lib/calle/adapter";
 import { FakeCalleAdapter } from "@/lib/calle/fake-adapter";
 import { InMemoryRepository } from "@/lib/database/in-memory-repository";
@@ -67,7 +68,38 @@ class ScriptedCalleAdapter implements CalleAdapter {
     };
   }
 
+  // DEC-023. The informational callback. Delivered by default; a test that
+  // cares about a failed or unanswered callback overrides nextNotification.
+  startPersonNotificationCallSpy = vi.fn();
+  nextNotification: unknown = {
+    person_reached: "yes",
+    message_delivered: "yes",
+    summary: "Message passed on.",
+  };
+  nextNotificationStatus: CallStatus = "completed";
+
+  async startPersonNotificationCall(
+    input: PersonNotificationCallInput
+  ): Promise<CallReference> {
+    this.startPersonNotificationCallSpy(input);
+    this.counter += 1;
+    return {
+      callId: `scripted_notification_${this.counter}`,
+      idempotencyKey: input.idempotencyKey,
+    };
+  }
+
   async getCallResult(callId: string): Promise<CallResult> {
+    if (callId.startsWith("scripted_notification_")) {
+      return {
+        callId,
+        agentType: "person_notification",
+        status: this.nextNotificationStatus,
+        structuredResult: this.nextNotification,
+        failureCode: null,
+        failureMessage: null,
+      };
+    }
     if (callId.startsWith("scripted_companion_")) {
       return {
         callId,
@@ -176,21 +208,30 @@ describe("startDemoEvent — Marie / Julie / Marc end-to-end", () => {
       // call leaves the fixed privacy-preserving message.
       "Voicemail left",
       "Calling Marc",
-      "Marc answered",
+      "Marc confirmed they could help.",
       "Visit confirmed — 17:30",
+      "KinCall called Marie to share Marc's commitment.",
+      "The follow-up message was delivered.",
       "Case closed",
     ]);
 
+    // DEC-023 adds a fifth call: the single informational callback to Marie,
+    // placed after Marc confirms and BEFORE the case closes. The four cascade
+    // calls, their order and their idempotency keys are unchanged.
     const callEvents = await deps.repository.listCallEvents(event.id);
-    expect(callEvents).toHaveLength(4);
+    expect(callEvents).toHaveLength(5);
     expect(new Set(callEvents.map((call) => call.idempotencyKey))).toEqual(
       new Set([
         `${event.runId}_companion_attempt_1`,
         `${event.runId}_contact_julie_attempt_1`,
         `${event.runId}_contact_julie_attempt_2`,
         `${event.runId}_contact_marc_attempt_1`,
+        `${event.runId}_person_notification`,
       ])
     );
+
+    // Exactly one, never retried.
+    expect(callEvents.filter((call) => call.agentType === "person_notification")).toHaveLength(1);
   });
 
   it("calls Julie twice before Marc, and Marc remains the accepting contact", async () => {
@@ -694,8 +735,10 @@ describe("family cascade — live-shaped async behaviour", () => {
       // claim one either — a model self-report is the only evidence there is.
       "No voicemail left",
       "Calling Marc",
-      "Marc answered",
+      "Marc confirmed they could help.",
       "Visit confirmed — 17:30",
+      "KinCall called Marie to share Marc's commitment.",
+      "The follow-up message was delivered.",
       "Case closed",
     ]);
   });

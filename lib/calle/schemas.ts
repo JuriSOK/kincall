@@ -201,6 +201,29 @@ export function isFamilyStructuredResult(value: unknown): value is FamilyStructu
   return true;
 }
 
+// DEC-023. The informational callback's minimal result. Deliberately records
+// ONLY whether the message reached the person — nothing here can change the
+// accepting contact, the decision, the cascade outcome or the terminal status,
+// all of which were settled before this call was placed.
+//
+// Total, like the Family schema (DEC-005): a call that reached voicemail must
+// still produce a schema-valid result rather than a malformed one.
+export interface PersonNotificationStructuredResult {
+  person_reached: YesNoUnknown;
+  message_delivered: YesNoUnknown;
+  summary: string;
+}
+
+export function isPersonNotificationStructuredResult(
+  value: unknown
+): value is PersonNotificationStructuredResult {
+  if (!isRecord(value)) return false;
+  if (!isYesNoUnknown(value.person_reached)) return false;
+  if (!isYesNoUnknown(value.message_delivered)) return false;
+  if (typeof value.summary !== "string") return false;
+  return true;
+}
+
 export interface NormalizedCompanionResult {
   neutralSummary: string;
   personReached: YesNoUnknown;

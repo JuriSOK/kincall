@@ -50,7 +50,13 @@ const TRANSITIONS: TransitionTable = {
     // Nobody eligible to call at all: an empty circle, or every contact skipped
     // for missing consent, archival or an unusable number. Terminal and visible,
     // rather than a wait for a human (DEC-011).
+    //
+    // Still reachable directly (DEC-023): this is the edge taken when the
+    // informational callback is SKIPPED — an archived or no-longer-consenting
+    // person must not be called, and the event must still reach its terminal
+    // status rather than stalling.
     NO_CONTACTS_REMAINING: "ATTENTION_UNRESOLVED",
+    PERSON_NOTIFICATION_STARTED: "NOTIFYING_PERSON",
   },
   CALLING_TRUSTED_CONTACT: {
     FAMILY_NO_ANSWER: "CONTACT_DID_NOT_ANSWER",
@@ -66,14 +72,29 @@ const TRANSITIONS: TransitionTable = {
     // one it is comes from the intent's contact id and attempt number, not from
     // the edge (DEC-011).
     FAMILY_CALL_STARTED: "CALLING_TRUSTED_CONTACT",
+    // Retained and still reachable: the callback-skipped path (DEC-023).
     NO_CONTACTS_REMAINING: "ATTENTION_UNRESOLVED",
+    PERSON_NOTIFICATION_STARTED: "NOTIFYING_PERSON",
   },
   CONTACT_DECLINED: {
     FAMILY_CALL_STARTED: "CALLING_TRUSTED_CONTACT",
     NO_CONTACTS_REMAINING: "ATTENTION_UNRESOLVED",
+    PERSON_NOTIFICATION_STARTED: "NOTIFYING_PERSON",
   },
   CONTACT_CONFIRMED: {
+    // Retained and still reachable: the callback-skipped path (DEC-023).
     CASE_CLOSED_EVENT: "CASE_CLOSED",
+    PERSON_NOTIFICATION_STARTED: "NOTIFYING_PERSON",
+  },
+  // DEC-023. The one informational callback is in flight. Both exits are
+  // terminal and neither is chosen by this call: which one applies was already
+  // settled by the cascade (a confirmation exists, or it does not), and is
+  // re-derived from the persisted family call events — so a replaying worker
+  // reaches the identical terminal status. Nothing here can start another call,
+  // reopen the event, or change the accepting contact.
+  NOTIFYING_PERSON: {
+    CASE_CLOSED_EVENT: "CASE_CLOSED",
+    NO_CONTACTS_REMAINING: "ATTENTION_UNRESOLVED",
   },
 };
 

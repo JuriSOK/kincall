@@ -3,23 +3,19 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { KpiCard } from "@/app/ui/kpi-card";
 
 describe("KpiCard", () => {
-  it("hides the sample-size label entirely when the count is zero", () => {
+  it("never renders a sample-size line — value alone carries the count", () => {
     const html = renderToStaticMarkup(
-      KpiCard({ label: "Answered", value: "Not enough data", sampleSize: 0 }) as never
+      KpiCard({ label: "Answered", value: "3 (100%)" }) as never
     );
-    expect(html).not.toMatch(/n\s*=\s*0/);
-    expect(html).not.toContain("()");
+    expect(html).not.toMatch(/n\s*=\s*\d/);
   });
 
-  it("still shows the sample-size label for a positive count", () => {
+  it("renders label and value, plus an optional caption", () => {
     const html = renderToStaticMarkup(
-      KpiCard({ label: "Answered", value: "3 (100%)", sampleSize: 3 }) as never
+      KpiCard({ label: "Check-ins", value: "12", caption: "last 30 days" }) as never
     );
-    expect(html).toContain("n = 3");
-  });
-
-  it("omits the sample-size label entirely when sampleSize is not provided (unrelated to the n=0 fix)", () => {
-    const html = renderToStaticMarkup(KpiCard({ label: "Check-ins", value: "12" }) as never);
-    expect(html).not.toContain("n =");
+    expect(html).toContain("Check-ins");
+    expect(html).toContain("12");
+    expect(html).toContain("last 30 days");
   });
 });

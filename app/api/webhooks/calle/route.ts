@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { getCalleAdapter } from "@/lib/calle/adapter";
 import { parseCalleWebhookEvent, verifyCalleWebhookSignature } from "@/lib/calle/webhook";
 import { getRepository } from "@/lib/database/store";
-import { processCompanionResult, processFamilyResult } from "@/lib/orchestration/engine";
+import {
+  processCompanionResult,
+  processFamilyResult,
+  processPersonNotificationResult,
+} from "@/lib/orchestration/engine";
 
 export async function POST(request: Request) {
   const secret = process.env.CALLE_WEBHOOK_SECRET;
@@ -64,7 +68,11 @@ export async function POST(request: Request) {
   const event = await repository.getEvent(callEvent.eventId);
   if (event) {
     const deps = { repository, calleAdapter: getCalleAdapter() };
-    if (callEvent.agentType === "companion") {
+    if (callEvent.agentType === "person_notification") {
+      // DEC-023. Never retried and never recursive — it only applies the
+      // terminal transition the cascade already earned.
+      await processPersonNotificationResult(deps, event, callEvent.id);
+    } else if (callEvent.agentType === "companion") {
       await processCompanionResult(deps, event, callEvent.id);
     } else {
       // Resumes the cascade: this contact's result is applied and, unless it

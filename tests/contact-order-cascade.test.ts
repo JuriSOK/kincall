@@ -146,7 +146,27 @@ class ScriptedAdapter implements CalleAdapter {
     };
   }
 
+  // DEC-023. Always delivered — this file's assertions are about contact
+  // ORDER, which the informational callback must not disturb.
+  async startPersonNotificationCall(input: { idempotencyKey: string }) {
+    return { callId: "sc_notification", idempotencyKey: input.idempotencyKey };
+  }
+
   async getCallResult(callId: string): Promise<CallResult> {
+    if (callId === "sc_notification") {
+      return {
+        callId,
+        agentType: "person_notification",
+        status: "completed",
+        structuredResult: {
+          person_reached: "yes",
+          message_delivered: "yes",
+          summary: "Message passed on.",
+        },
+        failureCode: null,
+        failureMessage: null,
+      };
+    }
     const companion = /^sc_companion_(\d+)$/.exec(callId);
     if (companion) {
       return {

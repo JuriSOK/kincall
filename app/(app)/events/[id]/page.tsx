@@ -12,6 +12,7 @@ import {
   describeFamilyAttempt,
   describeFamilyCascade,
   describeOwnership,
+  describePersonNotification,
   describeWorkflowStep,
   findConfirmation,
 } from "@/lib/presentation/event-summary";
@@ -49,6 +50,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const intervention = buildInterventionSummary(event, callEvents, contacts);
   const companionCalls = callEvents.filter((call) => call.agentType === "companion");
   const familyCalls = callEvents.filter((call) => call.agentType === "family");
+  // DEC-023. At most one, enforced by the operation ledger and by migration
+  // 0014's partial unique index.
+  const notificationCall = callEvents.find(
+    (call) => call.agentType === "person_notification"
+  );
 
   // The LAST companion call: after a bounded retry there are two, and the
   // decision came from the most recent one. readCompanionResult accepts the
@@ -230,6 +236,18 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               </div>
             ) : null}
           </div>
+        </Card>
+      ) : null}
+
+      {/* DEC-023. Deliberately LAST before the timeline and deliberately plain:
+          it sits below the outcome badge, the intervention card and the
+          trusted-circle detail, because who is helping matters more than
+          whether the courtesy call connected. Never a KPI, never a warning
+          tone — a callback that did not connect changes nothing about the
+          outcome above it. */}
+      {notificationCall ? (
+        <Card title={`Follow-up call to ${person?.firstName ?? "the person"}`}>
+          <p className="text-sm text-muted">{describePersonNotification(notificationCall)}</p>
         </Card>
       ) : null}
 

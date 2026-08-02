@@ -53,7 +53,25 @@ class ScriptedFamilyAdapter implements CalleAdapter {
     };
   }
 
+  async startPersonNotificationCall(input: { idempotencyKey: string }) {
+    return { callId: "archive_notification", idempotencyKey: input.idempotencyKey };
+  }
+
   async getCallResult(callId: string): Promise<CallResult> {
+    if (callId === "archive_notification") {
+      return {
+        callId,
+        agentType: "person_notification",
+        status: "completed",
+        structuredResult: {
+          person_reached: "yes",
+          message_delivered: "yes",
+          summary: "Message passed on.",
+        },
+        failureCode: null,
+        failureMessage: null,
+      };
+    }
     if (callId.startsWith("scripted_companion_")) {
       return {
         callId,

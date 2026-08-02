@@ -3,6 +3,7 @@ import { getCalleAdapter, getCalleMode } from "../calle/adapter";
 import {
   isCompanionStructuredResult,
   isFamilyStructuredResult,
+  isPersonNotificationStructuredResult,
   normalizeCompanionResult,
   readCompanionResult,
 } from "../calle/schemas";
@@ -31,6 +32,8 @@ import { orderContactsForCascade } from "./contact-order";
 import { decideCompanionAction } from "./decide-companion-action";
 import { buildFamilyContextBrief } from "./family-context-brief";
 import { handleFamilyResult } from "./handle-family-result";
+import { buildPersonNotificationBrief } from "./person-notification-brief";
+import { findConfirmation } from "../presentation/event-summary";
 import { record, timed } from "../observability/timing";
 import { attemptDiscriminator, operationKey } from "./operation-keys";
 import { isTerminalEventStatus, type TransitionEvent } from "./states";
@@ -229,7 +232,15 @@ export async function placeCallForIntent(
   // these reads would return, so nothing downstream can observe the
   // difference. The await ORDER is unchanged for every existing caller, which
   // is what tests/crash-recovery.test.ts pins.
-  preloaded?: { event: EventRecord; person: VulnerablePerson }
+  preloaded?: {
+    event: EventRecord;
+    person: VulnerablePerson;
+    // DEC-023. The already-composed callback message. Supplied by
+    // startPersonNotification, which is the only caller that can create a
+    // person_notification intent; a recovery-path caller re-composes it below
+    // from the same persisted facts.
+    notificationMessage?: string;
+  }
 ): Promise<CallEventRecord> {
   if (callEvent.calleCallId !== null) return callEvent;
 
@@ -258,7 +269,24 @@ export async function placeCallForIntent(
   let callId: string;
   try {
     const reference =
-      callEvent.agentType === "companion"
+      callEvent.agentType === "person_notification"
+        ? await deps.calleAdapter.startPersonNotificationCall({
+            eventId: event.id,
+            person,
+            idempotencyKey: callEvent.idempotencyKey,
+            // Re-composed from persisted facts when a recovery-path caller
+            // resumes a 'starting' intent it did not create (DEC-023), so the
+            // replayed call says exactly what the original would have.
+            message:
+              preloaded?.notificationMessage ??
+              (await composeNotificationMessage(
+                deps,
+                event,
+                person,
+                await settledCascadeOutcome(deps, event.id)
+              )),
+          })
+        : callEvent.agentType === "companion"
         ? await deps.calleAdapter.startCompanionCall({
             eventId: event.id,
             person,
@@ -329,6 +357,12 @@ async function supersede(
 interface CascadeStep {
   event: EventRecord;
   nextCallEventId: string | null;
+  // DEC-023. Which processor drives `nextCallEventId`. The cascade can now hand
+  // back either the next trusted-contact call or the single informational
+  // callback to the monitored person, and those are processed by different
+  // functions — so the caller is told which, rather than inferring it.
+  // Null exactly when `nextCallEventId` is null.
+  nextCallKind?: "family" | "person_notification";
 }
 
 // The two transitions that bracket one outbound check-in call. Keyed on the
@@ -570,22 +604,19 @@ async function startNextFamilyCall(
   );
 
   if (!target) {
-    // Terminal and autonomous: KinCall could not rule out a need for attention
-    // and has run out of people it may call. It does not wait for a human, and
-    // it does not contact an emergency service (DEC-011).
-    const outcome = await applyTransition(
-      deps,
-      current,
-      "NO_CONTACTS_REMAINING",
-      operationKey(options.trigger, "advance", "NO_CONTACTS_REMAINING"),
-      {
-        messages: [
-          ...skipMessages,
-          "No trusted contact confirmed they could help.",
-        ],
-      }
-    );
-    return { event: outcome.event, nextCallEventId: null };
+    // The autonomous dead end (DEC-011): KinCall could not rule out a need for
+    // attention and has run out of people it may call. It does not wait for a
+    // human, and it does not contact an emergency service.
+    //
+    // DEC-023 inserts ONE informational callback here, before the terminal
+    // transition: the person was told KinCall would try their circle, so they
+    // are told how that ended. The terminal status is unchanged either way.
+    return startPersonNotification(deps, current, {
+      trigger: options.trigger,
+      person,
+      outcome: "unresolved",
+      extraMessages: [...skipMessages, "No trusted contact confirmed they could help."],
+    });
   }
 
   const { contact: intended, attemptNumber } = target;
@@ -670,7 +701,287 @@ async function startNextFamilyCall(
     });
   }
 
-  return { event: result.event, nextCallEventId: callEvent.id };
+  return { event: result.event, nextCallEventId: callEvent.id, nextCallKind: "family" };
+}
+
+// ── The informational callback to the monitored person (DEC-023) ─────────────
+//
+// Placed ONCE, after the trusted-circle outcome is settled and BEFORE the
+// terminal transition, so the standing invariant holds unchanged: no call is
+// ever created after CASE_CLOSED or ATTENTION_UNRESOLVED.
+//
+// It is purely informational. It makes no attention decision, starts no
+// cascade, is never retried, and cannot change the accepting contact, the
+// decision, or which terminal status the event reaches — all of which were
+// settled before it was placed.
+
+type NotificationOutcomeKind = "confirmed" | "unresolved";
+
+// The event's own monitored person. Throws rather than defaulting: a call is
+// about to be placed to them, and guessing is not an option.
+async function personFor(deps: EngineDeps, event: EventRecord): Promise<VulnerablePerson> {
+  const person = await deps.repository.getPerson(event.personId);
+  if (!person) throw new Error(`Engine: unknown person "${event.personId}".`);
+  return person;
+}
+
+// Which terminal status this event has already earned. Derived from PERSISTED
+// family results rather than carried in memory, so a replaying worker that
+// shares none of this one's state reaches the identical conclusion.
+async function settledCascadeOutcome(
+  deps: EngineDeps,
+  eventId: string
+): Promise<NotificationOutcomeKind> {
+  const calls = await deps.repository.listCallEvents(eventId);
+  const confirmed = calls.some(
+    (call) =>
+      call.agentType === "family" &&
+      isFamilyStructuredResult(call.structuredResult) &&
+      call.structuredResult.can_intervene === "yes"
+  );
+  return confirmed ? "confirmed" : "unresolved";
+}
+
+// The terminal transition the settled outcome earns, applied whether or not the
+// callback happened or succeeded.
+async function closeAfterNotification(
+  deps: EngineDeps,
+  event: EventRecord,
+  outcome: NotificationOutcomeKind,
+  trigger: string,
+  extraMessages: string[] = []
+): Promise<EventRecord> {
+  if (outcome === "confirmed") {
+    const closed = await applyTransition(
+      deps,
+      event,
+      "CASE_CLOSED_EVENT",
+      operationKey(trigger, "advance", "CASE_CLOSED_EVENT"),
+      { patch: { closedAt: new Date().toISOString() }, messages: [...extraMessages, "Case closed"] }
+    );
+    return closed.event;
+  }
+
+  // closedAt is deliberately never set on the unresolved path (DEC-011): the
+  // case is finished, but nothing was resolved.
+  const unresolved = await applyTransition(
+    deps,
+    event,
+    "NO_CONTACTS_REMAINING",
+    operationKey(trigger, "advance", "NO_CONTACTS_REMAINING"),
+    { messages: extraMessages }
+  );
+  return unresolved.event;
+}
+
+// Composes the message from persisted, validated facts only — never from
+// anything held in memory across the cascade.
+async function composeNotificationMessage(
+  deps: EngineDeps,
+  event: EventRecord,
+  person: VulnerablePerson,
+  outcome: NotificationOutcomeKind
+): Promise<string> {
+  const { contextBrief } = await collectFamilyCallContext(deps, event.id, person.firstName);
+
+  if (outcome === "unresolved") {
+    return buildPersonNotificationBrief({ kind: "unresolved", personName: person.firstName }, contextBrief)
+      .message;
+  }
+
+  // The accepting contact is resolved the same way every other screen resolves
+  // it: from `callEvent.contactId`, the id KinCall itself chose when it placed
+  // the call — never from the model-returned `structured_result.contact_id`
+  // (DEC-005).
+  const [calls, contacts] = await Promise.all([
+    deps.repository.listCallEvents(event.id),
+    deps.repository.getTrustedContacts(event.personId),
+  ]);
+  const confirmation = findConfirmation(calls, contacts);
+
+  // Defensive: `outcome === "confirmed"` was derived from exactly this data, so
+  // a missing confirmation here would be a genuine inconsistency. Degrades to
+  // the unresolved wording rather than inventing a contact.
+  if (!confirmation) {
+    return buildPersonNotificationBrief({ kind: "unresolved", personName: person.firstName }, contextBrief)
+      .message;
+  }
+
+  return buildPersonNotificationBrief(
+    {
+      kind: "confirmed",
+      personName: person.firstName,
+      contactName: confirmation.contact?.firstName ?? "A trusted contact",
+      estimatedTime: confirmation.result.estimated_time,
+      interventionType: confirmation.result.intervention_type,
+      contactSummary: confirmation.result.summary,
+    },
+    contextBrief
+  ).message;
+}
+
+// Starts the single callback, or skips it and goes straight to the terminal
+// status when it must not be placed.
+async function startPersonNotification(
+  deps: EngineDeps,
+  event: EventRecord,
+  options: {
+    trigger: string;
+    person: VulnerablePerson;
+    outcome: NotificationOutcomeKind;
+    extraMessages?: string[];
+    // The accepting contact's name, for the confirmed path's timeline entry.
+    contactName?: string;
+  }
+): Promise<CascadeStep> {
+  const current = (await deps.repository.getEvent(event.id)) ?? event;
+  const extraMessages = options.extraMessages ?? [];
+
+  // Another worker already finished this event. Never place a call on top of a
+  // finished case — the same guard startNextFamilyCall applies.
+  if (isTerminalEventStatus(current.status)) {
+    return { event: current, nextCallEventId: null };
+  }
+
+  // Re-read rather than trusting the record loaded at the start of the cascade:
+  // a profile archived or a consent withdrawn WHILE the circle was being called
+  // must stop this call (DEC-007, DEC-009). The outcome still reaches its
+  // terminal status — only the courtesy call is skipped, and the timeline says
+  // why.
+  const person = (await deps.repository.getPerson(options.person.id)) ?? options.person;
+  const skipReason =
+    person.archivedAt !== null
+      ? "the profile has been removed"
+      : person.consentStatus !== "confirmed"
+        ? "consent is no longer confirmed"
+        : null;
+
+  if (skipReason) {
+    const closed = await closeAfterNotification(deps, current, options.outcome, options.trigger, [
+      ...extraMessages,
+      `KinCall did not call ${person.firstName} back — ${skipReason}.`,
+    ]);
+    return { event: closed, nextCallEventId: null };
+  }
+
+  const notificationKey = (transitionEvent: TransitionEvent) =>
+    operationKey(options.trigger, "advance", transitionEvent, "person_notification");
+
+  const started = await applyTransitionWithCallIntent(
+    deps,
+    current,
+    "PERSON_NOTIFICATION_STARTED",
+    notificationKey("PERSON_NOTIFICATION_STARTED"),
+    {
+      messages: [
+        ...extraMessages,
+        options.outcome === "confirmed"
+          ? `KinCall called ${person.firstName} to share ${options.contactName ?? "the"}'s commitment.`
+          : `KinCall called ${person.firstName} to explain that no support was confirmed.`,
+      ],
+      intent: {
+        agentType: "person_notification",
+        contactId: null,
+        // Always 1: exactly one attempt, never retried. Enforced three times
+        // over — here, by the operation ledger, and by migration 0014's partial
+        // unique index on (event_id) where agent_type = 'person_notification'.
+        attemptNumber: 1,
+        idempotencyKey: `${current.runId}_person_notification`,
+      },
+    }
+  );
+
+  if (started.conflict) {
+    return { event: started.event, nextCallEventId: null };
+  }
+
+  const message = await composeNotificationMessage(deps, started.event, person, options.outcome);
+
+  try {
+    const callEvent = await placeCallForIntent(deps, started.callEvent!, {
+      event: started.event,
+      person,
+      notificationMessage: message,
+    });
+    return {
+      event: started.event,
+      nextCallEventId: callEvent.id,
+      nextCallKind: "person_notification",
+    };
+  } catch (error) {
+    if (!(error instanceof CallStartFailedError)) throw error;
+    // DEC-023: a callback that could not even be placed changes nothing about
+    // the trusted-circle outcome. Recorded factually, never retried, and the
+    // event still reaches the terminal status it earned.
+    const detail = error.cause instanceof Error ? error.cause.message : "unknown error";
+    const closed = await closeAfterNotification(
+      deps,
+      started.event,
+      options.outcome,
+      options.trigger,
+      [`KinCall could not confirm that the follow-up message was delivered — ${detail}`]
+    );
+    return { event: closed, nextCallEventId: null };
+  }
+}
+
+// Fetches the callback's result and applies the terminal transition. Exported
+// so the poll route and the webhook resume it exactly like the other two.
+//
+// Deliberately makes NO decision: whatever this result says — delivered,
+// unanswered, technically failed, or unreadable — the event proceeds to the
+// terminal status the cascade already earned. There is no retry and no
+// recursion, so this can never place another call.
+export async function processPersonNotificationResult(
+  deps: EngineDeps,
+  event: EventRecord,
+  callEventId: string
+): Promise<EventRecord> {
+  const reread = async () => (await deps.repository.getEvent(event.id)) ?? event;
+
+  const callEvent = await prepareCallEvent(deps, callEventId);
+  if (!callEvent) return reread();
+
+  const rawResult = await deps.calleAdapter.getCallResult(callEvent.calleCallId!);
+
+  // Live mode only: still ringing. Leave the event at NOTIFYING_PERSON and take
+  // no lease, so a later webhook or poll finishes it.
+  if (rawResult.status === "queued" || rawResult.status === "in_progress") {
+    return reread();
+  }
+
+  const lease = await deps.repository.claimCallEventResult(callEventId, getLeaseSeconds());
+  if (!lease) return reread();
+
+  try {
+    const current = await reread();
+    const outcome = await settledCascadeOutcome(deps, current.id);
+
+    const delivered =
+      rawResult.status === "completed" &&
+      isPersonNotificationStructuredResult(rawResult.structuredResult) &&
+      rawResult.structuredResult.message_delivered === "yes";
+
+    // Never claims delivery that was not reported. "Could not confirm" covers
+    // a no-answer, a technical failure and an unreadable result alike —
+    // KinCall genuinely cannot tell them apart from the person's point of view.
+    const message = delivered
+      ? "The follow-up message was delivered."
+      : "KinCall could not confirm that the follow-up message was delivered.";
+
+    const persisted =
+      rawResult.status === "completed" &&
+      isPersonNotificationStructuredResult(rawResult.structuredResult)
+        ? completedOutcome(rawResult.structuredResult.summary, rawResult.structuredResult)
+        : completedOutcome();
+
+    const closed = await closeAfterNotification(deps, current, outcome, callEventId, [message]);
+    await deps.repository.finalizeCallEventResult(callEventId, lease.token, persisted);
+    return closed;
+  } catch (error) {
+    await deps.repository.releaseCallEventLease(callEventId, lease.token);
+    throw error;
+  }
 }
 
 // Resolves the call event to work on, resuming an intent whose CALL-E request
@@ -786,7 +1097,11 @@ export async function processCompanionResult(
       });
       await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
       if (!step.nextCallEventId) return step.event;
-      return processFamilyResult(deps, step.event, step.nextCallEventId);
+      // DEC-023: an empty or fully-skipped circle now routes through the
+      // informational callback before its terminal transition.
+      return step.nextCallKind === "person_notification"
+        ? processPersonNotificationResult(deps, step.event, step.nextCallEventId)
+        : processFamilyResult(deps, step.event, step.nextCallEventId);
     };
 
     // ── A call that never produced a conversation ─────────────────────────────
@@ -816,7 +1131,11 @@ export async function processCompanionResult(
       });
       await deps.repository.finalizeCallEventResult(callEventId, lease.token, completedOutcome());
       if (!step.nextCallEventId) return step.event;
-      return processFamilyResult(deps, step.event, step.nextCallEventId);
+      // DEC-023: an empty or fully-skipped circle now routes through the
+      // informational callback before its terminal transition.
+      return step.nextCallKind === "person_notification"
+        ? processPersonNotificationResult(deps, step.event, step.nextCallEventId)
+        : processFamilyResult(deps, step.event, step.nextCallEventId);
     }
 
     // ── A result KinCall cannot validate ─────────────────────────────────────
@@ -850,7 +1169,11 @@ export async function processCompanionResult(
         unreadableOutcome
       );
       if (!step.nextCallEventId) return step.event;
-      return processFamilyResult(deps, step.event, step.nextCallEventId);
+      // DEC-023: an empty or fully-skipped circle now routes through the
+      // informational callback before its terminal transition.
+      return step.nextCallKind === "person_notification"
+        ? processPersonNotificationResult(deps, step.event, step.nextCallEventId)
+        : processFamilyResult(deps, step.event, step.nextCallEventId);
     }
 
     const structuredResult = rawResult.structuredResult;
@@ -999,7 +1322,12 @@ export async function processFamilyResult(
     });
     await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
     if (!step.nextCallEventId) return step.event;
-    return processFamilyResult(deps, step.event, step.nextCallEventId);
+    // DEC-023: the cascade can now hand back either the next contact's call or
+    // the single informational callback, and they are driven by different
+    // processors.
+    return step.nextCallKind === "person_notification"
+      ? processPersonNotificationResult(deps, step.event, step.nextCallEventId)
+      : processFamilyResult(deps, step.event, step.nextCallEventId);
   };
 
   try {
@@ -1074,20 +1402,24 @@ export async function processFamilyResult(
         ? `Visit confirmed — ${structuredResult.estimated_time}`
         : "Intervention confirmed";
       const confirmed = await applyTransition(deps, event, "FAMILY_CONFIRMED", key("FAMILY_CONFIRMED"), {
-        messages: [`${contact.firstName} answered`, detail],
+        messages: [`${contact.firstName} confirmed they could help.`, detail],
       });
       if (confirmed.conflict) return supersede(deps, event, callEventId, lease, outcome);
 
-      const closed = await applyTransition(
-        deps,
-        confirmed.event,
-        "CASE_CLOSED_EVENT",
-        key("CASE_CLOSED_EVENT"),
-        { patch: { closedAt: new Date().toISOString() }, messages: ["Case closed"] }
-      );
-      if (closed.conflict) return supersede(deps, event, callEventId, lease, outcome);
+      // DEC-023: tell the person before closing. Same ordering rule `advance`
+      // below already follows — the next call's intent durably exists before
+      // this result is finalized, so a crash in between leaves this result
+      // reclaimable and the replay recovers that intent rather than skipping
+      // straight to a close the person was never told about.
+      const step = await startPersonNotification(deps, confirmed.event, {
+        trigger: callEventId,
+        person: await personFor(deps, confirmed.event),
+        outcome: "confirmed",
+        contactName: contact.firstName,
+      });
       await deps.repository.finalizeCallEventResult(callEventId, lease.token, outcome);
-      return closed.event;
+      if (!step.nextCallEventId) return step.event;
+      return processPersonNotificationResult(deps, step.event, step.nextCallEventId);
     }
 
     if (

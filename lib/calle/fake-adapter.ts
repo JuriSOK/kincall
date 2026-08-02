@@ -6,8 +6,13 @@ import type {
   CallResult,
   CompanionCallInput,
   FamilyCallInput,
+  PersonNotificationCallInput,
 } from "./adapter";
-import type { CompanionStructuredResult, FamilyStructuredResult } from "./schemas";
+import type {
+  CompanionStructuredResult,
+  FamilyStructuredResult,
+  PersonNotificationStructuredResult,
+} from "./schemas";
 
 // Canned scenarios for fake mode. Each one exercises a different autonomous path
 // end to end without placing a single real call (DEC-011). They are DEMO DATA:
@@ -140,6 +145,21 @@ function declines(contactId: string, firstName: string): FamilyStructuredResult 
   };
 }
 
+// DEC-023. The three deterministic outcomes of the informational callback.
+// Exported so a test can assert against the exact object the engine persisted
+// rather than re-declaring it and drifting.
+export const NOTIFICATION_DELIVERED: PersonNotificationStructuredResult = {
+  person_reached: "yes",
+  message_delivered: "yes",
+  summary: "The follow-up message was passed on.",
+};
+
+export const NOTIFICATION_NOT_ANSWERED: PersonNotificationStructuredResult = {
+  person_reached: "no",
+  message_delivered: "no",
+  summary: "The call was not answered.",
+};
+
 export interface FakeScenario {
   // Shown in the fake-mode scenario selector.
   label: string;
@@ -150,6 +170,13 @@ export interface FakeScenario {
   voicemail: boolean;
   companion(attemptNumber: number): CompanionStructuredResult;
   family(contactId: string, attemptNumber: number): FamilyStructuredResult;
+  // DEC-023. The single informational callback to the monitored person. Every
+  // scenario delivers it by default (`NOTIFICATION_DELIVERED`), because the
+  // interesting demo outcome is the cascade, not this call. The unanswered and
+  // technically-failed variants exist so tests can prove the terminal status is
+  // reached regardless — see tests/person-notification.test.ts. Optional so a
+  // scenario that says nothing about it keeps the delivered default.
+  notification?(): PersonNotificationStructuredResult | "failed";
 }
 
 // Explicit union rather than `keyof typeof`: the annotation below is what gives
@@ -251,7 +278,7 @@ export function isFakeScenarioId(value: unknown): value is FakeScenarioId {
 // any already-persisted fake call id still use — those default to attempt 1 and
 // the default scenario.
 const CALL_ID_PATTERN =
-  /^fake_(companion|family)_(?:([a-z_]+)#(\d+)_)?(.+)_([0-9a-f-]{36})$/;
+  /^fake_(companion|family|person_notification)_(?:([a-z_]+)#(\d+)_)?(.+)_([0-9a-f-]{36})$/;
 
 function encodeCallId(
   agentType: AgentType,
@@ -318,9 +345,45 @@ export class FakeCalleAdapter implements CalleAdapter {
     };
   }
 
+  // DEC-023. Attempt is always 1 — there is exactly one, never retried — so it
+  // is encoded as 1 rather than taken from an input field that does not exist.
+  async startPersonNotificationCall(
+    input: PersonNotificationCallInput
+  ): Promise<CallReference> {
+    return {
+      callId: encodeCallId("person_notification", input.person.id, this.scenario, 1),
+      idempotencyKey: input.idempotencyKey,
+    };
+  }
+
   async getCallResult(callId: string): Promise<CallResult> {
     const { agentType, subjectId, scenario, attemptNumber } = decodeCallId(callId);
     const definition = FAKE_SCENARIOS[scenario];
+
+    // DEC-023. Handled before the companion guard below: a notification is
+    // placed to whichever person the event belongs to, including profiles no
+    // canned companion scenario was ever authored for.
+    if (agentType === "person_notification") {
+      const outcome = definition.notification?.() ?? NOTIFICATION_DELIVERED;
+      if (outcome === "failed") {
+        return {
+          callId,
+          agentType,
+          status: "failed",
+          structuredResult: null,
+          failureCode: "fake_notification_failure",
+          failureMessage: "Simulated technical failure on the informational callback.",
+        };
+      }
+      return {
+        callId,
+        agentType,
+        status: "completed",
+        structuredResult: outcome,
+        failureCode: null,
+        failureMessage: null,
+      };
+    }
 
     // Every scenario is authored about the seeded demo person, so a companion
     // call to anyone else must fail loudly rather than reporting Marie's fall
