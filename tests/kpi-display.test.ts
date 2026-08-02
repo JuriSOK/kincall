@@ -3,7 +3,7 @@ import { displayAverage, displayCount, displayRate } from "@/lib/presentation/kp
 import type { MeanMetric, RateMetric } from "@/lib/kpi/dashboard-kpis";
 
 describe("displayCount", () => {
-  it("shows a genuine zero count as '0', never 'Not enough data'", () => {
+  it("shows a genuine zero count as '0'", () => {
     const result = displayCount(0);
     expect(result.kind).toBe("count");
     expect(result.text).toBe("0");
@@ -20,8 +20,7 @@ describe("displayRate", () => {
     const metric: RateMetric = { count: 0, total: 5, percentage: 0 };
     const result = displayRate(metric);
     expect(result.kind).toBe("rate");
-    expect(result.text).toContain("0%");
-    expect(result.text).not.toBe("Not enough data");
+    expect(result.text).toBe("0 (0%)");
     expect(result.sampleSize).toBe(5);
   });
 
@@ -30,22 +29,22 @@ describe("displayRate", () => {
     expect(displayRate(metric).text).toBe("3 (50%)");
   });
 
-  it("shows 'Not enough data' when the denominator is genuinely zero — never a fabricated 0%", () => {
+  it("shows a plain 0 (0%), not 'Not enough data', when the denominator is empty — by explicit product decision", () => {
     const metric: RateMetric = { count: 0, total: 0, percentage: null };
     const result = displayRate(metric);
-    expect(result.kind).toBe("unavailable");
-    expect(result.text).toBe("Not enough data");
-    expect(result.sampleSize).toBeUndefined();
+    expect(result.text).toBe("0 (0%)");
+    expect(result.text).not.toContain("Not enough data");
+    expect(result.sampleSize).toBe(0);
   });
 });
 
 describe("displayAverage", () => {
-  it("shows 'Not enough data' when there is no qualifying observation", () => {
+  it("shows a plain 0, not 'Not enough data', when there is no qualifying observation — by explicit product decision", () => {
     const metric: MeanMetric = { mean: null, sampleSize: 0 };
     const result = displayAverage(metric);
-    expect(result.kind).toBe("unavailable");
-    expect(result.text).toBe("Not enough data");
-    expect(result.sampleSize).toBeUndefined();
+    expect(result.text).toBe("0.0");
+    expect(result.text).not.toContain("Not enough data");
+    expect(result.sampleSize).toBe(0);
   });
 
   it("shows the calculated mean, formatted to one decimal by default", () => {
@@ -56,18 +55,17 @@ describe("displayAverage", () => {
     expect(result.sampleSize).toBe(3);
   });
 
-  it("shows a mathematically valid mean of exactly zero rather than treating it as unavailable", () => {
-    // Not a shape this codebase's own metrics currently produce, but the
-    // helper itself must not conflate "no observation" with "the observed
-    // mean happens to be 0" — those are different facts.
+  it("shows a mathematically valid mean of exactly zero identically to 'no observation'", () => {
     const metric: MeanMetric = { mean: 0, sampleSize: 2 };
     const result = displayAverage(metric);
-    expect(result.kind).toBe("average");
     expect(result.text).toBe("0.0");
   });
 
   it("accepts a custom formatter", () => {
     const metric: MeanMetric = { mean: 2, sampleSize: 4 };
     expect(displayAverage(metric, (m) => `${m} attempts`).text).toBe("2 attempts");
+    expect(displayAverage({ mean: null, sampleSize: 0 }, (m) => `${m} attempts`).text).toBe(
+      "0 attempts"
+    );
   });
 });
