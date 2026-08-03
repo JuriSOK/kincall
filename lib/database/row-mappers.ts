@@ -6,7 +6,6 @@ import type {
   CallEventRecord,
   CallEventStatus,
   ConsentStatus,
-  EventOperationRecord,
   EventRecord,
   ScheduleState,
   TimelineEntry,
@@ -251,26 +250,7 @@ export function toTimelineEntry(row: TimelineRow): TimelineEntry {
   };
 }
 
-export interface EventOperationRow {
-  id: number;
-  event_id: string;
-  operation_key: string;
-  transition_event: string;
-  from_status: string;
-  to_status: string;
-  call_event_id: string | null;
-  created_at: string;
-}
-
-export function toEventOperation(row: EventOperationRow): EventOperationRecord {
-  return {
-    id: row.id,
-    eventId: row.event_id,
-    operationKey: row.operation_key,
-    transitionEvent: row.transition_event,
-    fromStatus: row.from_status as EventStatus,
-    toStatus: row.to_status as EventStatus,
-    callEventId: row.call_event_id,
-    createdAt: requiredIso(row.created_at),
-  };
-}
+// No `event_operations` row mapper: the Supabase repository never reads those
+// rows back as records. `findAppliedOperation` only needs to know whether a row
+// EXISTS, so it selects a single column and checks for a hit — the ledger's
+// contents are never rendered or reasoned about, only its presence.

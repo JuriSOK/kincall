@@ -24,6 +24,11 @@
 .DS_Store
 *.pem
 
+# editor/IDE workspace state — machine-specific, never shared
+.vscode/
+.idea/
+*.swp
+
 # debug
 npm-debug.log*
 yarn-debug.log*

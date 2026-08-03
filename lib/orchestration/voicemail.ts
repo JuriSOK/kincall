@@ -78,21 +78,3 @@ export function describeVoicemailFromResult(
   if (attemptNumber < maxAttempts) return "Not attempted";
   return result?.voicemail_left === "yes" ? "Left" : "None left";
 }
-
-// Plain-language label for the event page.
-export function describeVoicemailForDisplay(outcome: VoicemailOutcome): string {
-  switch (outcome.kind) {
-    case "not_attempted":
-      return "Not attempted";
-    case "unavailable":
-      return "Unavailable — KinCall could not leave or confirm a message";
-    case "left":
-      return "Left";
-    case "not_left":
-      return "None left";
-    default: {
-      const exhaustive: never = outcome;
-      return exhaustive;
-    }
-  }
-}

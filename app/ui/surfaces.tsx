@@ -138,13 +138,6 @@ export function EmptyState({
   );
 }
 
-/** A non-animated placeholder. Non-animated on purpose: a pulsing block is the
- *  first thing to become uncomfortable for motion-sensitive users, and the
- *  reduced-motion rule in tokens.css would strip the animation anyway. */
-export function Skeleton({ className = "h-4 w-full" }: { className?: string }) {
-  return <div aria-hidden className={`rounded-kc-sm bg-sunken ${className}`} />;
-}
-
 /** A labelled key/value row, for the many "field: value" lines across pages. */
 export function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
