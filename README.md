@@ -5,10 +5,11 @@
 <h1 align="center">KinCall</h1>
 
 <p align="center">
-  <strong>AI-powered phone check-ins and trusted-circle coordination.</strong>
+  <strong>Agent-powered phone check-ins with deterministic trusted-circle orchestration.</strong>
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/CALL--E-Hackathon%202026-8b5cf6" alt="CALL-E Hackathon 2026" />
   <img src="https://img.shields.io/badge/status-functional%20MVP-2fc6c6" alt="Functional MVP" />
   <img src="https://img.shields.io/badge/tests-925%20passing-163f6b" alt="925 tests passing" />
   <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 16" />
@@ -16,103 +17,383 @@
   <img src="https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e" alt="Supabase PostgreSQL" />
 </p>
 
+<p align="center">
+  Built for <strong>CALL-E: Your Code Is Calling</strong>.
+</p>
+
 ---
 
 ## Overview
 
-KinCall is a phone-based check-in and family coordination system for people who may benefit from regular contact.
+KinCall is an agent-powered phone check-in and coordination system designed for people who may benefit from regular contact.
 
-It conducts a natural conversation, records a factual summary, applies deterministic attention rules, and contacts the person’s trusted circle when human support may be needed.
+Specialized voice agents conduct natural conversations and return structured outputs. A deterministic orchestration engine then follows an explicit decision tree to close the check-in, activate the trusted-circle cascade, or report that no support was confirmed.
 
-KinCall is not a medical device or an emergency service. It does not diagnose, assess medical severity, or contact emergency services.
+> **Agents understand the conversation. The orchestration engine decides what happens next.**
+
+KinCall is not a medical device or an emergency service. It does not diagnose, perform medical triage, or contact emergency services.
+
+---
+
+## The problem
+
+A regular phone call can reveal that someone needs help, but the main challenge begins after the conversation.
+
+Someone still needs to:
+
+- understand what was actually said;
+- decide whether human attention is required;
+- identify the right trusted contact;
+- communicate the context clearly;
+- avoid duplicate or inconsistent actions;
+- inform the monitored person of the final outcome;
+- maintain an accessible history of the event.
+
+KinCall turns that coordination process into a structured, deterministic and recoverable agent workflow.
 
 ---
 
 ## How it works
 
-1. KinCall calls the monitored person.
-2. The conversation is converted into a factual structured summary.
-3. Deterministic rules decide whether attention is required.
-4. When needed, trusted contacts are called one at a time.
-5. The cascade stops when someone confirms they can help, or when the circle is exhausted.
-6. KinCall calls the monitored person back with the outcome.
-7. The full event is recorded in the dashboard and history.
+1. A **Companion Agent** calls the monitored person.
+2. The conversation is transformed into a factual structured output.
+3. The **Orchestration Engine** validates and normalizes the result.
+4. A deterministic **decision tree** selects the next workflow action.
+5. When attention is required, **Family Agents** contact the trusted circle sequentially.
+6. The cascade stops when a contact confirms they can help or the circle is exhausted.
+7. A **Notification Agent** calls the monitored person back with the outcome.
+8. The complete event is persisted and displayed in the dashboard.
 
 ```mermaid
 flowchart TD
-    A["Check-in call"] --> B["Factual conversation summary"]
-    B --> C{"Attention required?"}
+    A["Companion Agent<br/>calls the monitored person"] --> B["Structured output<br/>facts, signals and summary"]
 
-    C -->|"No"| D["Close the check-in"]
-    C -->|"Yes"| E["Contact trusted circle"]
+    B --> C["Validation and normalization"]
+    C --> D{"Deterministic<br/>decision tree"}
 
-    E --> F{"Can this contact help?"}
-    F -->|"Yes"| G["Record confirmed support"]
-    F -->|"No / No answer"| H{"More contacts?"}
+    D -->|"No attention required"| E["Close the check-in"]
+    D -->|"Attention required"| F["Start trusted-circle cascade"]
 
-    H -->|"Yes"| E
-    H -->|"No"| I["No confirmed support"]
+    F --> G["Family Agent<br/>calls the next eligible contact"]
+    G --> H{"Can the contact help?"}
 
-    G --> J["Inform the monitored person"]
-    I --> J
+    H -->|"Yes"| I["Record confirmed support"]
+    H -->|"No / Unknown / No answer"| J{"More contacts available?"}
 
-    J --> K["Record the complete event"]
-    D --> K
+    J -->|"Yes"| G
+    J -->|"No"| K["No confirmed support"]
+
+    I --> L["Notification Agent<br/>communicates the outcome"]
+    K --> L
+
+    L --> M["Persist the final event state"]
+    E --> M
 ```
 
 ---
 
-## Core capabilities
+## Agent architecture
 
-| Capability | Description |
+KinCall uses specialized agents with clearly separated responsibilities.
+
+| Component | Responsibility |
 |---|---|
-| **Telephone check-ins** | CALL-E voice agents conduct natural phone conversations with the monitored person. |
-| **Factual context propagation** | The specific context shared during the check-in is passed to every trusted contact involved in the event. |
-| **Deterministic attention rules** | Language models structure the conversation, while application rules determine what happens next. |
-| **Trusted-circle cascade** | Contacts are called sequentially until one confirms they can help or the circle is exhausted. |
-| **Bounded retries** | Retry limits are explicit, persisted and enforced consistently. |
-| **Availability-aware ordering** | Contact availability may change who is called first, but never delays the cascade or permanently excludes someone. |
-| **Informational callback** | After the cascade, KinCall calls the monitored person once to communicate the outcome. |
-| **Intervention summaries** | Confirmed commitments are displayed with the contact, intended action and estimated timing when available. |
-| **No confirmed support state** | Events remain visibly unresolved when nobody confirms they can help. |
-| **Profiles and trusted circles** | Each profile includes contact preferences, schedule configuration and an ordered trusted circle. |
-| **Dashboard and history** | Daily summaries, operational metrics, event timelines and historical activity are available in one interface. |
-| **Crash-safe orchestration** | Durable call intents, operation keys and processing leases prevent duplicated calls during retries or restarts. |
-| **Accessibility foundations** | Semantic controls, keyboard navigation, visible focus and reduced-motion support are built into the interface. |
+| **Companion Agent** | Conducts the initial check-in and extracts a factual structured result from the conversation. |
+| **Family Agent** | Contacts one trusted-circle member and asks whether they can help with the specific situation. |
+| **Notification Agent** | Calls the monitored person back to communicate the confirmed or unresolved outcome. |
+| **Orchestration Engine** | Applies the decision tree, controls transitions, selects contacts, handles retries and guarantees workflow consistency. |
 
-> [!NOTE]
-> Automatic production scheduling is not implemented yet. Schedule preferences are stored and displayed, while check-ins are currently initiated manually.
+The agents interpret natural-language conversations, but they do not control the workflow.
+
+They cannot independently:
+
+- select the next trusted contact;
+- change retry limits;
+- close an event;
+- skip the cascade;
+- alter a terminal outcome;
+- create additional calls.
+
+Those decisions remain inside the deterministic orchestration layer.
 
 ---
 
-## Architecture
+## From conversation to decision
 
-KinCall separates conversational AI from operational decisions.
+The Companion Agent converts natural language into a validated structured result.
 
-CALL-E handles phone conversations and produces structured results. A deterministic TypeScript state machine owns event progression, retries, contact selection and terminal outcomes.
+For example:
+
+```json
+{
+  "person_reached": "yes",
+  "explicit_help_requested": "yes",
+  "neutral_summary": "Claire would like help completing an administrative document."
+}
+```
+
+The orchestration engine then applies an explicit business rule:
+
+```text
+explicit_help_requested = yes
+            │
+            ▼
+    ATTENTION_REQUIRED
+            │
+            ▼
+Start trusted-circle cascade
+```
+
+The AI model interprets the conversation.
+
+The decision tree determines the operational action.
+
+This separation makes the workflow:
+
+- predictable;
+- reproducible;
+- testable;
+- observable;
+- auditable;
+- independent from model variability.
+
+---
+
+## Trusted-circle orchestration
+
+When attention is required, KinCall activates a controlled sequential cascade.
+
+```text
+Julie
+  │
+  ├── Confirms support
+  │         │
+  │         ▼
+  │    Stop cascade
+  │
+  └── Declines / no answer
+                    │
+                    ▼
+                  Marc
+                    │
+                    ├── Confirms support
+                    │         │
+                    │         ▼
+                    │    Stop cascade
+                    │
+                    └── Declines / no answer
+                                      │
+                                      ▼
+                                  Next contact
+```
+
+The orchestration engine manages:
+
+- contact priority;
+- availability windows;
+- consent status;
+- active call attempts;
+- bounded retries;
+- confirmed commitments;
+- unresolved outcomes;
+- notification callbacks;
+- idempotency;
+- crash recovery.
+
+Only one trusted contact is called at a time.
+
+---
+
+## Context propagation
+
+KinCall preserves the factual context of the initial conversation throughout the workflow.
+
+For example:
+
+```text
+Monitored person:
+
+“I need help completing an administrative document.”
+```
+
+The Family Agent receives:
+
+```text
+“Claire told KinCall that she would like help completing
+an administrative document.”
+```
+
+The context is not reduced to a generic message such as:
+
+```text
+“Claire needs help.”
+```
+
+The same factual context is reused for every contact involved in the event.
+
+No use case is hardcoded. The contextual brief is generated from the validated structured output and can represent administrative, practical or previously unseen situations.
+
+---
+
+## Decision tree
+
+The decision layer is deterministic and model-independent.
+
+A simplified Companion decision tree looks like this:
+
+```mermaid
+flowchart TD
+    A["Companion structured result"] --> B{"Was the person reached?"}
+
+    B -->|"No"| C{"Retry available?"}
+    C -->|"Yes"| D["Retry Companion call"]
+    C -->|"No"| E["Attention required"]
+
+    B -->|"Yes"| F{"Explicit help requested?"}
+    F -->|"Yes"| E
+    F -->|"No"| G{"Attention signal detected?"}
+
+    G -->|"Yes"| E
+    G -->|"No"| H{"All closing conditions satisfied?"}
+
+    H -->|"Yes"| I["Close the check-in"]
+    H -->|"No / Unknown"| E
+
+    E --> J["Start trusted-circle cascade"]
+```
+
+A language model never directly decides to call Julie, Marc or another contact.
+
+It only returns structured facts that the engine evaluates.
+
+---
+
+## Event state machine
+
+The orchestration engine progresses through explicit event states.
+
+```mermaid
+stateDiagram-v2
+    [*] --> SCHEDULED
+
+    SCHEDULED --> CALLING_PERSON
+    CALLING_PERSON --> CONVERSATION_IN_PROGRESS
+    CONVERSATION_IN_PROGRESS --> ANALYSING_CONVERSATION
+
+    ANALYSING_CONVERSATION --> CASE_CLOSED: No attention required
+    ANALYSING_CONVERSATION --> ATTENTION_REQUIRED: Attention required
+
+    ATTENTION_REQUIRED --> CALLING_TRUSTED_CONTACT
+
+    CALLING_TRUSTED_CONTACT --> CONTACT_DECLINED
+    CALLING_TRUSTED_CONTACT --> CONTACT_DID_NOT_ANSWER
+    CALLING_TRUSTED_CONTACT --> CONTACT_CONFIRMED
+
+    CONTACT_DECLINED --> CALLING_TRUSTED_CONTACT: Next contact
+    CONTACT_DID_NOT_ANSWER --> CALLING_TRUSTED_CONTACT: Retry or next contact
+
+    CONTACT_CONFIRMED --> NOTIFYING_PERSON
+    ATTENTION_REQUIRED --> NOTIFYING_PERSON: Circle exhausted
+
+    NOTIFYING_PERSON --> CASE_CLOSED: Support confirmed
+    NOTIFYING_PERSON --> ATTENTION_UNRESOLVED: No support confirmed
+```
+
+The outcome notification is part of the workflow and occurs before the event reaches its terminal state.
+
+---
+
+## Core features
+
+| Feature | Description |
+|---|---|
+| **Specialized voice agents** | Companion, Family and Notification agents handle separate stages of the phone workflow. |
+| **Structured outputs** | Natural conversations are converted into validated facts, signals and neutral summaries. |
+| **Deterministic decision tree** | Explicit business rules control every operational decision. |
+| **Trusted-circle cascade** | Contacts are called sequentially until support is confirmed or the circle is exhausted. |
+| **Context-aware Family Agents** | Every contact receives the relevant factual context from the original check-in. |
+| **Availability-aware ordering** | Contact availability may influence call order without permanently excluding anyone. |
+| **Bounded retries** | Retry limits are explicit, persisted and consistently enforced. |
+| **Outcome notification** | The monitored person receives one final informational call after the cascade. |
+| **Intervention summaries** | KinCall records who committed, what they intend to do and when, when available. |
+| **Unresolved outcomes** | Exhausted cascades end visibly as **No confirmed support**. |
+| **Event timeline** | Calls, transitions and outcomes are recorded chronologically. |
+| **Operational dashboard** | Profiles, check-ins, activity metrics and event history are available from one interface. |
+| **Idempotent orchestration** | Duplicate webhooks, polls or workers cannot intentionally create duplicate workflow actions. |
+| **Crash recovery** | Durable operation records allow interrupted workflows to resume safely. |
+| **Accessibility foundations** | Keyboard controls, semantic markup, visible focus and reduced-motion support. |
+
+> [!NOTE]
+> Schedule preferences and next planned check-ins are already calculated and displayed. Automatic production scheduling is not implemented yet.
+
+---
+
+## System architecture
+
+KinCall follows an event-driven architecture built around a deterministic state machine.
 
 ```mermaid
 flowchart LR
-    UI["Next.js application<br/>Dashboard · Profiles · History"]
+    UI["Next.js application<br/>Dashboard · Profiles · Events"]
 
-    subgraph CORE["KinCall core"]
-        ENGINE["Orchestration engine"]
-        RULES["Deterministic decision rules"]
-        ENGINE --- RULES
+    subgraph ENGINE["KinCall Orchestration Engine"]
+        STATE["State machine"]
+        TREE["Decision tree"]
+        CASCADE["Trusted-circle cascade"]
+        RECOVERY["Idempotency and recovery"]
+
+        STATE --> TREE
+        TREE --> CASCADE
+        CASCADE --> RECOVERY
     end
 
-    ADAPTER["CALL-E adapter"]
-    DATABASE[("Supabase / PostgreSQL")]
-    VOICE["CALL-E voice platform"]
+    ADAPTER["CALL-E Adapter"]
+    DB[("Supabase / PostgreSQL")]
+    VOICE["CALL-E Voice Platform"]
 
     UI --> ENGINE
-    ENGINE <--> DATABASE
+    ENGINE <--> DB
     ENGINE --> ADAPTER
     ADAPTER --> VOICE
     VOICE -->|"Webhook or polling"| ENGINE
 ```
 
-Each outbound call is persisted before the external request is sent. Results are processed through idempotent operations and time-bounded leases, allowing interrupted workflows to recover without creating duplicate calls.
+### Separation of understanding and decision-making
+
+```text
+Voice conversation
+        │
+        ▼
+AI interpretation
+        │
+        ▼
+Structured output
+        │
+        ▼
+Validation and normalization
+        │
+        ▼
+Deterministic decision tree
+        │
+        ▼
+Orchestrated action
+```
+
+### Durable call intents
+
+Every outbound call is persisted as an intent before the external request is sent.
+
+This prevents a process interruption from leaving an external call that KinCall cannot recover or identify.
+
+### Idempotent operations
+
+Each orchestration step uses a stable operation key.
+
+Replaying the same webhook, poll or worker operation becomes a no-op instead of creating a second action.
+
+### Processing leases
+
+Call results are processed under time-bounded leases so that multiple workers cannot advance the same workflow simultaneously.
 
 ---
 
@@ -120,12 +401,13 @@ Each outbound call is persisted before the external request is sent. Results are
 
 | Layer | Technology |
 |---|---|
-| Web framework | Next.js 16, React 19 |
+| Frontend | Next.js 16, React 19 |
 | Language | TypeScript 5 |
 | Styling | Tailwind CSS v4 |
+| Orchestration | Deterministic state machine and decision tree |
+| Voice agents | CALL-E REST API |
 | Database | Supabase / PostgreSQL |
-| Voice integration | CALL-E REST API |
-| Validation | Runtime schemas and server-side validation |
+| Validation | Runtime schemas and normalized structured outputs |
 | Testing | Vitest |
 | Runtime | Node.js `^20.9.0 \|\| >=22.0.0` |
 
@@ -136,22 +418,27 @@ Each outbound call is persisted before the external request is sent. Results are
 ```text
 app/
 ├── (marketing)/        Landing page
-├── (app)/              Dashboard, profiles, contacts, history and events
-├── api/                Application and CALL-E API routes
+├── (app)/              Dashboard, profiles, history and event pages
+├── api/                Event, webhook, polling and profile routes
 └── ui/                 Shared UI components and KinCall branding
 
 lib/
-├── orchestration/      State machine, transitions and decision rules
-├── calle/              CALL-E adapters and structured-result schemas
+├── orchestration/      Engine, state machine, decision tree and cascade logic
+├── calle/              CALL-E adapter and structured-result schemas
 ├── database/           Repository interface and persistence drivers
-├── presentation/       Human-readable summaries and labels
-├── schedule/           Planned check-in calculations
-└── dashboard/          Dashboard aggregation helpers
+├── presentation/       Human-readable labels, briefs and summaries
+├── schedule/           Next-check-in calculations
+├── dashboard/          Operational metrics and aggregations
+└── observability/      Non-sensitive timing diagnostics
 
-prompts/                 Voice-agent instructions
-supabase/migrations/     Database schema and incremental migrations
-tests/                   Automated unit and integration-oriented tests
-docs/                    Product, architecture and decision documentation
+prompts/
+├── companion-agent.ts
+├── family-agent.ts
+└── person-notification-agent.ts
+
+supabase/migrations/     PostgreSQL schema and incremental migrations
+tests/                   Automated regression and orchestration tests
+docs/                    Architecture, specification and decision records
 ```
 
 ---
@@ -162,8 +449,8 @@ docs/                    Product, architecture and decision documentation
 
 - Node.js `^20.9.0 || >=22.0.0`
 - npm
-- A Supabase project for persistent storage
-- A CALL-E account for real phone calls
+- A Supabase project
+- A CALL-E account for real voice calls
 
 ### Installation
 
@@ -176,7 +463,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-The application will be available at:
+Open:
 
 ```text
 http://localhost:3000
@@ -184,7 +471,7 @@ http://localhost:3000
 
 ### Database setup
 
-Configure the Supabase variables in `.env.local`, then link and migrate the project:
+Configure Supabase in `.env.local`, then run:
 
 ```bash
 npx supabase link --project-ref <your-project-ref>
@@ -197,7 +484,7 @@ npx supabase db push
 
 ## Environment variables
 
-Never commit `.env.local`, API keys, database credentials or real phone numbers.
+Never commit `.env.local`, API keys, service-role credentials or real phone numbers.
 
 | Variable | Purpose |
 |---|---|
@@ -207,16 +494,16 @@ Never commit `.env.local`, API keys, database credentials or real phone numbers.
 | `CALLE_MODE` | Selects the CALL-E adapter. Real calls require `live`. |
 | `CALLE_API_KEY` | CALL-E API key. |
 | `CALLE_BASE_URL` | CALL-E API endpoint. |
-| `CALLE_WEBHOOK_URL` | Public callback URL for asynchronous call results. |
-| `CALLE_WEBHOOK_SECRET` | Secret used to verify incoming webhook requests. |
-| `KINCALL_PROCESSING_LEASE_SECONDS` | Duration of event-processing leases. |
-| `KINCALL_TIMING` | Enables non-sensitive timing diagnostics when set to `1`. |
+| `CALLE_WEBHOOK_URL` | Public URL used to receive asynchronous call results. |
+| `CALLE_WEBHOOK_SECRET` | Secret used to verify incoming webhook signatures. |
+| `KINCALL_PROCESSING_LEASE_SECONDS` | Duration of orchestration processing leases. |
+| `KINCALL_TIMING` | Enables non-sensitive timing logs when set to `1`. |
 
-Refer to `.env.example` for the full configuration template.
+See `.env.example` for the complete configuration template.
 
 ---
 
-## Quality checks
+## Quality and testing
 
 ```bash
 npm run typecheck
@@ -224,47 +511,86 @@ npm test
 npm run build
 ```
 
-The automated suite currently contains **925 passing tests** covering:
+The project currently includes **925 passing automated tests** across 62 test files.
 
-- state transitions and decision rules;
-- trusted-circle ordering and retries;
-- contextual information propagation;
+The suite covers:
+
+- decision-tree rules;
+- state-machine transitions;
+- agent structured-output validation;
+- trusted-circle contact ordering;
+- availability handling;
+- retry policies;
+- context propagation;
 - informational callbacks;
-- crash recovery and idempotency;
-- concurrent event processing;
-- contact consent and archival;
+- event idempotency;
+- duplicate webhook and polling processing;
+- crash recovery;
+- concurrent workers;
+- consent and archival rules;
 - scheduling calculations;
-- dashboard and presentation helpers.
+- dashboard and presentation logic.
 
-The test suite provides broad regression coverage but is not a formal verification of the system.
+The suite provides extensive regression coverage but is not a formal proof of correctness.
 
 ---
 
 ## Safety and limitations
 
-- **Not an emergency service.** KinCall does not contact emergency services.
-- **No medical diagnosis.** It does not diagnose conditions or assess medical severity.
-- **No verified intervention completion.** A trusted contact’s response is stored as a commitment, not proof that the action occurred.
-- **No automatic production scheduler yet.** Schedule preferences are stored, but calls are currently initiated manually.
-- **External call latency.** Telephone delivery time depends on CALL-E and the carrier.
-- **Limited voicemail detection.** KinCall cannot reliably distinguish a person from an answering machine.
-- **Authentication still required.** Mutating routes must be protected before a public live deployment.
-- **Compliance review required.** Data-protection and operational policies must be reviewed before broader real-world use.
+- **Not an emergency service.** KinCall never contacts emergency services.
+- **No medical diagnosis.** Agents do not diagnose conditions or perform medical triage.
+- **No verified intervention completion.** A contact confirmation is a recorded commitment, not proof that the action occurred.
+- **No automatic scheduler yet.** Schedule preferences are stored, but check-ins are currently initiated manually.
+- **External call latency.** Ringing time depends on CALL-E and the telephone carrier.
+- **Limited voicemail detection.** The platform cannot reliably distinguish a live person from an answering machine.
+- **Authentication required before public deployment.** Mutating API routes still require access control and rate limiting.
+- **Compliance review required.** Privacy, retention and operational policies must be reviewed before broader real-world use.
 
 ---
 
-## Project status
+## Hackathon status
 
-KinCall is a functional MVP with persistent profiles, trusted-circle orchestration, controlled live phone calls, dashboard reporting and automated recovery mechanisms.
+KinCall is currently being developed and tested as a submission for
+[CALL-E: Your Code Is Calling](https://call-e.devpost.com/).
 
-Before public deployment, the main remaining work includes:
+The hackathon version is a functional end-to-end MVP featuring:
 
-- user authentication and authorization;
-- protection and rate limiting for mutating routes;
-- automatic scheduling;
-- production webhook configuration;
-- compliance and privacy review;
-- infrastructure and operational hardening.
+- specialized voice agents;
+- structured conversational outputs;
+- a deterministic decision tree;
+- trusted-circle orchestration;
+- factual context propagation between agents;
+- outcome notification calls;
+- persistent event histories;
+- idempotency and crash recovery;
+- controlled live phone calls.
+
+Development is still ongoing.
+
+Before the final submission, the main remaining work includes:
+
+- completing the final live-call scenarios;
+- refining the product experience;
+- preparing the demonstration video;
+- finalizing the Devpost submission;
+- documenting technical and product feedback.
+
+Features required for broader public production use, including authentication, automatic scheduling, compliance review and deployment hardening, remain outside the current hackathon MVP scope.
+
+---
+
+## CALL-E hackathon
+
+KinCall is being built for
+[CALL-E: Your Code Is Calling](https://call-e.devpost.com/), an ongoing hackathon focused on functional AI agents that make real phone calls and complete real-world tasks.
+
+The project explores how specialized voice agents can work with a deterministic orchestration engine to coordinate human support around a monitored person.
+
+KinCall is an independent hackathon submission. It is not affiliated with, endorsed by or sponsored by CALL-E.
+
+---
+
+## Documentation
 
 Further technical details are available in:
 
@@ -272,10 +598,3 @@ Further technical details are available in:
 - [`docs/TECHNICAL_ARCHITECTURE.md`](docs/TECHNICAL_ARCHITECTURE.md)
 - [`docs/DECISION_LOG.md`](docs/DECISION_LOG.md)
 
----
-
-## Origin
-
-KinCall originated during the CALL-E hackathon and has continued as an independent product project.
-
-It is not affiliated with, endorsed by, or sponsored by CALL-E or any other organisation.
