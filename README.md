@@ -35,18 +35,11 @@ KinCall is not a medical device or an emergency service.
 
 ## The idea
 
-A phone call can reveal that someone needs help.
+Older adults, people living with chronic illness, and people with reduced mobility can easily become isolated, especially when family members live far away or cannot check in every day. Even when something is wrong, they may hesitate to call for help because they do not want to worry their relatives or feel like a burden.
 
-The challenge is what happens next:
+KinCall provides a simple and reassuring safety net. It regularly calls the monitored person, has a warm and natural conversation, and identifies whether support may be needed. When help is requested or the situation is unclear, KinCall contacts the trusted circle in a predefined order until someone confirms they can assist. It then calls the monitored person back to explain the outcome.
 
-- understanding the real situation;
-- deciding whether someone should be contacted;
-- reaching the right trusted person;
-- sharing the correct context;
-- confirming who can help;
-- informing the monitored person of the outcome.
-
-KinCall turns this process into one coordinated agent workflow.
+The goal is not to replace human relationships, but to make sure that silence, uncertainty, or a quiet request for help never goes unnoticed.
 
 ---
 
