@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { PersonHasActiveEventError, UnknownRecordError } from "@/lib/database/errors";
-import { getRepository } from "@/lib/database/store";
-import { validateUpdatePersonInput } from "@/lib/validation/profile";
+import { PersonHasActiveEventError, UnknownRecordError } from "@/backend/persistence/errors";
+import { getRepository } from "@/backend/persistence/store";
+import { validateUpdatePersonInput } from "@/shared/validation/profile";
 
 // Soft deletion (optional interface administration, not core orchestration —
 // see docs/DECISION_LOG.md DEC-009). The row is archived, never physically

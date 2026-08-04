@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Repository } from "@/lib/database/repository";
-import type { CallEventRecord, EventRecord } from "@/lib/database/types";
+import type { Repository } from "@/backend/persistence/repository";
+import type { CallEventRecord, EventRecord } from "@/shared/domain/types";
 
 // Reproduces the state a live run leaves behind, at two depths:
 //

@@ -3,9 +3,9 @@ import {
   ArchivedContactCannotBeReactivatedError,
   ContactHasActiveCallError,
   UnknownRecordError,
-} from "@/lib/database/errors";
-import { getRepository } from "@/lib/database/store";
-import { validateUpdateContactInput } from "@/lib/validation/profile";
+} from "@/backend/persistence/errors";
+import { getRepository } from "@/backend/persistence/store";
+import { validateUpdateContactInput } from "@/shared/validation/profile";
 
 // Stage E (DEC-017): a partial patch for the editable trusted-contact fields —
 // relationship, enabled, callableFrom/callableTo, timezone, maxAttempts.

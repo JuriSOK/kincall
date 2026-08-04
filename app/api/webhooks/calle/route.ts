@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCalleAdapter } from "@/lib/calle/adapter";
-import { parseCalleWebhookEvent, verifyCalleWebhookSignature } from "@/lib/calle/webhook";
-import { getRepository } from "@/lib/database/store";
+import { getCalleAdapter } from "@/backend/integrations/calle/adapter";
+import { parseCalleWebhookEvent, verifyCalleWebhookSignature } from "@/backend/integrations/calle/webhook";
+import { getRepository } from "@/backend/persistence/store";
 import {
   processCompanionResult,
   processFamilyResult,
   processPersonNotificationResult,
-} from "@/lib/orchestration/engine";
+} from "@/backend/orchestration/engine";
 
 export async function POST(request: Request) {
   const secret = process.env.CALLE_WEBHOOK_SECRET;

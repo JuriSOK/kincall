@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import type { ConsentStatus } from "@/lib/database/types";
-import { describeConsentStatus, describeContactTimezone } from "@/lib/presentation/labels";
-import type { FieldErrors } from "@/lib/validation/profile";
-import { Button } from "@/app/ui/button";
-import { controlClasses, FormField } from "@/app/ui/form-field";
-import { Badge, Card, EmptyState, Notice } from "@/app/ui/surfaces";
+import type { ConsentStatus } from "@/shared/domain/types";
+import { describeConsentStatus, describeContactTimezone } from "@/shared/presentation/labels";
+import type { FieldErrors } from "@/shared/validation/profile";
+import { Button } from "@/frontend/design-system/button";
+import { controlClasses, FormField } from "@/frontend/design-system/form-field";
+import { Badge, Card, EmptyState, Notice } from "@/frontend/design-system/surfaces";
 import { COMMON_TIMEZONES } from "../../profile-form-constants";
 import { submitContactEdit } from "./contact-edit-submit";
 import { submitContactForm } from "./contact-form-submit";
@@ -26,7 +26,7 @@ import { DeleteContactButton } from "./delete-contact-button";
 // live in the edit panel only now, not in the at-a-glance summary. The
 // per-contact statistics block (answer/acceptance/decline rate, mean
 // attempt, confirmed interventions, latest participation) was removed
-// entirely from this view; lib/kpi/contact-stats.ts itself is untouched and
+// entirely from this view; backend/kpi/contact-stats.ts itself is untouched and
 // still available if a future stage wants that detail back.
 export interface ContactSummary {
   id: string;

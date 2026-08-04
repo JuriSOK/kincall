@@ -1,0 +1,113 @@
+import { describe, expect, it } from "vitest";
+import { FakeCalleAdapter } from "@/backend/integrations/calle/fake-adapter";
+import type { TrustedContact, VulnerablePerson } from "@/shared/domain/types";
+
+function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
+  return {
+    id: "person_marie",
+    firstName: "Marie",
+    phone: "+33639980001",
+    preferredLanguage: "fr-FR",
+    conversationProfile: "cognitive_friendly",
+    preferredCallTime: "09:00",
+    interests: ["gardening", "family"],
+    consentStatus: "confirmed",
+    archivedAt: null,
+    timezone: "Europe/Paris",
+    avatarKey: null,
+    conversationNotes: null,
+    checkInDays: [1, 2, 3, 4, 5, 6, 7],
+    scheduleState: "active",
+    ...overrides,
+  };
+}
+
+function contact(overrides: Partial<TrustedContact> = {}): TrustedContact {
+  return {
+    id: "contact_julie",
+    personId: "person_marie",
+    firstName: "Julie",
+    phone: "+33639980002",
+    relationship: "daughter",
+    priority: 1,
+    consentStatus: "confirmed",
+    archivedAt: null,
+    isPrimary: false,
+    enabled: true,
+    callableFrom: null,
+    callableTo: null,
+    timezone: null,
+    maxAttempts: 2,
+    ...overrides,
+  };
+}
+
+describe("FakeCalleAdapter", () => {
+  it("returns Marie's canned companion result", async () => {
+    const adapter = new FakeCalleAdapter();
+    const reference = await adapter.startCompanionCall({
+      eventId: "event_001",
+      person: person(),
+      idempotencyKey: "event_001_companion_attempt_1",
+      attemptNumber: 1,
+    });
+    const result = await adapter.getCallResult(reference.callId);
+
+    expect(result.agentType).toBe("companion");
+    expect(result.status).toBe("completed");
+    expect(result.structuredResult).toMatchObject({
+      person_reached: "yes",
+      fall_mentioned: "yes",
+      mobility_difficulty: "yes",
+      attention_required: "yes",
+      attention_reasons: ["fall", "mobility_difficulty"],
+    });
+  });
+
+  it("returns Julie's no-answer result", async () => {
+    const adapter = new FakeCalleAdapter();
+    const reference = await adapter.startFamilyCall({
+      eventId: "event_001",
+      person: person(),
+      contact: contact(),
+      idempotencyKey: "event_001_contact_julie_attempt_1",
+      informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
+    });
+    const result = await adapter.getCallResult(reference.callId);
+
+    expect(result.structuredResult).toMatchObject({ answered: "no", intervention_type: "other", estimated_time: "" });
+  });
+
+  it("returns Marc's confirmation result", async () => {
+    const adapter = new FakeCalleAdapter();
+    const reference = await adapter.startFamilyCall({
+      eventId: "event_001",
+      person: person(),
+      contact: contact({ id: "contact_marc", firstName: "Marc", relationship: "son", priority: 2 }),
+      idempotencyKey: "event_001_contact_marc_attempt_1",
+      informationToShare: [],
+      attemptNumber: 1,
+      mayLeaveVoicemail: false,
+    });
+    const result = await adapter.getCallResult(reference.callId);
+
+    expect(result.structuredResult).toMatchObject({
+      answered: "yes",
+      can_intervene: "yes",
+      estimated_time: "17:30",
+    });
+  });
+
+  it("throws for a companion call to a person no scenario is written about", async () => {
+    const adapter = new FakeCalleAdapter();
+    const reference = await adapter.startCompanionCall({
+      eventId: "event_001",
+      person: person({ id: "person_unknown" }),
+      idempotencyKey: "key",
+      attemptNumber: 1,
+    });
+    await expect(adapter.getCallResult(reference.callId)).rejects.toThrow(/no canned scenario/);
+  });
+});

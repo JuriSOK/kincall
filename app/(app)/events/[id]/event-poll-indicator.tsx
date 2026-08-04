@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { EventStatus } from "@/lib/orchestration/states";
+import type { EventStatus } from "@/backend/orchestration/state-machine/states";
 import { isWaitingStatus, startPolling, type PollController } from "./event-poller";
 
 // How many consecutive failures before the user is told. One transient blip

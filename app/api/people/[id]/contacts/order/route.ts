@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { InvalidContactOrderError } from "@/lib/database/errors";
-import { getRepository } from "@/lib/database/store";
-import { validateOrderedIds } from "@/lib/validation/profile";
+import { InvalidContactOrderError } from "@/backend/persistence/errors";
+import { getRepository } from "@/backend/persistence/store";
+import { validateOrderedIds } from "@/shared/validation/profile";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

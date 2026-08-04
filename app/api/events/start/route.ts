@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getCalleAdapter, getCalleMode } from "@/lib/calle/adapter";
-import { isFakeScenarioId } from "@/lib/calle/fake-adapter";
-import { getRepository } from "@/lib/database/store";
-import { startDemoEvent } from "@/lib/orchestration/engine";
+import { getCalleAdapter, getCalleMode } from "@/backend/integrations/calle/adapter";
+import { isFakeScenarioId } from "@/backend/integrations/calle/fake-adapter";
+import { getRepository } from "@/backend/persistence/store";
+import { startDemoEvent } from "@/backend/orchestration/engine";
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as

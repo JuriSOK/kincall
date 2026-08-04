@@ -1,4 +1,4 @@
-import type { FieldErrors } from "@/lib/validation/profile";
+import type { FieldErrors } from "@/shared/validation/profile";
 
 export interface SubmitMakePrimaryResult {
   ok: boolean;

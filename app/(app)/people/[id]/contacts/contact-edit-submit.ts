@@ -1,4 +1,4 @@
-import { validateUpdateContactInput, type FieldErrors } from "@/lib/validation/profile";
+import { validateUpdateContactInput, type FieldErrors } from "@/shared/validation/profile";
 
 export interface ContactEditValues {
   relationship: string;

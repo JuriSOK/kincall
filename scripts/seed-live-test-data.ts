@@ -21,7 +21,7 @@
 //     this script does not import or reference any of those tables at all,
 //     so it is structurally incapable of starting a check-in or a call.
 //   - Never sets CALLE_MODE, never calls any CALL-E adapter — this script
-//     has no import of lib/calle/* anywhere.
+//     has no import of backend/integrations/calle/* anywhere.
 //   - Idempotent: rerunning compares each test row's current columns against
 //     this file's definitions and only writes the columns that differ.
 //     Already-correct rows are reported "skipped", not silently rewritten.
@@ -29,8 +29,8 @@
 //     reported as such — never silently un-archived.
 //
 // WHY THIS IS A FULLY SELF-CONTAINED SCRIPT (no import of anything under
-// lib/, not even a relative one), NOT lib/database/supabase-client.ts /
-// SupabaseRepository / lib/phone.ts / lib/avatars.ts:
+// lib/, not even a relative one), NOT backend/persistence/supabase-client.ts /
+// SupabaseRepository / shared/utilities/phone.ts / shared/utilities/avatars.ts:
 //   - supabase-client.ts starts with `import "server-only"`, a marker package
 //     whose default (non-Next) export unconditionally throws — it exists
 //     specifically to make an accidental client-bundle import a build error.
@@ -41,7 +41,7 @@
 //     "strip only" TypeScript execution (no build step — see below) does not
 //     support: `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, confirmed by hand before
 //     writing this file.
-//   - Even a leaf, class-free module like lib/phone.ts hits a genuine
+//   - Even a leaf, class-free module like shared/utilities/phone.ts hits a genuine
 //     conflict between the two tools this script must satisfy at once: tsc
 //     (moduleResolution "bundler", no `allowImportingTsExtensions`) REJECTS
 //     a relative import ending in ".ts" (TS5097), while Node's native loader
@@ -50,7 +50,7 @@
 //     `allowImportingTsExtensions` to the shared tsconfig.json for the sake
 //     of one script was rejected as too broad a footprint.
 //   This script therefore builds its own Supabase client, the same way
-//   lib/database/supabase-client.ts does (same env vars, same client
+//   backend/persistence/supabase-client.ts does (same env vars, same client
 //   options), talks to the two tables directly via parameterized PostgREST
 //   calls — exactly what the task brief calls "the existing server-side
 //   Supabase connection pattern" — and duplicates the small handful of pure
@@ -70,7 +70,7 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// ── Duplicated from lib/phone.ts (see that file for the authoritative
+// ── Duplicated from shared/utilities/phone.ts (see that file for the authoritative
 //    version and its own reasoning) — kept in sync by hand. ─────────────────
 const E164_PATTERN = /^\+[1-9]\d{6,14}$/;
 function isE164(phone: string): boolean {
@@ -88,20 +88,20 @@ function maskPhone(phone: string): string {
   return `${head}${"•".repeat(trimmed.length - 5)}${tail}`;
 }
 
-// ── Duplicated from lib/avatars.ts (see that file for the authoritative
+// ── Duplicated from shared/utilities/avatars.ts (see that file for the authoritative
 //    list) — kept in sync by hand. ──────────────────────────────────────────
 const AVATAR_KEYS = ["sunrise", "olive", "terracotta", "lavender", "ocean", "meadow", "amber", "rose"] as const;
 function isAvatarKey(value: string): boolean {
   return (AVATAR_KEYS as readonly string[]).includes(value);
 }
 
-// ── Enum values, mirrored from lib/validation/profile.ts ───────────────────
+// ── Enum values, mirrored from shared/validation/profile.ts ───────────────────
 // Not imported: that module pulls in ../phone and ../avatars via
 // EXTENSION-LESS relative imports, which resolve fine under Next.js/tsc's
 // bundler but fail under Node's native ESM loader
 // (`ERR_MODULE_NOT_FOUND`, confirmed by hand). Duplicated here instead of
 // fighting that resolution gap in a one-off script — if
-// lib/validation/profile.ts's allowed values ever change, this list must be
+// shared/validation/profile.ts's allowed values ever change, this list must be
 // updated to match by hand; there is no automated link between the two.
 const CONVERSATION_PROFILES = ["standard", "cognitive_friendly", "speech_difficulty"] as const;
 const PREFERRED_LANGUAGES = ["fr-FR", "en-GB", "en-US", "es-ES", "de-DE"] as const;
@@ -198,7 +198,7 @@ const PEOPLE: PersonSeed[] = [
 // relationship is free text in this schema (no CHECK/enum constraint on
 // trusted_contacts.relationship in any migration) — lowercased to match the
 // one existing convention already in the database (0005_seed.sql /
-// lib/database/seed.ts: "daughter", "son", "trusted neighbour"), including
+// backend/persistence/seed.ts: "daughter", "son", "trusted neighbour"), including
 // its British spelling for the neighbour/sister-style relationship words.
 const CONTACTS: ContactSeed[] = [
   // Claire's circle
@@ -257,7 +257,7 @@ function validateSeedData(): void {
   }
 }
 
-// ── Supabase client (mirrors lib/database/supabase-client.ts's pattern) ────
+// ── Supabase client (mirrors backend/persistence/supabase-client.ts's pattern) ────
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -276,7 +276,7 @@ function buildClient(): SupabaseClient {
 // ── The one controlled test number every profile and contact uses ──────────
 // Read exclusively from KINCALL_LIVE_TEST_PHONE — no fallback is hardcoded
 // anywhere in this file. This is not the per-participant override mechanism
-// (phoneEnvVarFor/resolveConfiguredPhone in lib/database/seed.ts, which
+// (phoneEnvVarFor/resolveConfiguredPhone in backend/persistence/seed.ts, which
 // exists for the four LEGACY demo entities whose stored column is always a
 // committed reserved-fiction placeholder): every profile created "through
 // the interface" already stores its real, validated number directly
@@ -302,7 +302,7 @@ function getTestPhone(): string {
   return value;
 }
 
-// ── Row shapes (subset of lib/database/row-mappers.ts's PersonRow/ContactRow) ──
+// ── Row shapes (subset of backend/persistence/row-mappers.ts's PersonRow/ContactRow) ──
 interface PersonRow {
   id: string;
   first_name: string;

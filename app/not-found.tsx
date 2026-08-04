@@ -1,5 +1,5 @@
-import { ButtonLink } from "@/app/ui/button";
-import { Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { ButtonLink } from "@/frontend/design-system/button";
+import { Card, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 
 /**
  * Shown for an unmatched URL and for any `notFound()` call — which the person

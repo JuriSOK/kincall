@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { ButtonLink } from "@/app/ui/button";
-import { KinCallMark } from "@/app/ui/kincall-mark";
+import { ButtonLink } from "@/frontend/design-system/button";
+import { KinCallMark } from "@/frontend/components/kincall-mark";
 
 // The public landing page (Stage B). Deliberately separate from the
 // application shell under app/(app)/ — this page has no Nav, no profile
@@ -12,7 +12,7 @@ import { KinCallMark } from "@/app/ui/kincall-mark";
 // on /dashboard instead of "/".
 //
 // UI/UX cleanup pass (see docs/DECISION_LOG.md's latest entry): the icon is
-// a redrawn vector mark (app/ui/kincall-mark.tsx), replacing the earlier
+// a redrawn vector mark (frontend/components/kincall-mark.tsx), replacing the earlier
 // raster logo — crisp at any size, themes correctly in dark mode via
 // --kc-brand-blue/--kc-brand-cyan, and never needs cropping. No separate
 // top-left/top-right text or CTA sits alongside it — the mark and wordmark
@@ -23,7 +23,7 @@ export default function LandingPage() {
     <main className="flex flex-1 flex-col">
       <section className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 px-5 py-16 text-center sm:px-8 sm:py-24">
         {/* The floating animation is decorative and is neutralised entirely
-            by app/ui/tokens.css's blanket prefers-reduced-motion rule — no
+            by frontend/design-system/tokens.css's blanket prefers-reduced-motion rule — no
             separate override needed here. */}
         <div className="kc-animate-float flex flex-col items-center gap-3">
           <KinCallMark className="h-20 w-20 sm:h-24 sm:w-24" />

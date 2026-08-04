@@ -7,13 +7,13 @@ import {
   PREFERRED_LANGUAGES,
   validatePersonInput,
   type FieldErrors,
-} from "@/lib/validation/profile";
-import { Button } from "@/app/ui/button";
-import { controlClasses, FormField } from "@/app/ui/form-field";
-import { Notice } from "@/app/ui/surfaces";
-import { AvatarPicker } from "@/app/ui/avatars/avatar-picker";
-import { WEEKDAYS } from "@/lib/schedule/format-schedule";
-import { describeConversationProfile, describeLanguage } from "@/lib/presentation/labels";
+} from "@/shared/validation/profile";
+import { Button } from "@/frontend/design-system/button";
+import { controlClasses, FormField } from "@/frontend/design-system/form-field";
+import { Notice } from "@/frontend/design-system/surfaces";
+import { AvatarPicker } from "@/frontend/components/avatars/avatar-picker";
+import { WEEKDAYS } from "@/shared/presentation/format-schedule";
+import { describeConversationProfile, describeLanguage } from "@/shared/presentation/labels";
 import { COMMON_TIMEZONES } from "../profile-form-constants";
 
 export function PersonForm() {

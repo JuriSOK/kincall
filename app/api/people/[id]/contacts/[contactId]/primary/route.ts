@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { InvalidPrimaryContactError } from "@/lib/database/errors";
-import { getRepository } from "@/lib/database/store";
+import { InvalidPrimaryContactError } from "@/backend/persistence/errors";
+import { getRepository } from "@/backend/persistence/store";
 
 // Stage E (DEC-017): the ONLY route that changes isPrimary. Kept separate
 // from the general PATCH .../[contactId] route — like Stage D's schedule

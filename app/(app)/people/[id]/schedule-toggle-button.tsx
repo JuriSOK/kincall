@@ -2,9 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { ScheduleState } from "@/lib/database/types";
-import { Button } from "@/app/ui/button";
-import { Notice } from "@/app/ui/surfaces";
+import type { ScheduleState } from "@/shared/domain/types";
+import { Button } from "@/frontend/design-system/button";
+import { Notice } from "@/frontend/design-system/surfaces";
 import { submitScheduleToggle } from "./schedule-toggle-submit";
 
 // A lightweight Pause/Resume toggle, separate from the full profile-edit

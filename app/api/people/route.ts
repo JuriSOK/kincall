@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRepository } from "@/lib/database/store";
-import { validatePersonInput } from "@/lib/validation/profile";
+import { getRepository } from "@/backend/persistence/store";
+import { validatePersonInput } from "@/shared/validation/profile";
 
 // Named in TECHNICAL_ARCHITECTURE.md §10's frozen repository structure.
 export async function POST(request: Request) {

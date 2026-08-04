@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { Button, ButtonLink } from "@/app/ui/button";
-import { Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { Button, ButtonLink } from "@/frontend/design-system/button";
+import { Card, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 
 /**
  * The route-level error boundary. Without it, an unhandled error in any page or

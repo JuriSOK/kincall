@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRepository } from "@/lib/database/store";
-import { validateContactInput } from "@/lib/validation/profile";
+import { getRepository } from "@/backend/persistence/store";
+import { validateContactInput } from "@/shared/validation/profile";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

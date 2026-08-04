@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRepository } from "@/lib/database/store";
-import { maskPhone } from "@/lib/phone";
-import { describeCallReadiness } from "@/lib/orchestration/person-status";
-import { PageHeader, PageShell } from "@/app/ui/surfaces";
+import { getRepository } from "@/backend/persistence/store";
+import { maskPhone } from "@/shared/utilities/phone";
+import { describeCallReadiness } from "@/backend/presentation/person-status";
+import { PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 import { ContactManager } from "./contact-manager";
 
 // PRODUCT_SPECIFICATION.md §13.1: "création d'un cercle de confiance" and
@@ -12,7 +12,7 @@ import { ContactManager } from "./contact-manager";
 // availability/max-attempts configuration. UI/UX cleanup pass: the default
 // card no longer shows per-contact statistics, so this page no longer fetches
 // this person's call-event history just to compute them — see
-// contact-manager.tsx's own note; lib/kpi/contact-stats.ts is unused here but
+// contact-manager.tsx's own note; backend/kpi/contact-stats.ts is unused here but
 // otherwise untouched.
 export default async function ContactsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

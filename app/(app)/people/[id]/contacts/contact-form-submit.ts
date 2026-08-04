@@ -1,4 +1,4 @@
-import { validateContactInput, type FieldErrors } from "@/lib/validation/profile";
+import { validateContactInput, type FieldErrors } from "@/shared/validation/profile";
 
 // The entire surface the submit logic is allowed to touch on the form — a
 // real HTMLFormElement satisfies this, and so does a plain test double.

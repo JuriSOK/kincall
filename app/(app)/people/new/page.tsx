@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { Card, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 import { PersonForm } from "./person-form";
 
 // PRODUCT_SPECIFICATION.md §13.1 "création d'un profil de personne vulnérable",

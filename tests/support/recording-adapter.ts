@@ -6,8 +6,8 @@ import type {
   CompanionCallInput,
   FamilyCallInput,
   PersonNotificationCallInput,
-} from "@/lib/calle/adapter";
-import { FakeCalleAdapter, type FakeScenarioId } from "@/lib/calle/fake-adapter";
+} from "@/backend/integrations/calle/adapter";
+import { FakeCalleAdapter, type FakeScenarioId } from "@/backend/integrations/calle/fake-adapter";
 
 // FakeCalleAdapter mints a fresh random call id on every start, so it does not
 // model CALL-E's Idempotency-Key contract: repeating a request under a key

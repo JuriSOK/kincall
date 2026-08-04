@@ -1,4 +1,4 @@
-import { Notice } from "@/app/ui/surfaces";
+import { Notice } from "@/frontend/design-system/surfaces";
 
 // DEC-010: a static, unconditional notice, present regardless of any detected
 // signal or severity — it must never read as a signal of how serious this

@@ -1,8 +1,8 @@
 @import "tailwindcss";
-@import "./ui/tokens.css";
+@import "../frontend/design-system/tokens.css";
 
 /* Tailwind v4 is CSS-first: this block is what makes the tokens in
- * ui/tokens.css reachable as utilities (bg-surface, text-muted, rounded-kc,
+ * frontend/design-system/tokens.css reachable as utilities (bg-surface, text-muted, rounded-kc,
  * shadow-kc, …). There is no tailwind.config.* file in this project. */
 @theme inline {
   --color-canvas: var(--kc-canvas);
@@ -59,7 +59,7 @@ body {
 
 /* A soft, slow levitation for the landing hero mark only — small enough to
  * read as "gently alive," never enough to distract from the page's actual
- * content. app/ui/tokens.css's blanket `prefers-reduced-motion: reduce` rule
+ * content. frontend/design-system/tokens.css's blanket `prefers-reduced-motion: reduce` rule
  * already forces every animation's duration to ~0 and its iteration count to
  * 1, so this needs no reduced-motion override of its own: that global rule
  * covers it automatically. */

@@ -1,7 +1,7 @@
 import { beforeEach, describe } from "vitest";
-import { SupabaseRepository } from "@/lib/database/supabase-repository";
-import type { Repository } from "@/lib/database/repository";
-import { repositoryContract } from "../repository-contract";
+import { SupabaseRepository } from "@/backend/persistence/supabase-repository";
+import type { Repository } from "@/backend/persistence/repository";
+import { repositoryContract } from "../persistence/repository-contract";
 import {
   isIntegrationConfigured,
   requireIntegrationEnv,

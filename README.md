@@ -278,6 +278,35 @@ Orchestrated action
 
 ---
 
+## Repository
+
+One Next.js application, organized so the architecture is visible from the tree:
+`app/` routes, `frontend/` renders, `backend/` decides, `shared/` is used by both.
+
+| Path | Purpose |
+|---|---|
+| [`app/`](app/) | Next.js pages and thin API entry points |
+| [`frontend/`](frontend/) | Design system and product UI components |
+| [`backend/`](backend/) | Agents, orchestration, integrations and persistence |
+| [`shared/`](shared/) | Domain types, validation and pure formatting |
+| [`tests/`](tests/) | Orchestration, agent, UI and regression coverage |
+| [`supabase/`](supabase/) | PostgreSQL migrations and database tooling |
+| [`docs/`](docs/) | Product, architecture, decisions and demo material |
+
+Where the important pieces live:
+
+| What | Where |
+|---|---|
+| Companion / Family / Notification agents | [`backend/agents/`](backend/agents/) |
+| Decision tree | [`backend/orchestration/decision-tree.ts`](backend/orchestration/decision-tree.ts) |
+| Orchestration engine | [`backend/orchestration/engine.ts`](backend/orchestration/engine.ts) |
+| Event states and transitions | [`backend/orchestration/state-machine/`](backend/orchestration/state-machine/) |
+| Trusted-circle cascade | [`backend/orchestration/cascade/`](backend/orchestration/cascade/) |
+| CALL-E integration | [`backend/integrations/calle/`](backend/integrations/calle/) |
+| Persistence | [`backend/persistence/`](backend/persistence/) |
+
+---
+
 ## Getting started
 
 ### Prerequisites
@@ -388,6 +417,7 @@ Before the final submission, the main remaining work includes:
 - [`Product specification`](docs/PRODUCT_SPECIFICATION.md)
 - [`Technical architecture`](docs/TECHNICAL_ARCHITECTURE.md)
 - [`Decision log`](docs/DECISION_LOG.md)
+- [`Demo walkthrough`](docs/DEMO.md)
 
 ---
 

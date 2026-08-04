@@ -1,4 +1,4 @@
-import { validateUpdatePersonInput, type FieldErrors } from "@/lib/validation/profile";
+import { validateUpdatePersonInput, type FieldErrors } from "@/shared/validation/profile";
 
 export interface SubmitPersonEditResult {
   ok: boolean;

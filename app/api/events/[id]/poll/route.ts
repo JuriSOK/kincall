@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCalleAdapter } from "@/lib/calle/adapter";
-import { getRepository } from "@/lib/database/store";
-import { startTimer } from "@/lib/observability/timing";
+import { getCalleAdapter } from "@/backend/integrations/calle/adapter";
+import { getRepository } from "@/backend/persistence/store";
+import { startTimer } from "@/backend/observability/timing";
 import {
   processCompanionResult,
   processFamilyResult,
   processPersonNotificationResult,
-} from "@/lib/orchestration/engine";
+} from "@/backend/orchestration/engine";
 
 // Recovery mechanism (TECHNICAL_ARCHITECTURE.md §4): fetches whichever call is
 // currently in flight — Companion or a trusted-contact call — and processes its
@@ -35,7 +35,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   }
 
   const deps = { repository, calleAdapter: getCalleAdapter() };
-  // Timing only (DEC-022) — see lib/observability/timing.ts. Off unless
+  // Timing only (DEC-022) — see backend/observability/timing.ts. Off unless
   // KINCALL_TIMING=1; never persisted, never logs call content.
   const stopTimer = startTimer(event.id, "poll_result_processed");
   // DEC-023 adds the third purpose. Dispatched explicitly rather than by an

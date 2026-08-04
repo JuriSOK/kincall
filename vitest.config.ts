@@ -4,6 +4,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    // Recursive, so the tests/ subdirectories (orchestration, agents,
+    // persistence, ui, unit, regression) are all discovered without listing
+    // them here — adding a directory needs no config change.
     include: ["tests/**/*.test.ts"],
     // The Supabase integration lane is opt-in and runs serially — sequence
     // resetting and deterministic-id assertions are only coherent that way.

@@ -1,4 +1,4 @@
-import type { EventStatus } from "@/lib/orchestration/states";
+import type { EventStatus } from "@/backend/orchestration/state-machine/states";
 
 // Statuses where a Companion or Family call is in flight and CALL-E has not
 // yet delivered a terminal result — i.e. exactly the states the poll route

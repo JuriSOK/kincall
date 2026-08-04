@@ -2,9 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button } from "@/app/ui/button";
-import { controlClasses } from "@/app/ui/form-field";
-import { Badge, Notice } from "@/app/ui/surfaces";
+import { Button } from "@/frontend/design-system/button";
+import { controlClasses } from "@/frontend/design-system/form-field";
+import { Badge, Notice } from "@/frontend/design-system/surfaces";
 
 export interface DemoScenarioOption {
   id: string;

@@ -1,5 +1,5 @@
-import { validateUpdatePersonInput, type FieldErrors } from "@/lib/validation/profile";
-import type { ScheduleState } from "@/lib/database/types";
+import { validateUpdatePersonInput, type FieldErrors } from "@/shared/validation/profile";
+import type { ScheduleState } from "@/shared/domain/types";
 
 export interface SubmitScheduleToggleResult {
   ok: boolean;

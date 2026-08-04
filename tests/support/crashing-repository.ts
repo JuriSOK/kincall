@@ -1,4 +1,4 @@
-import type { Repository } from "@/lib/database/repository";
+import type { Repository } from "@/backend/persistence/repository";
 
 export class InjectedCrash extends Error {
   constructor(method: string) {

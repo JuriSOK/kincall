@@ -1,15 +1,15 @@
-import { getRepository } from "@/lib/database/store";
-import { groupByDay } from "@/lib/dashboard/group-by-day";
-import { buildMonthCalendar, shiftMonthKey } from "@/lib/history/calendar";
-import { filterHistoryEvents } from "@/lib/history/filter-events";
-import { parsePeriod, periodSince } from "@/lib/kpi/period";
-import { buildHistoryEventView, type EventOutcomeCategory } from "@/lib/presentation/history-view";
-import { formatDayKey, formatDayLabel, formatMonthKey, formatMonthLabel } from "@/lib/presentation/format-date";
-import { ActivityRow } from "@/app/ui/activity-row";
-import { MonthCalendar } from "@/app/ui/calendar";
-import { HistoryFilters } from "@/app/ui/filters";
-import { PeriodSelector } from "@/app/ui/period-selector";
-import { Card, EmptyState, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { getRepository } from "@/backend/persistence/store";
+import { groupByDay } from "@/backend/dashboard/group-by-day";
+import { buildMonthCalendar, shiftMonthKey } from "@/backend/history/calendar";
+import { filterHistoryEvents } from "@/backend/history/filter-events";
+import { parsePeriod, periodSince } from "@/backend/kpi/period";
+import { buildHistoryEventView, type EventOutcomeCategory } from "@/backend/presentation/history-view";
+import { formatDayKey, formatDayLabel, formatMonthKey, formatMonthLabel } from "@/shared/presentation/format-date";
+import { ActivityRow } from "@/frontend/components/activity-row";
+import { MonthCalendar } from "@/frontend/components/calendar";
+import { HistoryFilters } from "@/frontend/components/filters";
+import { PeriodSelector } from "@/frontend/components/period-selector";
+import { Card, EmptyState, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 
 // A generous but explicit bound — see Repository.listRecentEvents's own
 // contract and the dashboard page's identical note. The calendar and the

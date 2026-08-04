@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getRepository } from "@/lib/database/store";
-import { Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { getRepository } from "@/backend/persistence/store";
+import { Card, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 import { PersonEditForm } from "./person-edit-form";
 
 // Stage C (docs/DECISION_LOG.md DEC-015): the profile-edit route. Editable

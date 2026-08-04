@@ -5,7 +5,7 @@ export interface CollectedNode {
   props: Record<string, unknown>;
 }
 
-// The app/ui/surfaces.tsx primitives (Card, PageHeader, EmptyState, ...)
+// The frontend/design-system/surfaces.tsx primitives (Card, PageHeader, EmptyState, ...)
 // pass nested content through several differently-named ReactNode props, not
 // only `children` — a period selector or an action button commonly arrives
 // via `actions`/`action`, a subtitle via `description`/`lead`. These are the

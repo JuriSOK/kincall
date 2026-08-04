@@ -1,28 +1,28 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { listDemoScenarios } from "@/lib/calle/demo-scenarios";
-import { getRepository } from "@/lib/database/store";
-import { maskPhone } from "@/lib/phone";
-import type { CallReadiness } from "@/lib/orchestration/person-status";
-import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
-import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
-import { parseProfilePeriod, profilePeriodSince } from "@/lib/kpi/period";
-import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
-import { displayCount, displayRate } from "@/lib/presentation/kpi-display";
-import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
-import { formatCheckInDays, formatNextCheckIn, SCHEDULE_STATE_LABEL } from "@/lib/schedule/format-schedule";
-import { formatDateTime } from "@/lib/presentation/format-date";
+import { listDemoScenarios } from "@/backend/integrations/calle/demo-scenarios";
+import { getRepository } from "@/backend/persistence/store";
+import { maskPhone } from "@/shared/utilities/phone";
+import type { CallReadiness } from "@/backend/presentation/person-status";
+import { describeCallReadiness, describePersonStatus } from "@/backend/presentation/person-status";
+import { computeCheckInKpis, groupCallEventsByEvent } from "@/backend/kpi/dashboard-kpis";
+import { parseProfilePeriod, profilePeriodSince } from "@/backend/kpi/period";
+import { buildInterventionSummary } from "@/backend/presentation/intervention-summary";
+import { displayCount, displayRate } from "@/backend/presentation/kpi-display";
+import { computeNextCheckIn } from "@/backend/scheduling/next-check-in";
+import { formatCheckInDays, formatNextCheckIn, SCHEDULE_STATE_LABEL } from "@/shared/presentation/format-schedule";
+import { formatDateTime } from "@/shared/presentation/format-date";
 import {
   describeConsentStatus,
   describeConversationProfile,
   describeLanguage,
-} from "@/lib/presentation/labels";
-import { STATUS_TONE } from "@/lib/presentation/status-tone";
-import { Avatar } from "@/app/ui/avatars/avatar";
-import { ButtonLink } from "@/app/ui/button";
-import { KpiCard } from "@/app/ui/kpi-card";
-import { ProfilePeriodSelector } from "@/app/ui/profile-period-selector";
-import { Badge, Card, DetailRow, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
+} from "@/shared/presentation/labels";
+import { STATUS_TONE } from "@/backend/presentation/status-tone";
+import { Avatar } from "@/frontend/components/avatars/avatar";
+import { ButtonLink } from "@/frontend/design-system/button";
+import { KpiCard } from "@/frontend/components/kpi-card";
+import { ProfilePeriodSelector } from "@/frontend/components/profile-period-selector";
+import { Badge, Card, DetailRow, EmptyState, Notice, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 import { DeletePersonButton } from "../delete-person-button";
 import { LaunchDemoButton } from "./launch-demo-button";
 import { ScheduleToggleButton } from "./schedule-toggle-button";
@@ -189,7 +189,7 @@ export default async function PersonPage({
               {SCHEDULE_STATE_LABEL[person.scheduleState] ?? person.scheduleState}
             </Badge>
             {/* Timezone and local time announced together in one text node,
-                not as disconnected fragments — lib/schedule/format-schedule.ts's
+                not as disconnected fragments — shared/presentation/format-schedule.ts's
                 own doc comment explains why. */}
             <p className="text-sm font-medium">
               {formatNextCheckIn(nextCheckIn, person.timezone, now)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { ConfirmDeleteButton } from "@/app/ui/confirm-delete-button";
+import { ConfirmDeleteButton } from "@/frontend/design-system/confirm-delete-button";
 
 interface Props {
   personId: string;

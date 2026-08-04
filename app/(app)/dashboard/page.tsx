@@ -1,28 +1,28 @@
 import Link from "next/link";
-import { getRepository } from "@/lib/database/store";
-import { describeCallReadiness, describePersonStatus } from "@/lib/orchestration/person-status";
-import { computeDailyRecapStatus } from "@/lib/dashboard/daily-recap-status";
-import { detectConfigurationGaps, type ConfigurationGap } from "@/lib/dashboard/configuration-gaps";
-import { groupByDay } from "@/lib/dashboard/group-by-day";
-import { computeUpcomingCheckIns } from "@/lib/dashboard/upcoming-check-ins";
-import { computeCheckInKpis, groupCallEventsByEvent } from "@/lib/kpi/dashboard-kpis";
-import { parsePeriod, periodSince } from "@/lib/kpi/period";
-import { describeAction } from "@/lib/presentation/event-summary";
-import { buildHistoryEventView } from "@/lib/presentation/history-view";
-import { displayAverage, displayCount, displayRate } from "@/lib/presentation/kpi-display";
-import { formatTime } from "@/lib/presentation/format-date";
-import { STATUS_TONE } from "@/lib/presentation/status-tone";
-import { computeNextCheckIn } from "@/lib/schedule/next-check-in";
-import { formatNextCheckIn, formatOccurrence } from "@/lib/schedule/format-schedule";
-import { ActivityPersonFilter } from "@/app/ui/activity-person-filter";
-import { ActivityRow } from "@/app/ui/activity-row";
-import { Avatar } from "@/app/ui/avatars/avatar";
-import { ButtonLink } from "@/app/ui/button";
-import { DailyRecapRow, type DailyRecapItem } from "@/app/ui/daily-recap";
-import { KpiCard } from "@/app/ui/kpi-card";
-import { PeriodSelector } from "@/app/ui/period-selector";
-import { ProfileCard } from "@/app/ui/profile-card";
-import { Card, EmptyState, Notice, PageHeader, PageShell } from "@/app/ui/surfaces";
+import { getRepository } from "@/backend/persistence/store";
+import { describeCallReadiness, describePersonStatus } from "@/backend/presentation/person-status";
+import { computeDailyRecapStatus } from "@/backend/dashboard/daily-recap-status";
+import { detectConfigurationGaps, type ConfigurationGap } from "@/backend/dashboard/configuration-gaps";
+import { groupByDay } from "@/backend/dashboard/group-by-day";
+import { computeUpcomingCheckIns } from "@/backend/dashboard/upcoming-check-ins";
+import { computeCheckInKpis, groupCallEventsByEvent } from "@/backend/kpi/dashboard-kpis";
+import { parsePeriod, periodSince } from "@/backend/kpi/period";
+import { describeAction } from "@/backend/presentation/event-summary";
+import { buildHistoryEventView } from "@/backend/presentation/history-view";
+import { displayAverage, displayCount, displayRate } from "@/backend/presentation/kpi-display";
+import { formatTime } from "@/shared/presentation/format-date";
+import { STATUS_TONE } from "@/backend/presentation/status-tone";
+import { computeNextCheckIn } from "@/backend/scheduling/next-check-in";
+import { formatNextCheckIn, formatOccurrence } from "@/shared/presentation/format-schedule";
+import { ActivityPersonFilter } from "@/frontend/components/activity-person-filter";
+import { ActivityRow } from "@/frontend/components/activity-row";
+import { Avatar } from "@/frontend/components/avatars/avatar";
+import { ButtonLink } from "@/frontend/design-system/button";
+import { DailyRecapRow, type DailyRecapItem } from "@/frontend/components/daily-recap";
+import { KpiCard } from "@/frontend/components/kpi-card";
+import { PeriodSelector } from "@/frontend/components/period-selector";
+import { ProfileCard } from "@/frontend/components/profile-card";
+import { Card, EmptyState, Notice, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 
 // A generous but explicit bound, not an unbounded read — see
 // Repository.listRecentEvents's own contract. Fine for a hackathon-scale
@@ -113,7 +113,7 @@ export default async function DashboardPage({
   );
 
   // "Upcoming check-ins" (§4 of the Stage D brief) — sorted chronologically
-  // and bounded, via the pure lib/dashboard/upcoming-check-ins.ts helper.
+  // and bounded, via the pure backend/dashboard/upcoming-check-ins.ts helper.
   // Paused/inactive/unconfigured profiles are excluded entirely by that
   // helper, never shown with a placeholder. Rendering this list creates
   // nothing: it is read-only, computed fresh on every request.
@@ -194,7 +194,7 @@ export default async function DashboardPage({
   // now" block — one row per person, always (not only those needing
   // attention), so the section reads as an overview of the day rather than a
   // warning list. Detail is not removed, only moved one click away: each row
-  // expands (native <details>, see app/ui/daily-recap.tsx) to the event's own
+  // expands (native <details>, see frontend/components/daily-recap.tsx) to the event's own
   // decision reason and a link to the full event page. Unresolved cases still
   // sort first and keep their own distinct badge tone (DEC-011) — the
   // reframing changes how this reads, not whether an unresolved case is easy
@@ -287,7 +287,7 @@ export default async function DashboardPage({
         </Card>
       ) : null}
 
-      {/* C — KPI strip (§8). Count-based only; see lib/kpi/dashboard-kpis.ts
+      {/* C — KPI strip (§8). Count-based only; see backend/kpi/dashboard-kpis.ts
           for exactly what is and is not computed, and why. */}
       <Card
         title="Operational activity"

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { isFamilyStructuredResult, readCompanionResult } from "@/lib/calle/schemas";
-import { getRepository } from "@/lib/database/store";
-import { MAX_COMPANION_ATTEMPTS } from "@/lib/orchestration/decide-companion-action";
-import { describePersonStatus } from "@/lib/orchestration/person-status";
+import { isFamilyStructuredResult, readCompanionResult } from "@/backend/integrations/calle/schemas";
+import { getRepository } from "@/backend/persistence/store";
+import { MAX_COMPANION_ATTEMPTS } from "@/backend/orchestration/decision-tree";
+import { describePersonStatus } from "@/backend/presentation/person-status";
 import {
   describeAction,
   describeAttentionOutcome,
@@ -15,12 +15,12 @@ import {
   describePersonNotification,
   describeWorkflowStep,
   findConfirmation,
-} from "@/lib/presentation/event-summary";
-import { buildInterventionSummary } from "@/lib/presentation/intervention-summary";
-import { formatTime } from "@/lib/presentation/format-date";
-import { STATUS_TONE } from "@/lib/presentation/status-tone";
-import { InterventionCard } from "@/app/ui/intervention-card";
-import { Badge, Card, PageHeader, PageShell } from "@/app/ui/surfaces";
+} from "@/backend/presentation/event-summary";
+import { buildInterventionSummary } from "@/backend/presentation/intervention-summary";
+import { formatTime } from "@/shared/presentation/format-date";
+import { STATUS_TONE } from "@/backend/presentation/status-tone";
+import { InterventionCard } from "@/frontend/components/intervention-card";
+import { Badge, Card, PageHeader, PageShell } from "@/frontend/design-system/surfaces";
 import { EventPollIndicator } from "./event-poll-indicator";
 import { SafetyNotice } from "./safety-notice";
 

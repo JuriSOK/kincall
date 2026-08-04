@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Nav } from "@/app/ui/nav";
+import { Nav } from "@/frontend/components/nav";
 
 // Every route under this group — /dashboard, /history, /people/*, /events/*
 // — shares this layout. This is deliberately the ONE place a future

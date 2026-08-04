@@ -1,6 +1,6 @@
 "use client";
 
-import { ConfirmDeleteButton } from "@/app/ui/confirm-delete-button";
+import { ConfirmDeleteButton } from "@/frontend/design-system/confirm-delete-button";
 
 interface Props {
   personId: string;
@@ -14,7 +14,7 @@ interface Props {
 
 // Soft deletion (optional interface administration, not core orchestration —
 // see docs/DECISION_LOG.md DEC-009). The behaviour lives in
-// app/ui/confirm-delete-button.tsx, shared with trusted-contact archiving;
+// frontend/design-system/confirm-delete-button.tsx, shared with trusted-contact archiving;
 // this wrapper only supplies the wording and the endpoint.
 export function DeletePersonButton({ personId, personName, mode }: Props) {
   return (
