@@ -404,35 +404,7 @@ The test suite covers:
 - Call delivery time depends on CALL-E and the telephone carrier.
 - Voicemail cannot always be identified reliably.
 - Authentication and additional security are required before public deployment.
-
----
-
-## Hackathon status
-
-KinCall is currently being built for
-[CALL-E: Your Code Is Calling](https://call-e.devpost.com/).
-
-The current hackathon MVP includes:
-
-- specialized AI voice agents;
-- real phone calls;
-- structured conversational outputs;
-- a decision tree;
-- trusted-circle orchestration;
-- context propagation between agents;
-- outcome notification calls;
-- persistent event histories;
-- a complete operational dashboard.
-
-Development and live testing are still ongoing.
-
-Before the final submission, the main remaining work includes:
-
-- completing the final live scenarios;
-- refining the user experience;
-- preparing the demo video;
-- finalizing the Devpost submission.
-
+  
 ---
 
 ## Documentation
