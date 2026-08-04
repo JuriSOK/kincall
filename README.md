@@ -309,10 +309,10 @@ Where the important pieces live:
 
 ### Prerequisites
 
-- Node.js
+- Node.js `^20.9.0 || >=22.0.0`
 - npm
-- Supabase
-- A CALL-E account for real calls
+- A Supabase project
+- A CALL-E account — only needed to place real calls
 
 ### Installation
 
@@ -333,10 +333,42 @@ http://localhost:3000
 
 ### Database
 
+Set `KINCALL_PERSISTENCE=supabase`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in
+`.env.local`, then apply the schema:
+
 ```bash
 npx supabase link --project-ref <your-project-ref>
 npx supabase migration list
 npx supabase db push
+```
+
+The migrations seed one demo profile and its trusted circle. Their stored numbers are
+reserved-for-fiction numbers that KinCall refuses to dial, so the application is safe to
+explore before any real number exists anywhere.
+
+### Placing a real call safely
+
+Real calls are opt-in and cannot happen by accident.
+
+1. **Enable live mode explicitly.** Set `CALLE_MODE=live` and provide `CALLE_API_KEY`.
+   Without both, no outbound call is ever placed.
+2. **Use your own number, with consent.** Create a profile and trusted contacts through the
+   interface, or override a stored number with `KINCALL_PHONE_<ENTITY_ID>` (the id
+   uppercased, non-alphanumerics as underscores — `contact_sophie` →
+   `KINCALL_PHONE_CONTACT_SOPHIE`). Only call people who have agreed to be called.
+3. **A profile must have confirmed consent**, or KinCall refuses to call it — in every mode.
+4. **Reserved-for-fiction numbers are rejected** before any request leaves the process, so a
+   half-configured profile fails loudly instead of dialling a stranger.
+
+> [!WARNING]
+> Live calls consume CALL-E credit and ring a real phone. Keep `CALLE_MODE` unset while
+> exploring the interface, the dashboard or the test suite — none of them need it.
+
+Test data created for a live run can be archived afterwards:
+
+```bash
+node --env-file=.env.local scripts/cleanup-live-test-data.ts           # dry run
+node --env-file=.env.local scripts/cleanup-live-test-data.ts --confirm
 ```
 
 ### Quality checks
@@ -351,7 +383,7 @@ npm run build
 
 ## Testing
 
-KinCall currently includes **925 passing automated tests**.
+KinCall currently includes **970 passing automated tests**.
 
 The test suite covers:
 
