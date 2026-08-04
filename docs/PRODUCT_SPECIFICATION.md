@@ -2,205 +2,205 @@
 
 > **Because every vulnerable person deserves someone who checks in.**
 
-## 1. Présentation du produit
+## 1. Product overview
 
-**KinCall** est un système d’agents téléphoniques autonomes destiné aux personnes âgées, handicapées ou vulnérables vivant seules ou nécessitant un suivi régulier.
+**KinCall** is an autonomous telephone-agent system for older, disabled, or vulnerable people who live alone or need regular check-ins.
 
-KinCall appelle régulièrement la personne afin d’avoir une conversation naturelle avec elle. L’objectif n’est pas de lui faire remplir un questionnaire, mais de créer une interaction familière au cours de laquelle l’agent peut prendre de ses nouvelles et identifier d’éventuelles situations inhabituelles.
+KinCall calls the person regularly to have a natural conversation with them. The goal is not to make them fill out a questionnaire, but to create a familiar interaction during which the agent can check in on them and identify any unusual situations.
 
-Lorsqu’un problème est détecté, un orchestrateur déclenche l’agent téléphonique le plus adapté. Celui-ci peut notamment appeler les proches enregistrés, leur expliquer la situation et trouver une personne capable d’intervenir.
+When a problem is detected, an orchestrator triggers the most appropriate telephone agent. This agent can, among other things, call the registered relatives, explain the situation to them, and find someone able to help.
 
-KinCall ne remplace ni la famille, ni les professionnels de santé, ni les services d’urgence. Il aide le cercle de confiance à rester présent et à mieux se coordonner.
-
----
-
-## 2. Signification du nom
-
-Le mot anglais **kin** désigne la famille, les proches ou les personnes avec lesquelles un individu entretient un lien fort.
-
-Le nom **KinCall** associe donc :
-
-- **Kin** : la famille et le cercle de confiance ;
-- **Call** : l’appel téléphonique, qui constitue le principal moyen d’action du produit.
-
-Le nom reflète la promesse centrale du produit :
-
-> **Utiliser les appels téléphoniques pour maintenir le lien entre une personne vulnérable et ses proches.**
+KinCall replaces neither the family, nor healthcare professionals, nor emergency services. It helps the trusted circle stay present and coordinate better.
 
 ---
 
-## 3. Problème identifié
+## 2. Meaning of the name
 
-De nombreuses personnes âgées, handicapées ou vulnérables vivent seules ou passent une grande partie de leur journée sans interaction avec leurs proches.
+The English word **kin** refers to family, relatives, or people with whom an individual has a strong bond.
 
-Leurs familles souhaitent prendre régulièrement de leurs nouvelles, mais plusieurs difficultés se présentent :
+The name **KinCall** therefore combines:
 
-- les proches ne peuvent pas toujours appeler quotidiennement ;
-- les appels sont parfois oubliés ou reportés ;
-- la personne vulnérable ne souhaite pas forcément déranger sa famille ;
-- elle peut minimiser ses difficultés pour ne pas inquiéter son entourage ;
-- elle peut oublier de signaler un événement important ;
-- une situation inhabituelle nécessite parfois d’appeler plusieurs personnes avant de trouver quelqu’un de disponible ;
-- les SMS, notifications et applications mobiles ne sont pas toujours adaptés au public concerné.
+- **Kin**: family and the trusted circle;
+- **Call**: the phone call, which is the product's main means of action.
 
-Aujourd’hui, le suivi et la coordination reposent principalement sur la disponibilité des proches.
+The name reflects the product's central promise:
+
+> **Use phone calls to maintain the connection between a vulnerable person and their loved ones.**
 
 ---
 
-## 4. Vision du produit
+## 3. Problem identified
 
-KinCall doit devenir une présence téléphonique familière capable de :
+Many older, disabled, or vulnerable people live alone or spend much of their day without interacting with their loved ones.
 
-1. prendre régulièrement des nouvelles d’une personne vulnérable ;
-2. maintenir une conversation naturelle et adaptée à son profil ;
-3. identifier les informations importantes au cours de l’échange ;
-4. détecter les situations qui nécessitent l’attention du cercle de confiance ;
-5. contacter automatiquement les proches dans l’ordre prévu ;
-6. expliquer clairement la situation ;
-7. confirmer qu’une personne peut intervenir ;
-8. enregistrer l’ensemble des actions réalisées.
+Their families want to check in on them regularly, but several difficulties arise:
 
-La vision du produit peut être résumée ainsi :
+- relatives cannot always call every day;
+- calls are sometimes forgotten or postponed;
+- the vulnerable person does not necessarily want to bother their family;
+- they may downplay their difficulties so as not to worry those around them;
+- they may forget to report an important event;
+- an unusual situation sometimes requires calling several people before finding someone available;
+- text messages, notifications, and mobile apps are not always suited to this audience.
 
-> **KinCall appelle pour créer du lien et orchestre les proches lorsque quelque chose semble anormal.**
-
----
-
-## 5. Cibles
-
-### 5.1 Utilisateur principal
-
-La personne qui reçoit les appels de KinCall :
-
-- personne âgée vivant seule ;
-- personne en situation de handicap ;
-- personne atteinte de troubles cognitifs légers ;
-- personne atteinte de la maladie d’Alzheimer, selon un profil conversationnel adapté ;
-- personne isolée ;
-- personne ayant besoin d’un suivi régulier non médical.
-
-### 5.2 Client principal
-
-La personne qui configure et finance le service :
-
-- enfant ;
-- conjoint ;
-- frère ou sœur ;
-- membre de la famille ;
-- aidant ;
-- représentant légal.
-
-Pour le MVP du hackathon, la cible commerciale principale est :
-
-> **Un proche souhaitant veiller sur un membre vulnérable de sa famille sans pouvoir l’appeler constamment.**
-
-### 5.3 Cibles secondaires
-
-À plus long terme, KinCall pourrait être utilisé par :
-
-- services d’aide à domicile ;
-- résidences autonomie ;
-- associations ;
-- établissements spécialisés ;
-- mutuelles ;
-- assureurs ;
-- services de téléassistance.
-
-Ces cibles ne font pas partie du périmètre prioritaire du MVP.
+Today, follow-up and coordination rely mainly on the availability of relatives.
 
 ---
 
-## 6. Proposition de valeur
+## 4. Product vision
 
-### Pour la personne vulnérable
+KinCall should become a familiar telephone presence capable of:
 
-- recevoir régulièrement un appel ;
-- pouvoir discuter sans avoir l’impression d’être interrogée ;
-- ne pas avoir à prendre elle-même l’initiative de déranger ses proches ;
-- bénéficier d’une présence stable et familière ;
-- être aidée lorsque quelque chose ne va pas.
+1. regularly checking in on a vulnerable person;
+2. holding a natural conversation suited to their profile;
+3. identifying important information during the exchange;
+4. detecting situations that require the trusted circle's attention;
+5. automatically contacting relatives in the planned order;
+6. clearly explaining the situation;
+7. confirming that someone can help;
+8. recording every action taken.
 
-### Pour les proches
+The product vision can be summarized as follows:
 
-- être rassurés sans devoir appeler plusieurs fois par jour ;
-- être alertés uniquement lorsqu’une situation mérite leur attention ;
-- recevoir un résumé clair et contextualisé ;
-- éviter de devoir coordonner manuellement toute la famille ;
-- savoir qui a répondu et qui peut intervenir.
-
-### Pour le hackathon
-
-KinCall démontre que CALL-E peut être utilisé non seulement pour passer un appel, mais pour orchestrer plusieurs agents téléphoniques spécialisés autour d’un besoin humain concret.
+> **KinCall calls to create connection, and orchestrates relatives when something seems wrong.**
 
 ---
 
-## 7. Principes du produit
+## 5. Targets
 
-### 7.1 La conversation avant le questionnaire
+### 5.1 Primary user
 
-KinCall ne doit pas donner l’impression de suivre une liste rigide de questions.
+The person who receives KinCall's calls:
 
-L’agent doit introduire naturellement les éléments importants dans la conversation.
+- an older person living alone;
+- a person with a disability;
+- a person with mild cognitive impairment;
+- a person with Alzheimer's disease, using an adapted conversational profile;
+- an isolated person;
+- a person needing regular, non-medical follow-up.
 
-Exemple :
+### 5.2 Primary customer
 
-> Bonjour Marie. Comment allez-vous aujourd’hui ? Vous m’aviez parlé de votre jardin la dernière fois. Avez-vous pu vous en occuper cette semaine ?
+The person who sets up and pays for the service:
 
-La personne peut alors répondre naturellement :
+- a child;
+- a spouse;
+- a sibling;
+- a family member;
+- a caregiver;
+- a legal representative.
 
-> Non, je ne suis pas sortie depuis ma chute.
+For the hackathon MVP, the primary commercial target is:
 
-Cette information peut être identifiée sans que l’appel ressemble à un interrogatoire médical.
+> **A relative who wants to watch over a vulnerable family member without being able to call them constantly.**
 
-### 7.2 Une présence familière
+### 5.3 Secondary targets
 
-Le même agent doit conserver :
+In the longer term, KinCall could be used by:
 
-- le même prénom ;
-- la même voix ;
-- un ton cohérent ;
-- une mémoire limitée des conversations précédentes ;
-- une connaissance des centres d’intérêt et habitudes autorisés.
+- home-care services;
+- independent-living residences;
+- associations;
+- specialized facilities;
+- mutual insurers;
+- insurers;
+- telecare services.
 
-L’objectif est de créer une interaction reconnaissable et rassurante.
-
-### 7.3 Des agents spécialisés
-
-Un seul agent ne doit pas tout faire.
-
-Chaque type d’appel possède :
-
-- un objectif différent ;
-- un niveau de concision différent ;
-- un ton adapté ;
-- des informations spécifiques à transmettre ;
-- des règles distinctes.
-
-### 7.4 Une orchestration invisible pour l’utilisateur
-
-La personne vulnérable ne doit pas avoir à comprendre l’architecture technique.
-
-Pour elle, KinCall reste une seule présence cohérente.
-
-L’architecture multi-agents est utilisée en arrière-plan pour améliorer la sécurité, la précision et l’efficacité du système.
-
-### 7.5 L’humain reste responsable
-
-KinCall accompagne les proches mais ne remplace pas leur jugement.
-
-Le produit ne doit pas :
-
-- établir un diagnostic ;
-- prescrire un traitement ;
-- affirmer qu’une personne est en sécurité ;
-- se substituer à un professionnel ;
-- déclencher sans contrôle des actions critiques non autorisées.
+These targets are not part of the MVP's priority scope.
 
 ---
 
-## 8. Architecture multi-agents
+## 6. Value proposition
 
-KinCall repose sur plusieurs agents spécialisés coordonnés par un orchestrateur central.
+### For the vulnerable person
+
+- receiving a regular call;
+- being able to talk without feeling interrogated;
+- not having to take the initiative to bother their relatives;
+- benefiting from a stable, familiar presence;
+- being helped when something is wrong.
+
+### For relatives
+
+- being reassured without having to call several times a day;
+- being alerted only when a situation deserves their attention;
+- receiving a clear, contextualized summary;
+- avoiding having to manually coordinate the whole family;
+- knowing who answered and who can help.
+
+### For the hackathon
+
+KinCall demonstrates that CALL-E can be used not just to place a call, but to orchestrate several specialized telephone agents around a concrete human need.
+
+---
+
+## 7. Product principles
+
+### 7.1 Conversation before questionnaire
+
+KinCall must not give the impression of following a rigid list of questions.
+
+The agent must naturally weave important elements into the conversation.
+
+Example:
+
+> Hello Marie. How are you today? You told me about your garden last time. Were you able to tend to it this week?
+
+The person can then answer naturally:
+
+> No, I haven't gone out since my fall.
+
+This information can be identified without the call feeling like a medical interrogation.
+
+### 7.2 A familiar presence
+
+The same agent must keep:
+
+- the same first name;
+- the same voice;
+- a consistent tone;
+- a limited memory of previous conversations;
+- knowledge of authorized interests and habits.
+
+The goal is to create a recognizable and reassuring interaction.
+
+### 7.3 Specialized agents
+
+A single agent should not do everything.
+
+Each type of call has:
+
+- a different goal;
+- a different level of conciseness;
+- an adapted tone;
+- specific information to convey;
+- distinct rules.
+
+### 7.4 Orchestration invisible to the user
+
+The vulnerable person should not have to understand the technical architecture.
+
+To them, KinCall remains a single, coherent presence.
+
+The multi-agent architecture is used behind the scenes to improve the system's safety, accuracy, and efficiency.
+
+### 7.5 The human stays in charge
+
+KinCall supports relatives but does not replace their judgment.
+
+The product must not:
+
+- make a diagnosis;
+- prescribe a treatment;
+- assert that a person is safe;
+- substitute for a professional;
+- trigger unauthorized critical actions without control.
+
+---
+
+## 8. Multi-agent architecture
+
+KinCall relies on several specialized agents coordinated by a central orchestrator.
 
 ```text
                     ┌────────────────────┐
@@ -235,76 +235,76 @@ KinCall repose sur plusieurs agents spécialisés coordonnés par un orchestrate
 
 ---
 
-## 9. Les agents
+## 9. The agents
 
 ### 9.1 Companion Agent
 
 #### Mission
 
-Créer une conversation naturelle avec la personne vulnérable et collecter les informations utiles sans transformer l’appel en questionnaire.
+Create a natural conversation with the vulnerable person and gather useful information without turning the call into a questionnaire.
 
-#### Comportement
+#### Behavior
 
-Le Companion Agent :
+The Companion Agent:
 
-- appelle la personne à l’heure prévue ;
-- se présente clairement comme un assistant automatisé ;
-- utilise une voix et un prénom stables ;
-- démarre la conversation à partir d’un sujet familier ;
-- se souvient des éléments autorisés des conversations précédentes ;
-- laisse la personne parler ;
-- reformule si une réponse est ambiguë ;
-- pose des questions simples ;
-- évite les formulations anxiogènes ;
-- adapte son langage au profil enregistré ;
-- termine l’appel calmement.
+- calls the person at the scheduled time;
+- clearly identifies itself as an automated assistant;
+- uses a stable voice and first name;
+- starts the conversation from a familiar topic;
+- remembers authorized elements from previous conversations;
+- lets the person talk;
+- rephrases if an answer is ambiguous;
+- asks simple questions;
+- avoids anxiety-inducing phrasing;
+- adapts its language to the registered profile;
+- ends the call calmly.
 
-#### Exemples d’adaptation
+#### Adaptation examples
 
-##### Profil standard
+##### Standard profile
 
-- conversation chaleureuse ;
-- questions ouvertes ;
-- références aux habitudes précédentes.
+- warm conversation;
+- open-ended questions;
+- references to previous habits.
 
-##### Personne atteinte de troubles cognitifs
+##### Person with cognitive impairment
 
-- phrases courtes ;
-- une seule question à la fois ;
-- absence de formulation culpabilisante ;
-- répétitions possibles ;
-- pas de question du type « Vous ne vous souvenez pas ? ».
+- short sentences;
+- one question at a time;
+- no guilt-inducing phrasing;
+- repetition allowed;
+- no questions like "Don't you remember?"
 
-##### Personne avec difficulté d’élocution
+##### Person with speech difficulty
 
-- pauses plus longues ;
-- absence d’interruption ;
-- reformulation pour confirmation ;
-- réponses simples acceptées.
+- longer pauses;
+- no interrupting;
+- rephrasing to confirm;
+- simple answers accepted.
 
-#### Responsabilités
+#### Responsibilities
 
-Le Companion Agent peut :
+The Companion Agent can:
 
-- discuter ;
-- clarifier une information ;
-- extraire les faits importants ;
-- produire un compte rendu structuré.
+- converse;
+- clarify information;
+- extract important facts;
+- produce a structured report.
 
-Il ne peut pas :
+It cannot:
 
-- décider seul d’une escalade ;
-- poser un diagnostic ;
-- appeler les proches ;
-- appeler les secours ;
-- promettre qu’une personne va intervenir.
+- decide on an escalation by itself;
+- make a diagnosis;
+- call relatives;
+- call emergency services;
+- promise that someone will help.
 
-#### Sortie attendue
+#### Expected output
 
 ```json
 {
   "call_status": "completed",
-  "conversation_summary": "Marie indique être tombée hier et avoir des difficultés à marcher.",
+  "conversation_summary": "Marie says she fell yesterday and is having difficulty walking.",
   "signals": [
     {
       "type": "fall_mentioned",
@@ -331,21 +331,21 @@ Il ne peut pas :
 
 #### Mission
 
-Analyser le compte rendu du Companion Agent et décider de la prochaine action autorisée.
+Analyze the Companion Agent's report and decide the next authorized action.
 
-L’Orchestrator ne passe aucun appel directement.
+The Orchestrator never places a call directly.
 
-#### Entrées
+#### Inputs
 
-- résultat structuré du Companion Agent ;
-- profil de la personne ;
-- règles configurées par la famille ;
-- liste ordonnée des contacts ;
-- historique récent ;
-- statut des appels précédents ;
-- restrictions de sécurité.
+- the Companion Agent's structured result;
+- the person's profile;
+- rules configured by the family;
+- the ordered list of contacts;
+- recent history;
+- the status of previous calls;
+- safety restrictions.
 
-#### Décisions possibles
+#### Possible decisions
 
 ```text
 NO_ACTION
@@ -357,28 +357,28 @@ REQUEST_HUMAN_REVIEW
 ACTIVATE_CONFIGURED_ESCALATION
 ```
 
-#### Exemple de logique simplifiée
+#### Example of simplified logic
 
 ```text
-Si l’appel n’a pas été répondu :
-    programmer une nouvelle tentative ;
-    si le nombre maximal de tentatives est atteint :
-        contacter le premier proche.
+If the call was not answered:
+    schedule another attempt;
+    if the maximum number of attempts has been reached:
+        contact the first relative.
 
-Si la personne mentionne une chute sans difficulté actuelle :
-    contacter un proche selon les règles configurées.
+If the person mentions a fall with no current difficulty:
+    contact a relative according to the configured rules.
 
-Si la personne mentionne une chute et ne peut pas se déplacer :
-    priorité élevée ;
-    contacter immédiatement le premier proche ;
-    poursuivre la cascade si aucune prise en charge n’est confirmée.
+If the person mentions a fall and cannot move:
+    high priority;
+    immediately contact the first relative;
+    continue the cascade if no one confirms taking charge.
 
-Si aucun signal inhabituel n’est détecté :
-    clôturer l’appel ;
-    enregistrer un résumé.
+If no unusual signal is detected:
+    close the call;
+    log a summary.
 ```
 
-#### Sortie attendue
+#### Expected output
 
 ```json
 {
@@ -400,38 +400,38 @@ Si aucun signal inhabituel n’est détecté :
 
 #### Mission
 
-Informer efficacement un proche et obtenir une confirmation d’intervention.
+Efficiently inform a relative and obtain a confirmation of help.
 
-Contrairement au Companion Agent, le Family Agent ne cherche pas à mener une longue conversation.
+Unlike the Companion Agent, the Family Agent does not try to hold a long conversation.
 
-Il doit être :
+It must be:
 
-- direct ;
-- factuel ;
-- calme ;
-- transparent ;
-- orienté vers une décision.
+- direct;
+- factual;
+- calm;
+- transparent;
+- decision-oriented.
 
-#### Exemple d’appel
+#### Example call
 
-> Bonjour Julie. Je suis KinCall, l’assistant téléphonique configuré pour prendre régulièrement des nouvelles de votre maman.  
+> Hello Julie. I'm KinCall, the telephone assistant set up to regularly check in on your mother.
 >
-> Je viens de terminer un appel avec elle. Elle m’a indiqué être tombée hier et avoir aujourd’hui des difficultés à marcher. Elle ne souhaitait pas vous déranger.  
+> I just finished a call with her. She told me she fell yesterday and is having difficulty walking today. She didn't want to bother you.
 >
-> Pouvez-vous la rappeler ou passer la voir aujourd’hui ?
+> Could you call her back or go see her today?
 
-#### Réponses recherchées
+#### Responses sought
 
-- le proche peut intervenir ;
-- le proche ne peut pas intervenir ;
-- le proche demande davantage d’informations ;
-- le proche souhaite appeler lui-même la personne ;
-- le proche demande de contacter le suivant ;
-- aucune réponse ;
-- numéro occupé ;
-- appel refusé.
+- the relative can help;
+- the relative cannot help;
+- the relative asks for more information;
+- the relative wants to call the person themselves;
+- the relative asks to contact the next person;
+- no answer;
+- busy signal;
+- call declined.
 
-#### Sortie attendue
+#### Expected output
 
 ```json
 {
@@ -442,62 +442,62 @@ Il doit être :
   "intervention_type": "visit",
   "estimated_time": "18:00",
   "contact_next_person": false,
-  "summary": "Julie confirme qu’elle passera voir Marie à 18 h."
+  "summary": "Julie confirms she will visit Marie at 18:00."
 }
 ```
 
-#### Comportement en cas d’échec
+#### Behavior on failure
 
 ```text
-Julie ne répond pas
+Julie does not answer
         ↓
-Orchestrator reçoit NO_ANSWER
+Orchestrator receives NO_ANSWER
         ↓
-Marc est sélectionné
+Marc is selected
         ↓
-Family Agent appelle Marc
+Family Agent calls Marc
         ↓
-Marc confirme qu’il peut intervenir
+Marc confirms he can help
         ↓
-La cascade s’arrête
+The cascade stops
 ```
 
 ### 9.4 Escalation Agent
 
-#### Statut dans le MVP
+#### Status in the MVP
 
-L’Escalation Agent peut être présenté dans l’architecture, mais son intégration avec des services d’urgence réels ne fait pas partie du MVP principal.
+The Escalation Agent can be presented in the architecture, but its integration with real emergency services is not part of the core MVP.
 
 #### Mission
 
-Appliquer une procédure d’escalade explicitement configurée par la famille ou l’organisation responsable.
+Apply an escalation procedure explicitly configured by the family or the responsible organization.
 
-Il peut, selon le contexte autorisé :
+Depending on the authorized context, it can:
 
-- appeler un aidant professionnel ;
-- appeler un service de téléassistance ;
-- appeler un responsable désigné ;
-- transmettre les informations nécessaires à un opérateur humain ;
-- préparer un dossier de situation ;
-- demander une validation humaine.
+- call a professional caregiver;
+- call a telecare service;
+- call a designated manager;
+- forward the necessary information to a human operator;
+- prepare a situation file;
+- request human validation.
 
-#### Limite critique
+#### Critical limitation
 
-KinCall ne doit pas être présenté comme un dispositif garantissant la prise en charge d’une urgence médicale.
+KinCall must not be presented as a device that guarantees a medical emergency will be handled.
 
-Dans le MVP :
+In the MVP:
 
-- aucun appel réel aux pompiers, au SAMU ou à un hôpital n’est effectué ;
-- les scénarios d’urgence sont simulés ou redirigés vers un numéro de test autorisé ;
-- une validation humaine est requise avant toute action critique.
+- no real call is made to firefighters, emergency medical services, or a hospital;
+- emergency scenarios are simulated or redirected to an authorized test number;
+- human validation is required before any critical action.
 
 ---
 
-## 10. Cercle de confiance
+## 10. Trusted circle
 
-Chaque personne vulnérable possède un cercle de confiance ordonné.
+Each vulnerable person has an ordered trusted circle.
 
-Exemple :
+Example:
 
 ```json
 [
@@ -522,104 +522,104 @@ Exemple :
 ]
 ```
 
-L’ordre détermine la cascade d’appels.
+The order determines the call cascade.
 
-L’Orchestrator arrête la cascade dès qu’un contact confirme qu’il prend la situation en charge.
+The Orchestrator stops the cascade as soon as a contact confirms they are taking charge of the situation.
 
 ---
 
-## 11. Parcours utilisateur principal
+## 11. Main user journey
 
-### 11.1 Configuration
+### 11.1 Setup
 
-Le proche crée le profil de la personne vulnérable.
+The relative creates the vulnerable person's profile.
 
-Il renseigne :
+They provide:
 
-- prénom ;
-- numéro de téléphone ;
-- langue ;
-- horaires préférés ;
-- fréquence des appels ;
-- besoins d’adaptation ;
-- centres d’intérêt autorisés ;
-- contacts de confiance ;
-- ordre des contacts ;
-- règles d’escalade ;
-- consentements.
+- first name;
+- phone number;
+- language;
+- preferred times;
+- call frequency;
+- adaptation needs;
+- authorized interests;
+- trusted contacts;
+- contact order;
+- escalation rules;
+- consents.
 
-### 11.2 Appel régulier
+### 11.2 Regular call
 
-À l’heure prévue :
+At the scheduled time:
 
-1. le Companion Agent appelle ;
-2. la personne décroche ;
-3. une conversation naturelle commence ;
-4. les informations pertinentes sont extraites ;
-5. un compte rendu structuré est généré.
+1. the Companion Agent calls;
+2. the person answers;
+3. a natural conversation begins;
+4. relevant information is extracted;
+5. a structured report is generated.
 
-### 11.3 Décision
+### 11.3 Decision
 
-L’Orchestrator analyse le compte rendu.
+The Orchestrator analyzes the report.
 
-Il peut :
+It can:
 
-- clôturer l’événement ;
-- programmer un nouvel appel ;
-- contacter un proche ;
-- lancer une cascade ;
-- demander une intervention humaine.
+- close the event;
+- schedule a new call;
+- contact a relative;
+- launch a cascade;
+- request human intervention.
 
 ### 11.4 Coordination
 
-Le Family Agent appelle les contacts dans l’ordre défini.
+The Family Agent calls contacts in the defined order.
 
-Chaque appel cherche à obtenir une réponse concrète :
+Each call seeks a concrete answer:
 
-> Pouvez-vous intervenir ?
+> Can you help?
 
-### 11.5 Clôture
+### 11.5 Closing
 
-L’événement est clôturé lorsqu’une condition est remplie :
+The event is closed when one condition is met:
 
-- aucun problème n’a été détecté ;
-- un proche a confirmé une intervention ;
-- un opérateur humain a repris le dossier ;
-- la procédure configurée est terminée.
+- no problem was detected;
+- a relative confirmed they would help;
+- a human operator took over the case;
+- the configured procedure is complete.
 
 ---
 
-## 12. Scénario principal du MVP
+## 12. Main MVP scenario
 
-### Contexte
+### Context
 
-Marie a 82 ans et vit seule.
+Marie is 82 years old and lives alone.
 
-Sa fille Julie a configuré KinCall pour l’appeler chaque matin.
+Her daughter Julie set up KinCall to call her every morning.
 
-### Déroulement
+### Walkthrough
 
-#### Étape 1 — Appel de la personne
+#### Step 1 — Calling the person
 
-Le Companion Agent appelle Marie.
+The Companion Agent calls Marie.
 
-> Bonjour Marie. Comment allez-vous ce matin ? La dernière fois, vous m’aviez dit que vous souhaitiez vous occuper de votre jardin.
+> Hello Marie. How are you this morning? Last time, you told me you wanted to tend to your garden.
 
-Marie répond :
+Marie replies:
 
-> Je n’ai pas pu. Je suis tombée hier, mais je ne voulais pas embêter Julie.
+> I couldn't. I fell yesterday, but I didn't want to bother Julie.
 
-Le Companion Agent clarifie calmement :
+The Companion Agent calmly clarifies:
 
-> Je suis désolé de l’apprendre. Est-ce que vous arrivez à vous déplacer aujourd’hui ?
+> I'm sorry to hear that. Are you able to get around today?
 
-Marie répond :
+Marie replies:
 
-> Très difficilement.
+> Only with great difficulty.
 
-#### Étape 2 — Analyse
+#### Step 2 — Analysis
 
-Le Companion Agent produit un compte rendu :
+The Companion Agent produces a report:
 
 ```json
 {
@@ -630,104 +630,104 @@ Le Companion Agent produit un compte rendu :
 }
 ```
 
-#### Étape 3 — Orchestration
+#### Step 3 — Orchestration
 
-L’Orchestrator décide de contacter Julie.
+The Orchestrator decides to contact Julie.
 
-#### Étape 4 — Appel du proche
+#### Step 4 — Calling the relative
 
-Le Family Agent appelle Julie.
+The Family Agent calls Julie.
 
-> Bonjour Julie. Je viens de parler avec votre maman. Elle m’a indiqué être tombée hier et avoir des difficultés à se déplacer. Elle ne souhaitait pas vous déranger. Pouvez-vous passer la voir aujourd’hui ?
+> Hello Julie. I just spoke with your mother. She told me she fell yesterday and is having difficulty getting around. She didn't want to bother you. Could you go see her today?
 
-Julie répond :
+Julie replies:
 
-> Oui, j’irai vers 18 heures.
+> Yes, I'll go around 6 p.m.
 
-#### Étape 5 — Confirmation
+#### Step 5 — Confirmation
 
-Le dashboard affiche :
+The dashboard shows:
 
 ```text
 Marie Dupont
-Situation : prise en charge confirmée
+Situation: help confirmed
 
-Événement détecté :
-- chute mentionnée ;
-- difficulté à se déplacer.
+Event detected:
+- fall mentioned;
+- difficulty getting around.
 
-Actions :
-- Julie contactée ;
-- visite confirmée à 18 h.
+Actions:
+- Julie contacted;
+- visit confirmed at 18:00.
 ```
 
 ---
 
-## 13. Fonctionnalités du MVP
+## 13. MVP features
 
-### 13.1 Obligatoires
+### 13.1 Required
 
-- création d’un profil de personne vulnérable ;
-- création d’un cercle de confiance ;
-- configuration de l’ordre des contacts ;
-- lancement manuel d’un appel de démonstration ;
-- appel CALL-E vers la personne vulnérable ;
-- conversation naturelle ;
-- résumé de l’appel ;
-- extraction d’informations structurées ;
-- classification simple de la situation ;
-- déclenchement de l’Orchestrator ;
-- appel CALL-E vers un proche ;
-- récupération de sa réponse ;
-- cascade vers le contact suivant en cas d’absence ;
-- arrêt de la cascade après confirmation ;
-- dashboard affichant le statut du workflow ;
-- historique des appels et décisions.
+- creating a vulnerable-person profile;
+- creating a trusted circle;
+- configuring contact order;
+- manually launching a demo call;
+- a CALL-E call to the vulnerable person;
+- natural conversation;
+- call summary;
+- structured information extraction;
+- simple classification of the situation;
+- triggering the Orchestrator;
+- a CALL-E call to a relative;
+- retrieving their answer;
+- cascading to the next contact if unanswered;
+- stopping the cascade after confirmation;
+- a dashboard showing workflow status;
+- a history of calls and decisions.
 
-### 13.2 Optionnelles
+### 13.2 Optional
 
-- planification récurrente ;
-- mémoire des conversations ;
-- plusieurs profils conversationnels ;
-- personnalisation de la voix ;
-- choix de la langue ;
-- nouvel appel vers la personne pour confirmer qu’un proche arrive ;
-- résumé envoyé par email ou SMS ;
-- appel d’un aidant professionnel de test.
+- recurring scheduling;
+- conversation memory;
+- multiple conversational profiles;
+- voice customization;
+- language selection;
+- a new call to the person to confirm a relative is on their way;
+- a summary sent by email or SMS;
+- calling a test professional caregiver.
 
-### 13.3 Hors périmètre du MVP
+### 13.3 Out of scope for the MVP
 
-- diagnostic médical ;
-- analyse clinique ;
-- appel réel aux services d’urgence ;
-- connexion à un dossier médical ;
-- gestion de prescriptions ;
-- reconnaissance certifiée de pathologies ;
-- surveillance continue ;
-- détection d’une chute par capteur ;
-- localisation en temps réel ;
-- facturation ;
-- application mobile complète ;
-- portail pour EHPAD ;
-- intégration à des hôpitaux réels.
+- medical diagnosis;
+- clinical analysis;
+- real calls to emergency services;
+- connection to a medical record;
+- prescription management;
+- certified recognition of medical conditions;
+- continuous monitoring;
+- sensor-based fall detection;
+- real-time location tracking;
+- billing;
+- a full mobile application;
+- a portal for nursing homes;
+- integration with real hospitals.
 
 ---
 
-## 14. Interface du MVP
+## 14. MVP interface
 
-### 14.1 Page d’accueil
+### 14.1 Home page
 
-Contenu :
+Content:
 
-- présentation courte de KinCall ;
-- bouton « Add a loved one » ;
-- liste des profils existants.
+- a short introduction to KinCall;
+- an "Add a loved one" button;
+- a list of existing profiles.
 
-### 14.2 Fiche de la personne
+### 14.2 Person profile page
 
 ```text
 Marie Dupont
-82 ans
+Age 82
 
 Status
 Needs attention
@@ -741,7 +741,7 @@ Trusted circle
 3. Nicole — Neighbour
 ```
 
-### 14.3 Vue d’un événement
+### 14.3 Event view
 
 ```text
 09:02 — Check-in call started
@@ -755,7 +755,7 @@ Trusted circle
 09:14 — Case closed
 ```
 
-### 14.4 Résumé
+### 14.4 Summary
 
 ```text
 What happened?
@@ -770,7 +770,7 @@ Marc confirmed that he will visit at 17:30.
 
 ---
 
-## 15. États d’un événement
+## 15. Event states
 
 ```text
 SCHEDULED
@@ -790,7 +790,7 @@ CASE_CLOSED
 
 ---
 
-## 16. Données principales
+## 16. Core data
 
 ### VulnerablePerson
 
@@ -850,178 +850,178 @@ CASE_CLOSED
 
 ---
 
-## 17. Règles de sécurité
+## 17. Safety rules
 
-### 17.1 Consentement
+### 17.1 Consent
 
-Les personnes appelées doivent avoir accepté :
+The people being called must have agreed to:
 
-- de recevoir des appels automatisés ;
-- que les conversations soient analysées ;
-- que certaines informations soient communiquées aux contacts désignés.
+- receive automated calls;
+- have their conversations analyzed;
+- have certain information shared with designated contacts.
 
-### 17.2 Transparence
+### 17.2 Transparency
 
-KinCall doit toujours se présenter comme un agent automatisé.
+KinCall must always identify itself as an automated agent.
 
-Il ne doit pas prétendre être :
+It must not claim to be:
 
-- un membre de la famille ;
-- un médecin ;
-- un infirmier ;
-- un service public ;
-- un opérateur d’urgence humain.
+- a family member;
+- a doctor;
+- a nurse;
+- a public service;
+- a human emergency operator.
 
-### 17.3 Données partagées
+### 17.3 Shared data
 
-Le Family Agent ne doit transmettre que les informations nécessaires à la prise en charge.
+The Family Agent must share only the information necessary for the relative to help.
 
-Il ne doit pas communiquer l’intégralité de la conversation sans autorisation.
+It must not share the full conversation without authorization.
 
-### 17.4 Urgences
+### 17.4 Emergencies
 
-Pour le hackathon :
+For the hackathon:
 
-- les appels aux services d’urgence sont exclus du scénario réel ;
-- les appels sont effectués uniquement vers des numéros de test autorisés ;
-- l’Escalation Agent est présenté comme une extension future ;
-- aucune promesse médicale n’est faite.
+- calls to emergency services are excluded from the real scenario;
+- calls are made only to authorized test numbers;
+- the Escalation Agent is presented as a future extension;
+- no medical promise is made.
 
-### 17.5 Incertitude
+### 17.5 Uncertainty
 
-Lorsqu’une information est incertaine, KinCall doit utiliser des formulations prudentes.
+When information is uncertain, KinCall must use cautious wording.
 
-Exemple :
+Example:
 
-> Marie a indiqué avoir des difficultés à marcher.
+> Marie indicated she is having difficulty walking.
 
-Et non :
+And not:
 
-> Marie ne peut plus marcher.
+> Marie can no longer walk.
 
-### 17.6 Faux positifs
+### 17.6 False positives
 
-Le système doit distinguer :
+The system must distinguish between:
 
-- un fait explicitement déclaré ;
-- une interprétation ;
-- une variation par rapport aux habitudes ;
-- une donnée incertaine.
-
----
-
-## 18. Indicateurs de succès
-
-Pour le MVP, les indicateurs de démonstration sont :
-
-- appel vers la personne correctement exécuté ;
-- conversation terminée ;
-- résultat structuré récupéré ;
-- situation pertinente correctement identifiée ;
-- décision d’orchestration générée ;
-- appel vers un proche déclenché ;
-- réponse du proche extraite ;
-- cascade fonctionnelle en cas d’absence ;
-- intervention confirmée ;
-- dashboard mis à jour ;
-- scénario complet réalisé sans intervention manuelle technique.
-
-### Indicateurs produit futurs
-
-- taux d’appels répondus ;
-- taux de situations prises en charge ;
-- temps moyen avant confirmation d’un proche ;
-- nombre moyen de contacts appelés ;
-- taux de faux positifs ;
-- taux d’escalades inutiles ;
-- satisfaction des proches ;
-- satisfaction des personnes appelées ;
-- taux de conservation du service.
+- an explicitly stated fact;
+- an interpretation;
+- a change from usual habits;
+- uncertain data.
 
 ---
 
-## 19. Différenciation
+## 18. Success indicators
 
-KinCall se distingue d’un agent vocal classique grâce à quatre éléments.
+For the MVP, the demonstration indicators are:
 
-### 19.1 La conversation adaptative
+- the call to the person executed correctly;
+- conversation completed;
+- structured result retrieved;
+- the relevant situation correctly identified;
+- an orchestration decision generated;
+- a call to a relative triggered;
+- the relative's answer extracted;
+- a working cascade when there is no answer;
+- help confirmed;
+- dashboard updated;
+- the full scenario completed without manual technical intervention.
 
-Le Companion Agent adapte son comportement au profil de la personne.
+### Future product indicators
 
-### 19.2 La mémoire relationnelle
-
-L’agent peut utiliser certains éléments des conversations précédentes pour rendre l’appel plus naturel.
-
-### 19.3 L’architecture multi-agents
-
-Chaque type d’appel est exécuté par un agent spécialisé.
-
-### 19.4 L’orchestration téléphonique
-
-KinCall ne se contente pas de détecter une situation. Il contacte les personnes appropriées jusqu’à obtenir une prise en charge confirmée.
-
----
-
-## 20. Pourquoi CALL-E est indispensable
-
-Sans CALL-E, KinCall ne peut pas fournir sa proposition de valeur principale.
-
-Le produit repose sur la capacité à :
-
-- appeler une personne qui n’utilise pas nécessairement d’application ;
-- mener une conversation vocale ;
-- s’adapter aux réponses ;
-- collecter des informations ;
-- appeler plusieurs contacts ;
-- gérer les absences et échecs ;
-- obtenir des engagements vocaux ;
-- récupérer des transcriptions et résultats structurés.
-
-Le téléphone n’est donc pas une fonctionnalité secondaire.
-
-> **Le téléphone est l’interface principale et le moyen d’action de KinCall.**
+- answered-call rate;
+- rate of situations handled;
+- average time before a relative confirms;
+- average number of contacts called;
+- false-positive rate;
+- rate of unnecessary escalations;
+- relatives' satisfaction;
+- satisfaction of the people called;
+- service retention rate.
 
 ---
 
-## 21. Positionnement pour le hackathon
+## 19. Differentiation
 
-### Phrase courte
+KinCall distinguishes itself from a standard voice agent through four elements.
+
+### 19.1 Adaptive conversation
+
+The Companion Agent adapts its behavior to the person's profile.
+
+### 19.2 Relational memory
+
+The agent can use certain elements from previous conversations to make the call feel more natural.
+
+### 19.3 Multi-agent architecture
+
+Each type of call is handled by a specialized agent.
+
+### 19.4 Telephone orchestration
+
+KinCall does not simply detect a situation. It contacts the appropriate people until help is confirmed.
+
+---
+
+## 20. Why CALL-E is essential
+
+Without CALL-E, KinCall cannot deliver its core value proposition.
+
+The product relies on the ability to:
+
+- call a person who does not necessarily use an app;
+- hold a voice conversation;
+- adapt to responses;
+- gather information;
+- call multiple contacts;
+- handle no-answers and failures;
+- obtain verbal commitments;
+- retrieve transcripts and structured results.
+
+The phone is therefore not a secondary feature.
+
+> **The phone is KinCall's primary interface and means of action.**
+
+---
+
+## 21. Positioning for the hackathon
+
+### Short statement
 
 > **KinCall is a multi-agent phone care coordinator that checks in on vulnerable people and automatically coordinates their trusted contacts when something seems wrong.**
 
-### Pitch de 30 secondes
+### 30-second pitch
 
 > Many vulnerable people live alone and do not always tell their families when something is wrong because they do not want to disturb them. KinCall uses a familiar conversational agent to call them regularly. If an unusual situation is detected, an orchestrator launches a specialised family agent that contacts trusted relatives until someone confirms they can help. KinCall does not replace families. It helps them stay present when it matters most.
 
-### Message principal
+### Core message
 
 > **KinCall does not simply detect that something is wrong. It makes sure that someone takes care of it.**
 
 ---
 
-## 22. Démonstration du hackathon
+## 22. Hackathon demo
 
-### Durée cible
+### Target duration
 
-Moins de trois minutes.
+Under three minutes.
 
-### Scénario
+### Scenario
 
-#### 0:00–0:20 — Problème
+#### 0:00–0:20 — Problem
 
-Présentation de Marie, 82 ans, vivant seule.
+Introducing Marie, 82, living alone.
 
-Sa fille ne peut pas l’appeler chaque matin.
+Her daughter cannot call her every morning.
 
 #### 0:20–1:10 — Companion Agent
 
-KinCall appelle Marie.
+KinCall calls Marie.
 
-Elle mentionne une chute et explique qu’elle ne voulait pas déranger sa fille.
+She mentions a fall and explains she didn't want to bother her daughter.
 
 #### 1:10–1:25 — Orchestrator
 
-Le dashboard montre :
+The dashboard shows:
 
 ```text
 Fall mentioned
@@ -1031,18 +1031,18 @@ Trusted contact required
 
 #### 1:25–2:10 — Family Agent
 
-KinCall appelle Julie.
+KinCall calls Julie.
 
-Premier scénario possible :
+One possible scenario:
 
-- Julie ne répond pas ;
-- l’Orchestrator appelle Marc.
+- Julie does not answer;
+- the Orchestrator calls Marc.
 
-Marc répond et confirme qu’il passera à 17 h 30.
+Marc answers and confirms he will visit at 5:30 p.m.
 
-#### 2:10–2:40 — Résultat
+#### 2:10–2:40 — Result
 
-Le dashboard affiche :
+The dashboard shows:
 
 ```text
 Situation detected
@@ -1053,7 +1053,7 @@ Case closed
 
 #### 2:40–3:00 — Conclusion
 
-Présentation de l’architecture :
+Presenting the architecture:
 
 ```text
 Companion Agent
@@ -1063,143 +1063,143 @@ Orchestrator
 Family Agent
 ```
 
-Conclusion :
+Conclusion:
 
 > **One conversation detected the problem. A coordinated sequence of calls made sure someone would help.**
 
 ---
 
-## 23. Priorités de développement
+## 23. Development priorities
 
-### Priorité 1 — Boucle principale
+### Priority 1 — Main loop
 
-- profil Marie ;
-- appel Companion ;
-- extraction structurée ;
-- décision de l’Orchestrator ;
-- appel Family ;
-- confirmation ;
+- Marie's profile;
+- Companion call;
+- structured extraction;
+- Orchestrator decision;
+- Family call;
+- confirmation;
 - dashboard.
 
-### Priorité 2 — Cascade
+### Priority 2 — Cascade
 
-- premier proche sans réponse ;
-- appel du deuxième proche ;
-- arrêt après confirmation.
+- first relative with no answer;
+- calling the second relative;
+- stopping after confirmation.
 
-### Priorité 3 — Personnalisation
+### Priority 3 — Personalization
 
-- profil conversationnel ;
-- mémoire simple ;
-- centres d’intérêt ;
-- ton adapté.
+- conversational profile;
+- simple memory;
+- interests;
+- adapted tone.
 
-### Priorité 4 — Présentation
+### Priority 4 — Presentation
 
-- interface claire ;
-- timeline ;
-- architecture ;
-- vidéo ;
-- documentation ;
-- contribution GitHub liée au hackathon.
+- a clear interface;
+- timeline;
+- architecture;
+- video;
+- documentation;
+- the GitHub contribution tied to the hackathon.
 
 ---
 
-## 24. Risques du projet
+## 24. Project risks
 
-### Risque technique
+### Technical risk
 
-La qualité de la conversation peut varier.
+Conversation quality may vary.
 
-**Réponse :**
+**Mitigation:**
 
-- limiter le scénario de démonstration ;
-- préparer des consignes précises ;
-- utiliser des résultats structurés ;
-- prévoir un mode de simulation pour les répétitions.
+- limiting the demo scenario;
+- preparing precise instructions;
+- using structured results;
+- providing a simulation mode for rehearsals.
 
-### Risque de surcomplexité
+### Over-complexity risk
 
-Le produit peut devenir trop large.
+The product could become too broad.
 
-**Réponse :**
+**Mitigation:**
 
-Le MVP se limite à :
+The MVP is limited to:
 
 ```text
-Appeler la personne
+Call the person
         ↓
-Détecter une situation
+Detect a situation
         ↓
-Appeler les proches
+Call relatives
         ↓
-Obtenir une confirmation
+Obtain confirmation
 ```
 
-### Risque médical
+### Medical risk
 
-Le produit peut être perçu comme un dispositif médical.
+The product could be perceived as a medical device.
 
-**Réponse :**
+**Mitigation:**
 
-- absence de diagnostic ;
-- absence de recommandation médicale ;
-- absence d’appel réel aux secours ;
-- positionnement centré sur la communication et la coordination.
+- no diagnosis;
+- no medical recommendation;
+- no real calls to emergency services;
+- positioning centered on communication and coordination.
 
-### Risque éthique
+### Ethical risk
 
-La personne peut se sentir surveillée.
+The person may feel surveilled.
 
-**Réponse :**
+**Mitigation:**
 
-- consentement explicite ;
-- transparence ;
-- conversation naturelle ;
-- données minimales ;
-- contrôle par la personne et ses proches.
-
----
-
-## 25. Non-objectifs
-
-KinCall n’a pas pour objectif de :
-
-- remplacer les conversations familiales ;
-- simuler un membre de la famille ;
-- surveiller secrètement une personne ;
-- remplacer une téléassistance certifiée ;
-- remplacer un professionnel de santé ;
-- diagnostiquer une maladie ;
-- décider seul d’une intervention médicale ;
-- appeler automatiquement les secours sans procédure contrôlée.
+- explicit consent;
+- transparency;
+- natural conversation;
+- minimal data;
+- control by the person and their relatives.
 
 ---
 
-## 26. Résumé final
+## 25. Non-goals
 
-KinCall est un système multi-agents reposant sur CALL-E.
+KinCall does not aim to:
 
-Son fonctionnement principal est simple :
+- replace family conversations;
+- impersonate a family member;
+- secretly monitor a person;
+- replace certified telecare;
+- replace a healthcare professional;
+- diagnose an illness;
+- decide alone on a medical intervention;
+- automatically call emergency services without a controlled procedure.
+
+---
+
+## 26. Final summary
+
+KinCall is a multi-agent system built on CALL-E.
+
+Its core operation is simple:
 
 ```text
-1. Un Companion Agent appelle une personne vulnérable.
+1. A Companion Agent calls a vulnerable person.
 
-2. Il mène une conversation familière et adaptée.
+2. It holds a familiar, adapted conversation.
 
-3. Un Orchestrator analyse le compte rendu.
+3. An Orchestrator analyzes the report.
 
-4. Lorsqu’une situation inhabituelle est détectée,
-   un Family Agent appelle les proches.
+4. When an unusual situation is detected,
+   a Family Agent calls relatives.
 
-5. Les contacts sont appelés dans l’ordre prévu
-   jusqu’à ce que quelqu’un confirme une intervention.
+5. Contacts are called in the planned order
+   until someone confirms they will help.
 
-6. Le résultat est enregistré et affiché dans un dashboard.
+6. The result is recorded and shown on a dashboard.
 ```
 
-La valeur de KinCall ne réside pas uniquement dans la détection d’un problème.
+KinCall's value does not lie solely in detecting a problem.
 
-Elle réside dans sa capacité à transformer une conversation en action concrète :
+It lies in its ability to turn a conversation into concrete action:
 
-> **Quelqu’un a été informé, quelqu’un a répondu et quelqu’un va intervenir.**
+> **Someone was informed, someone answered, and someone will help.**
