@@ -782,11 +782,13 @@ async function composeNotificationMessage(
   person: VulnerablePerson,
   outcome: NotificationOutcomeKind
 ): Promise<string> {
-  const { contextBrief } = await collectFamilyCallContext(deps, event.id, person.firstName);
-
+  // DEC-023 revision: the callback carries the OUTCOME ONLY. It deliberately
+  // does NOT read collectFamilyCallContext — that context brief is written in
+  // the third person FOR a trusted contact, and speaking it back to the
+  // monitored person made KinCall discuss its own listener in front of her.
+  // The Family calls still receive it, unchanged.
   if (outcome === "unresolved") {
-    return buildPersonNotificationBrief({ kind: "unresolved", personName: person.firstName }, contextBrief)
-      .message;
+    return buildPersonNotificationBrief({ kind: "unresolved", personName: person.firstName }).message;
   }
 
   // The accepting contact is resolved the same way every other screen resolves
@@ -803,21 +805,17 @@ async function composeNotificationMessage(
   // a missing confirmation here would be a genuine inconsistency. Degrades to
   // the unresolved wording rather than inventing a contact.
   if (!confirmation) {
-    return buildPersonNotificationBrief({ kind: "unresolved", personName: person.firstName }, contextBrief)
-      .message;
+    return buildPersonNotificationBrief({ kind: "unresolved", personName: person.firstName }).message;
   }
 
-  return buildPersonNotificationBrief(
-    {
-      kind: "confirmed",
-      personName: person.firstName,
-      contactName: confirmation.contact?.firstName ?? "A trusted contact",
-      estimatedTime: confirmation.result.estimated_time,
-      interventionType: confirmation.result.intervention_type,
-      contactSummary: confirmation.result.summary,
-    },
-    contextBrief
-  ).message;
+  return buildPersonNotificationBrief({
+    kind: "confirmed",
+    personName: person.firstName,
+    contactName: confirmation.contact?.firstName ?? "A trusted contact",
+    estimatedTime: confirmation.result.estimated_time,
+    interventionType: confirmation.result.intervention_type,
+    contactSummary: confirmation.result.summary,
+  }).message;
 }
 
 // Starts the single callback, or skips it and goes straight to the terminal

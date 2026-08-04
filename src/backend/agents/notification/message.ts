@@ -8,8 +8,25 @@ import type { FamilyStructuredResult } from "@/backend/integrations/calle/schema
 // replaying worker produces byte-identical wording — which matters, because
 // this text is what a real person hears.
 //
+// SPOKEN DIRECTLY TO THE MONITORED PERSON.
+//
+// This is the one KinCall message addressed TO the person the check-in was
+// about, and it must sound like it. A live test produced "Marc confirmed that
+// he will visit Claire this afternoon" — spoken to Claire herself — because the
+// Family calls' third-person context brief was appended here. That brief is
+// written FOR a trusted contact ("Claire told KinCall that…"), so reusing it
+// made KinCall talk about its own listener in front of her, and restated a
+// problem she already knew she had.
+//
+// So this message now carries the OUTCOME ONLY. The original reason for the
+// call is never repeated: the Family calls still receive the full factual
+// context (family/context-brief.ts, unchanged), and this callback says only who
+// committed to what, or that nobody did.
+//
 // WHAT IT MAY NEVER SAY
 //
+//   * the recipient's own name in a third-person sentence — she is listening;
+//   * the original Companion context, in any form;
 //   * that the contact has ALREADY visited or called — the commitment is a
 //     future intention KinCall recorded, never an action it observed (§7.5);
 //   * that KinCall verified anything, or that the person is safe or fine;
@@ -18,20 +35,23 @@ import type { FamilyStructuredResult } from "@/backend/integrations/calle/schema
 //   * any diagnosis, severity, or medical framing;
 //   * an internal enum, field name, contact id, or phone number.
 //
-// It also hardcodes no situation: the optional context sentence is the same
-// factual brief the Family calls used (src/backend/agents/family/context-brief.ts),
-// which is the person's own reported words rather than a lookup.
+// PRONOUNS. The contact is always "they". KinCall stores no pronouns for a
+// trusted contact, and a relationship label ("daughter", "trusted neighbour")
+// is not one — guessing from it would misgender a real person on a real call.
+// "They" is correct for everyone and needs no data KinCall does not have.
 
 export interface ConfirmedNotificationFacts {
   kind: "confirmed";
+  // The recipient. Deliberately NEVER spoken — used only to detect and reject a
+  // persisted sentence that refers to her in the third person.
   personName: string;
   contactName: string;
   // Free text as the contact said it ("this afternoon", "17:30"), never parsed
   // into a time and never compared against a clock. Empty means not stated.
   estimatedTime: string;
   interventionType: FamilyStructuredResult["intervention_type"];
-  // The contact's own persisted summary. Used only for the "other" action,
-  // where there is no verb to state — never as a substitute for the outcome.
+  // The contact's own persisted summary. Used only for the "other" action, and
+  // only when it passes the safety gate below — never quoted verbatim.
   contactSummary: string;
 }
 
@@ -49,10 +69,8 @@ export interface PersonNotificationBrief {
   // there IS something for them to do — never on the confirmed path, where
   // suggesting an action would undercut the commitment just reported.
   guidance: string | null;
-  // One factual sentence recalling what this was about, appended only when a
-  // specific context exists. Never invented.
-  context: string | null;
-  // The three above, joined — what the prompt actually renders.
+  // What the prompt actually renders: outcome only, plus guidance where it
+  // applies. There is deliberately no context field any more.
   message: string;
 }
 
@@ -69,9 +87,52 @@ function withTimePreposition(estimatedTime: string): string {
   return CLOCK_LIKE.test(trimmed) ? ` at ${trimmed}` : ` ${trimmed}`;
 }
 
-// The future-tense verb for each intervention type. "other" deliberately has no
-// verb: KinCall was not told what the contact intends to do, so it says only
-// that they can help, rather than guessing at an action.
+function terminated(sentence: string): string {
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// The ONLY shape of persisted Family summary this will speak back to the
+// monitored person, for an `other` intervention where there is no verb to state.
+//
+// Deliberately narrow. `intervention_type: "other"` means the contact committed
+// to neither a visit nor a call, and `summary` is free text a model wrote FOR A
+// THIRD PARTY ("One or two neutral sentences describing what this contact said
+// and what they agreed to do" — family/prompt.ts). Rewriting arbitrary prose
+// into safe second-person speech is exactly the invention §7.5 forbids, so this
+// accepts only an unambiguous "<Contact> will <action>" and rejects everything
+// else — including anything that might be referring to the listener:
+//
+//   * a sentence naming the recipient — she is on the line;
+//   * a third-person pronoun, which in these summaries usually means HER;
+//   * anything long enough to be narrative rather than a commitment;
+//   * anything carrying JSON punctuation or an internal field name.
+//
+// Returns the bare action phrase, or null to use the safe fallback.
+function safeOtherAction(
+  contactSummary: string,
+  contactName: string,
+  personName: string
+): string | null {
+  const summary = contactSummary.trim().replace(/[.!?]+$/, "");
+  if (summary.length === 0 || summary.length > 100) return null;
+
+  const match = new RegExp(`^${escapeRegExp(contactName)}\\s+will\\s+(.+)$`, "i").exec(summary);
+  if (!match) return null;
+
+  const action = match[1].trim();
+  if (action.length === 0) return null;
+  if (new RegExp(`\\b${escapeRegExp(personName)}\\b`, "i").test(action)) return null;
+  if (/\b(he|him|his|she|her|hers)\b/i.test(action)) return null;
+  if (/[{}[\]"]|_/.test(action)) return null;
+
+  return action;
+}
+
+// Second person throughout: the listener is "you", never her own name.
 function confirmedOutcome(facts: ConfirmedNotificationFacts): string {
   const when = withTimePreposition(facts.estimatedTime);
 
@@ -85,50 +146,27 @@ function confirmedOutcome(facts: ConfirmedNotificationFacts): string {
         ? `${facts.contactName} confirmed that they will call you${when}.`
         : `${facts.contactName} confirmed that they will call you.`;
     case "other":
-    default:
-      // No stated action. The contact's own summary is the most specific true
-      // thing available, and it is theirs rather than KinCall's invention.
-      return facts.contactSummary.trim().length > 0
-        ? `${facts.contactName} confirmed that they can help. They said: ${terminated(facts.contactSummary.trim())}`
-        : `${facts.contactName} confirmed that they can help with the situation you described.`;
+    default: {
+      const action = safeOtherAction(facts.contactSummary, facts.contactName, facts.personName);
+      return action
+        ? `${facts.contactName} confirmed that they will ${action} for you.`
+        : `${facts.contactName} confirmed that they can help you.`;
+    }
   }
 }
 
-function terminated(sentence: string): string {
-  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
-}
-
-// `contextBrief` is the SAME sentence the Family calls carried
-// (family-context-brief.ts), passed through so the person hears the situation
-// described the way their contacts heard it. Optional: only appended when the
-// brief is specific, because a generic fallback adds nothing here and would
-// pad the message a person is listening to on the phone.
-export function buildPersonNotificationBrief(
-  facts: NotificationFacts,
-  contextSentence: string | null
-): PersonNotificationBrief {
-  const context = contextSentence?.trim() ? terminated(contextSentence.trim()) : null;
-
+// Outcome only — no Companion context, no Family context brief. See the header.
+export function buildPersonNotificationBrief(facts: NotificationFacts): PersonNotificationBrief {
   if (facts.kind === "unresolved") {
     // Deliberately "confirmed that they were available", never "nobody
     // answered": on this path some contacts may have answered and declined,
     // and some may not have answered at all. The only thing true of all of
     // them is that none committed.
-    const outcome = `Nobody in your trusted circle confirmed that they were available.`;
-    const guidance = `If you still need help, please contact another person you trust directly.`;
-    return {
-      outcome,
-      guidance,
-      context,
-      message: [outcome, guidance, context].filter(Boolean).join(" "),
-    };
+    const outcome = "Nobody in your trusted circle confirmed that they were available.";
+    const guidance = "If you still need help, please contact another person you trust directly.";
+    return { outcome, guidance, message: `${outcome} ${guidance}` };
   }
 
-  const outcome = confirmedOutcome(facts);
-  return {
-    outcome,
-    guidance: null,
-    context,
-    message: [outcome, context].filter(Boolean).join(" "),
-  };
+  const outcome = terminated(confirmedOutcome(facts));
+  return { outcome, guidance: null, message: outcome };
 }

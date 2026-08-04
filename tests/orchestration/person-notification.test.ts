@@ -388,3 +388,68 @@ describe("no raw internals reach the message", () => {
     }
   });
 });
+
+// ── DEC-023 revision: the callback speaks TO the monitored person ────────────
+//
+// End-to-end guards for the live failure where Claire was told "Marc confirmed
+// that he will visit Claire this afternoon", followed by a restatement of the
+// administrative document she had asked about. These assert through the REAL
+// engine, so they also prove the Family calls kept their context.
+describe("the callback carries the outcome only, in the second person (DEC-023)", () => {
+  it("names the contact and addresses the person as 'you', never by name", async () => {
+    const d = deps();
+    await startDemoEvent("person_marie", d);
+    const message = (d.calleAdapter as RecordingCalleAdapter).notificationMessages()[0];
+
+    expect(message).toContain("Marc");
+    expect(message).toContain("visit you");
+    // She is the listener — her own name must never be spoken back at her.
+    expect(message).not.toMatch(/\bMarie\b/);
+    expect(message).not.toContain("visit Marie");
+  });
+
+  it("never repeats the original Companion context on the confirmed path", async () => {
+    const d = deps();
+    await startDemoEvent("person_marie", d);
+    const adapter = d.calleAdapter as RecordingCalleAdapter;
+    const message = adapter.notificationMessages()[0];
+
+    for (const fragment of ["fell yesterday", "difficult to walk", "told KinCall", "mentioned"]) {
+      expect(message.toLowerCase()).not.toContain(fragment.toLowerCase());
+    }
+  });
+
+  it("never repeats the original context on the unresolved path either", async () => {
+    const d = deps({ scenario: "all_contacts_unavailable" });
+    const event = await startDemoEvent("person_marie", d);
+    const message = (d.calleAdapter as RecordingCalleAdapter).notificationMessages()[0];
+
+    expect(event.status).toBe("ATTENTION_UNRESOLVED");
+    expect(message).not.toMatch(/\bMarie\b/);
+    for (const fragment of ["fell yesterday", "difficult to walk", "told KinCall"]) {
+      expect(message.toLowerCase()).not.toContain(fragment.toLowerCase());
+    }
+    // Some contacts answered and declined — never claim otherwise.
+    expect(message).not.toMatch(/nobody answered|no answer/i);
+    expect(message).toContain("confirmed that they were available");
+  });
+
+  // The separation that makes the fix correct rather than lossy.
+  it("still gives every trusted contact the full factual context", async () => {
+    const d = deps({ scenario: "all_contacts_unavailable" });
+    await startDemoEvent("person_marie", d);
+    const adapter = d.calleAdapter as RecordingCalleAdapter;
+    const familyBriefs = adapter.startFamilyCallSpy.mock.calls.map(
+      (call) => (call[0] as { contextBrief?: string }).contextBrief ?? ""
+    );
+
+    expect(familyBriefs.length).toBeGreaterThan(1);
+    for (const brief of familyBriefs) {
+      expect(brief).toContain("difficult to walk");
+      expect(brief).toContain("Marie");
+    }
+    // Identical for every contact, and different from what the person hears.
+    expect(new Set(familyBriefs).size).toBe(1);
+    expect(familyBriefs[0]).not.toBe(adapter.notificationMessages()[0]);
+  });
+});

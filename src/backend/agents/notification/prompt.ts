@@ -25,8 +25,17 @@ export function buildPersonNotificationTask(
   return [
     `Call ${person.firstName} on behalf of KinCall to pass on one piece of news. This is not a check-in: you are not asking how they are.`,
     "Introduce yourself immediately and clearly as KinCall, an automated assistant — do not claim to be a family member, a doctor, a nurse, an emergency operator or any human service.",
+    // The whole point of this call: you are speaking TO the person the earlier
+    // check-in was about. A live test had the agent say "Marc confirmed that he
+    // will visit Claire this afternoon" — to Claire — which is both wrong and
+    // unsettling to hear about yourself.
+    `You are speaking directly to ${person.firstName}. Greet them by their first name once, then address them as "you" for the rest of the call.`,
+    `Never refer to ${person.firstName} in the third person and never use their name as the subject of a sentence — say "you", not "${person.firstName}".`,
     `Say that you are calling to let them know what happened after your earlier call, then tell them exactly this: ${message}`,
     "Say it once, in your own natural words, without adding, guessing at or embellishing any detail it does not contain.",
+    // The message is the outcome only. The reason for the earlier call is
+    // deliberately absent, and must not be reconstructed here.
+    "Do not mention or repeat what the earlier call was about, and do not reopen that subject. They already know why they asked for help — you are only telling them what came of it.",
     // The single most important boundary on this call: a recorded intention is
     // not a completed action (§7.5).
     "Do not say that anything has already been done, do not say the matter is resolved, and do not say they are safe or fine.",
