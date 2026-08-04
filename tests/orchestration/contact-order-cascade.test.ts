@@ -18,7 +18,7 @@ import { RecordingCalleAdapter } from "../support/recording-adapter";
 
 // Stage E (docs/DECISION_LOG.md DEC-017): the explicit regression net comparing
 // the cascade's behaviour BEFORE and AFTER the new availability-ordering layer
-// (backend/orchestration/cascade/contact-order.ts). At the seeded default configuration —
+// (src/backend/orchestration/cascade/contact-order.ts). At the seeded default configuration —
 // every contact enabled, no availability window, maxAttempts: 2 — the ordering
 // layer must be a complete no-op: every one of the five fake scenarios places
 // EXACTLY the same calls, in the same order, with the same attempt numbers, and
@@ -57,7 +57,7 @@ interface ScenarioExpectation {
   decision: string;
 }
 
-// Hand-derived directly from backend/integrations/calle/fake-adapter.ts's FAKE_SCENARIOS
+// Hand-derived directly from src/backend/integrations/calle/fake-adapter.ts's FAKE_SCENARIOS
 // definitions — a definitive, independent snapshot of "what should happen",
 // not merely "whatever the code currently does".
 const EXPECTATIONS: ScenarioExpectation[] = [

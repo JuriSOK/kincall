@@ -40,7 +40,7 @@ with the unresolved message, and the event reaches `ATTENTION_UNRESOLVED` instea
 1. **The escalation is not the agent's decision.** Claire said nothing alarming and the
    agent flagged no attention. She *asked for help*, and that single fact overrides the
    model's own assessment — a rule in
-   [`backend/orchestration/decision-tree.ts`](../backend/orchestration/decision-tree.ts).
+   [`src/backend/orchestration/decision-tree.ts`](../src/backend/orchestration/decision-tree.ts).
 
 2. **The context survives the handoff.** Julie and Marc are not told "Claire needs help."
    They are told she would like help completing an administrative document — her own

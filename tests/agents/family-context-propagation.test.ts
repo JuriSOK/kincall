@@ -341,7 +341,7 @@ describe("no hardcoded situation vocabulary exists (DEC-022)", () => {
   it("the brief module names no specific real-world situation", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync(
-      new URL("../../backend/agents/family/context-brief.ts", import.meta.url),
+      new URL("../../src/backend/agents/family/context-brief.ts", import.meta.url),
       "utf-8"
     );
     // Strip comments: the header legitimately explains the administrative

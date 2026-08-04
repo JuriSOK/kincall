@@ -15,7 +15,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": fileURLToPath(new URL("./", import.meta.url)),
+      "@": fileURLToPath(new URL("./src/", import.meta.url)),
       // `server-only` throws when resolved outside Next.js's react-server
       // condition, which is exactly its job in a client bundle — but it would
       // also break a plain Node test run. Stubbed here; the real guard still

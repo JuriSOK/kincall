@@ -57,7 +57,7 @@ function relative(file: string): string {
 describe("shared/ is runtime-neutral", () => {
   it("never imports from app/, frontend/ or backend/", () => {
     const offenders: string[] = [];
-    for (const file of sourceFiles("shared")) {
+    for (const file of sourceFiles("src/shared")) {
       for (const spec of runtimeImports(read(file))) {
         if (/^@\/(app|frontend|backend)\//.test(spec)) {
           offenders.push(`${relative(file)} -> ${spec}`);
@@ -71,7 +71,7 @@ describe("shared/ is runtime-neutral", () => {
 describe("backend/ does not depend on the user interface", () => {
   it("never imports from frontend/ or app/", () => {
     const offenders: string[] = [];
-    for (const file of sourceFiles("backend")) {
+    for (const file of sourceFiles("src/backend")) {
       for (const spec of runtimeImports(read(file))) {
         if (/^@\/(frontend|app)\//.test(spec)) {
           offenders.push(`${relative(file)} -> ${spec}`);
@@ -85,7 +85,7 @@ describe("backend/ does not depend on the user interface", () => {
 describe("client components never reach server-only code", () => {
   it("no \"use client\" file imports from backend/", () => {
     const offenders: string[] = [];
-    for (const file of [...sourceFiles("app"), ...sourceFiles("frontend")]) {
+    for (const file of [...sourceFiles("src/app"), ...sourceFiles("src/frontend")]) {
       const source = read(file);
       if (!/^\s*["']use client["']/m.test(source)) continue;
       for (const spec of runtimeImports(source)) {
@@ -99,7 +99,7 @@ describe("client components never reach server-only code", () => {
 
   it("no \"use client\" file imports the Supabase or CALL-E clients", () => {
     const offenders: string[] = [];
-    for (const file of [...sourceFiles("app"), ...sourceFiles("frontend")]) {
+    for (const file of [...sourceFiles("src/app"), ...sourceFiles("src/frontend")]) {
       const source = read(file);
       if (!/^\s*["']use client["']/m.test(source)) continue;
       if (/@supabase\/supabase-js|server-only/.test(source)) {
@@ -116,7 +116,7 @@ describe("API routes stay thin", () => {
   // persistence logic drift into the routing layer.
   it("never instantiate a Supabase or CALL-E client directly", () => {
     const offenders: string[] = [];
-    for (const file of sourceFiles("app/api")) {
+    for (const file of sourceFiles("src/app/api")) {
       const source = read(file);
       if (/createClient\s*\(/.test(source) || /new\s+LiveCalleAdapter\s*\(/.test(source)) {
         offenders.push(relative(file));
@@ -129,7 +129,7 @@ describe("API routes stay thin", () => {
 describe("no import survives from the pre-reorganization layout", () => {
   it("nothing references @/lib, @/prompts or @/app/ui", () => {
     const offenders: string[] = [];
-    const roots = ["app", "frontend", "backend", "shared", "tests", "scripts"];
+    const roots = ["src", "tests", "scripts"];
     // This file necessarily contains the very strings it forbids, so it is the
     // one file excluded from its own scan.
     const self = path.join(ROOT, "tests/regression/architecture-boundaries.test.ts");
@@ -141,6 +141,25 @@ describe("no import survives from the pre-reorganization layout", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("application source lives only under src/", () => {
+  it("leaves no duplicate source tree at the repository root", () => {
+    const stillAtRoot = ["app", "frontend", "backend", "shared"].filter((dir) => {
+      try {
+        return statSync(path.join(ROOT, dir)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+    expect(stillAtRoot).toEqual([]);
+  });
+
+  it("keeps every source directory under src/", () => {
+    for (const dir of ["app", "frontend", "backend", "shared"]) {
+      expect(statSync(path.join(ROOT, "src", dir)).isDirectory()).toBe(true);
+    }
   });
 });
 

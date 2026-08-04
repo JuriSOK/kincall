@@ -1,0 +1,157 @@
+/* KinCall design tokens.
+ *
+ * Imported once, from src/app/globals.css. Tailwind v4 is CSS-first — there is no
+ * tailwind.config.* file in this project — so the palette, spacing and radius
+ * scales live here as custom properties and are exposed to utilities through
+ * globals.css's `@theme inline` block.
+ *
+ * Direction (global UI/UX pass): clean, modern, warm-premium, aligned with
+ * the KinCall logo's soft blue/turquoise identity — deep blue paired with a
+ * cyan/turquoise accent over a light, airy canvas. Deliberately not
+ * dark-by-default, not neon, not glassmorphic. This replaces the earlier
+ * warm-terracotta palette; the SHAPE, SPACING, MOTION and STATUS-TONE systems
+ * below are unchanged, since only the brand palette was in scope for this
+ * pass.
+ *
+ * Status semantics are UNCHANGED from the pre-existing interface, and
+ * deliberately not touched by this rebrand: amber means attention, emerald
+ * means calm/resolved, a heavier rose/red means unresolved. Recoloring those
+ * would be changing product meaning, not a visual refresh — see each tone's
+ * own section further down, which keeps its previous hues exactly.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  /* A soft, cool off-white page — a hint of the logo's blue rather than a
+   * neutral grey — with plain white cards layered on top of it. */
+  --kc-canvas: #f5f9fb;
+  --kc-surface: #ffffff;
+  --kc-surface-sunken: #eef5f7;
+  --kc-border: #dbe7eb;
+  --kc-border-strong: #c1d5da;
+
+  /* ── Text ─────────────────────────────────────────────────────────────── */
+  --kc-text: #172a37;
+  --kc-text-muted: #57707c;
+  --kc-text-subtle: #7e929c;
+
+  /* ── Accent (primary actions, links) ──────────────────────────────────── */
+  /* A deep turquoise-teal, sampled from the logo's blue-to-cyan gradient —
+   * dark enough for accessible text/icon contrast on white, distinct from
+   * every status tone below so a primary button can never be mistaken for a
+   * status signal. --kc-brand-blue/--kc-brand-cyan are the wider gradient
+   * pair the landing hero and other decorative gradients draw from; ordinary
+   * UI (buttons, links, focus rings) uses --kc-accent alone for consistency
+   * and contrast, never a live gradient on text. */
+  --kc-accent: #0f7a8c;
+  --kc-accent-hover: #0c6472;
+  --kc-accent-soft: #e3f4f6;
+  --kc-accent-text: #ffffff;
+  --kc-brand-blue: #163f6b;
+  --kc-brand-cyan: #2fc6c6;
+
+  /* ── Status tones ─────────────────────────────────────────────────────── */
+  --kc-calm-bg: #ecf7f0;
+  --kc-calm-border: #b6ddc5;
+  --kc-calm-text: #1f5c39;
+
+  --kc-attention-bg: #fdf3e2;
+  --kc-attention-border: #e9cd97;
+  --kc-attention-text: #7a5312;
+
+  --kc-unresolved-bg: #fbebe8;
+  --kc-unresolved-border: #e7b4aa;
+  --kc-unresolved-text: #8a2f20;
+
+  --kc-danger: #9d2b1c;
+  --kc-danger-bg: #fbebe8;
+  --kc-danger-border: #e7b4aa;
+
+  /* ── Shape ────────────────────────────────────────────────────────────── */
+  --kc-radius-sm: 0.375rem;
+  --kc-radius: 0.75rem;
+  --kc-radius-lg: 1.125rem;
+  --kc-radius-full: 999px;
+
+  /* ── Depth ────────────────────────────────────────────────────────────── */
+  /* Low-contrast and blue-tinted rather than neutral grey, so surfaces feel
+   * lit rather than outlined. */
+  --kc-shadow-sm: 0 1px 2px rgb(16 40 56 / 0.05);
+  --kc-shadow: 0 1px 3px rgb(16 40 56 / 0.06), 0 6px 16px -6px rgb(16 40 56 / 0.10);
+  --kc-shadow-lg: 0 2px 6px rgb(16 40 56 / 0.06), 0 18px 40px -12px rgb(16 40 56 / 0.16);
+
+  /* ── Focus ────────────────────────────────────────────────────────────── */
+  --kc-focus-ring: var(--kc-accent);
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --kc-transition: 150ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Deep blue-tinted dark, not pure black, so the same brand identity
+     * survives the theme switch. */
+    --kc-canvas: #0f1a22;
+    --kc-surface: #16242e;
+    --kc-surface-sunken: #0b141b;
+    --kc-border: #26404c;
+    --kc-border-strong: #375666;
+
+    --kc-text: #eaf3f5;
+    --kc-text-muted: #a6bdc6;
+    --kc-text-subtle: #83a0aa;
+
+    --kc-accent: #3fd0d0;
+    --kc-accent-hover: #5cdcdc;
+    --kc-accent-soft: #10333a;
+    --kc-accent-text: #062226;
+    --kc-brand-blue: #2c5c94;
+    --kc-brand-cyan: #3fd0d0;
+
+    --kc-calm-bg: #16291f;
+    --kc-calm-border: #2f5540;
+    --kc-calm-text: #a5dcbb;
+
+    --kc-attention-bg: #2e2313;
+    --kc-attention-border: #5d4720;
+    --kc-attention-text: #ecc98a;
+
+    --kc-unresolved-bg: #331b17;
+    --kc-unresolved-border: #6a332a;
+    --kc-unresolved-text: #f0aa9c;
+
+    --kc-danger: #f0a496;
+    --kc-danger-bg: #331b17;
+    --kc-danger-border: #6a332a;
+
+    --kc-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --kc-shadow: 0 1px 3px rgb(0 0 0 / 0.45), 0 6px 16px -6px rgb(0 0 0 / 0.5);
+    --kc-shadow-lg: 0 2px 6px rgb(0 0 0 / 0.45), 0 18px 40px -12px rgb(0 0 0 / 0.6);
+  }
+}
+
+/* Honour an explicit request for less motion by removing it entirely, rather
+ * than merely shortening it. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --kc-transition: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* One focus treatment for every interactive element in the app. `:focus-visible`
+ * rather than `:focus`, so a mouse click does not leave a ring behind but
+ * keyboard navigation is always visible. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--kc-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--kc-radius-sm);
+}

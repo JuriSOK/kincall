@@ -23,7 +23,7 @@ describe("Dashboard page", () => {
   });
 
   it("shows the daily-recap 'Not checked in yet' wording for a person with no events at all", async () => {
-    // person_marie is seeded with zero events (backend/persistence/seed.ts), so
+    // person_marie is seeded with zero events (src/backend/persistence/seed.ts), so
     // regardless of what "now" happens to be when this test runs, the Daily
     // recap row can only ever be in the "no check-in today" state — a
     // deterministic, wiring-level check that the page actually calls
@@ -34,10 +34,10 @@ describe("Dashboard page", () => {
   });
 
   describe("Operational activity zero-value display", () => {
-    // The seeded in-memory fixture (backend/persistence/seed.ts) has zero events for
+    // The seeded in-memory fixture (src/backend/persistence/seed.ts) has zero events for
     // anyone, so every count and every rate's denominator here is genuinely
     // zero — this proves the page actually calls the shared kpi-display
-    // helper (backend/presentation/kpi-display.ts) rather than reintroducing an
+    // helper (src/backend/presentation/kpi-display.ts) rather than reintroducing an
     // inline ternary that could drift from it. By explicit product decision,
     // "Not enough data" is never shown anywhere — an empty denominator
     // displays as a plain zero, identically to a genuine measured zero. The

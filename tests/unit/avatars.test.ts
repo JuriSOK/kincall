@@ -18,7 +18,7 @@ describe("isAvatarKey", () => {
 
 describe("AVATAR_REGISTRY completeness", () => {
   // The single-source-of-truth guarantee DEC-015 relies on: the validator
-  // (shared/utilities/avatars.ts) and the UI registry (frontend/components/avatars/registry.tsx) can
+  // (src/shared/utilities/avatars.ts) and the UI registry (src/frontend/components/avatars/registry.tsx) can
   // never recognise different sets, because this test fails the moment they
   // do — whether a key is missing a graphic, or a graphic exists for a key
   // nobody can ever submit.

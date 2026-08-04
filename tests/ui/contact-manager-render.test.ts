@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ContactManager, type ContactSummary } from "@/app/(app)/people/[id]/contacts/contact-manager";
 import { renderServerComponent } from "../support/render";
 
-// Mirrors the seeded demo circle (backend/persistence/seed.ts): three confirmed,
+// Mirrors the seeded demo circle (src/backend/persistence/seed.ts): three confirmed,
 // enabled contacts with no availability window and the default max attempts
 // — exactly the shape that used to render "Callable window: Always
 // available", "Maximum attempts: 2" and the whole per-contact statistics
@@ -104,7 +104,7 @@ describe("Trusted-circle default card", () => {
     // *there*. Together they cover §6: removed from the default view,
     // still present in the edit interface.
     const source = readFileSync(
-      new URL("../../app/(app)/people/[id]/contacts/contact-manager.tsx", import.meta.url),
+      new URL("../../src/app/(app)/people/[id]/contacts/contact-manager.tsx", import.meta.url),
       "utf-8"
     );
     const panelSource = source.slice(source.indexOf("function ContactEditPanel"));
@@ -115,7 +115,7 @@ describe("Trusted-circle default card", () => {
 
   it("removes the four explanatory texts from the edit panel without leaving replacement prose", () => {
     const source = readFileSync(
-      new URL("../../app/(app)/people/[id]/contacts/contact-manager.tsx", import.meta.url),
+      new URL("../../src/app/(app)/people/[id]/contacts/contact-manager.tsx", import.meta.url),
       "utf-8"
     );
     const panelSource = source.slice(source.indexOf("function ContactEditPanel"));
@@ -127,7 +127,7 @@ describe("Trusted-circle default card", () => {
 
   it("shows 'Same as {PersonName}' instead of raw inherited-timezone wording, and never the old 'Inherit' phrasing", () => {
     const source = readFileSync(
-      new URL("../../app/(app)/people/[id]/contacts/contact-manager.tsx", import.meta.url),
+      new URL("../../src/app/(app)/people/[id]/contacts/contact-manager.tsx", import.meta.url),
       "utf-8"
     );
     const panelSource = source.slice(source.indexOf("function ContactEditPanel"));

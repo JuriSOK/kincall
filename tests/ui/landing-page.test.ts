@@ -29,8 +29,8 @@ describe("Landing page", () => {
   });
 
   it("the old raster logo asset and the hand-drawn hero-mark SVG are both gone", () => {
-    expect(existsSync(new URL("../../app/ui/kincall-logo.jpeg", import.meta.url))).toBe(false);
-    expect(existsSync(new URL("../../app/(marketing)/hero-mark.tsx", import.meta.url))).toBe(false);
+    expect(existsSync(new URL("../../src/app/ui/kincall-logo.jpeg", import.meta.url))).toBe(false);
+    expect(existsSync(new URL("../../src/app/(marketing)/hero-mark.tsx", import.meta.url))).toBe(false);
   });
 
   it("preserves the floating animation on the hero lockup", () => {

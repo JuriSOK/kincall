@@ -15,9 +15,9 @@ import { formatNextCheckIn, formatOccurrence } from "@/shared/presentation/forma
 // exercising the functions and confirming their behaviour is a pure
 // computation with no observable side effect.
 const SCHEDULE_MODULES = [
-  "backend/scheduling/next-check-in.ts",
-  "shared/presentation/format-schedule.ts",
-  "backend/dashboard/upcoming-check-ins.ts",
+  "src/backend/scheduling/next-check-in.ts",
+  "src/shared/presentation/format-schedule.ts",
+  "src/backend/dashboard/upcoming-check-ins.ts",
 ];
 
 describe("schedule rendering has no repository access at all", () => {

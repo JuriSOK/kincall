@@ -11,7 +11,7 @@ import { RecordingCalleAdapter } from "../support/recording-adapter";
 // the REAL engine and the REAL fake scenarios end to end — never against a
 // hand-written fixture of what the persisted data is assumed to look like.
 // This is what proves the displayed sentence matches what actually got stored,
-// and it is why backend/integrations/calle/fake-adapter.ts was not edited for Stage F: the
+// and it is why src/backend/integrations/calle/fake-adapter.ts was not edited for Stage F: the
 // expected strings below are derived from its existing results, not the other
 // way round.
 

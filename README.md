@@ -281,14 +281,14 @@ Orchestrated action
 ## Repository
 
 One Next.js application, organized so the architecture is visible from the tree:
-`app/` routes, `frontend/` renders, `backend/` decides, `shared/` is used by both.
+`src/app/` routes, `src/frontend/` renders, `src/backend/` decides, `src/shared/` is used by both.
 
 | Path | Purpose |
 |---|---|
-| [`app/`](app/) | Next.js pages and thin API entry points |
-| [`frontend/`](frontend/) | Design system and product UI components |
-| [`backend/`](backend/) | Agents, orchestration, integrations and persistence |
-| [`shared/`](shared/) | Domain types, validation and pure formatting |
+| [`src/app/`](src/app/) | Next.js pages and thin API entry points |
+| [`src/frontend/`](src/frontend/) | Design system and product UI components |
+| [`src/backend/`](src/backend/) | Agents, orchestration, integrations and persistence |
+| [`src/shared/`](src/shared/) | Domain types, validation and pure formatting |
 | [`tests/`](tests/) | Orchestration, agent, UI and regression coverage |
 | [`supabase/`](supabase/) | PostgreSQL migrations and database tooling |
 | [`docs/`](docs/) | Product, architecture, decisions and demo material |
@@ -297,13 +297,13 @@ Where the important pieces live:
 
 | What | Where |
 |---|---|
-| Companion / Family / Notification agents | [`backend/agents/`](backend/agents/) |
-| Decision tree | [`backend/orchestration/decision-tree.ts`](backend/orchestration/decision-tree.ts) |
-| Orchestration engine | [`backend/orchestration/engine.ts`](backend/orchestration/engine.ts) |
-| Event states and transitions | [`backend/orchestration/state-machine/`](backend/orchestration/state-machine/) |
-| Trusted-circle cascade | [`backend/orchestration/cascade/`](backend/orchestration/cascade/) |
-| CALL-E integration | [`backend/integrations/calle/`](backend/integrations/calle/) |
-| Persistence | [`backend/persistence/`](backend/persistence/) |
+| Companion / Family / Notification agents | [`src/backend/agents/`](src/backend/agents/) |
+| Decision tree | [`src/backend/orchestration/decision-tree.ts`](src/backend/orchestration/decision-tree.ts) |
+| Orchestration engine | [`src/backend/orchestration/engine.ts`](src/backend/orchestration/engine.ts) |
+| Event states and transitions | [`src/backend/orchestration/state-machine/`](src/backend/orchestration/state-machine/) |
+| Trusted-circle cascade | [`src/backend/orchestration/cascade/`](src/backend/orchestration/cascade/) |
+| CALL-E integration | [`src/backend/integrations/calle/`](src/backend/integrations/calle/) |
+| Persistence | [`src/backend/persistence/`](src/backend/persistence/) |
 
 ---
 

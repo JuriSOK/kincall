@@ -229,7 +229,7 @@ describe("orderContactsForCascade — exclusions", () => {
 
   it("does NOT exclude an unconsented contact — that stays selectCascadeTarget's job", () => {
     // See this module's own top-of-file comment: consent filtering is
-    // deliberately left to backend/orchestration/engine.ts's contactBlockedReason,
+    // deliberately left to src/backend/orchestration/engine.ts's contactBlockedReason,
     // which is what produces the "has not confirmed consent" timeline entry
     // every pre-Stage-E test already depends on. Removing them here would
     // silently swallow that message.

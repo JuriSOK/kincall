@@ -144,7 +144,7 @@ Example Companion result. The shape is generic rather than fall-specific
 (DEC-011): `attention_required` is a binary *operational* judgement about whether
 somebody should check in, never a medical or severity assessment, and
 `attention_reasons` comes from a closed list of codes so a free-text reason
-cannot smuggle in a medical interpretation. See `lib/calle/schemas.ts` for the
+cannot smuggle in a medical interpretation. See `src/backend/integrations/calle/schemas.ts` for the
 authoritative shape.
 
 ```json
@@ -166,7 +166,7 @@ authoritative shape.
 }
 ```
 
-The deterministic rule order (DEC-011/DEC-011 revision; `lib/orchestration/decide-companion-action.ts`
+The deterministic rule order (DEC-011/DEC-011 revision; `src/backend/orchestration/decision-tree.ts`
 is authoritative). CALL-E may interpret the conversation, but it does not control
 the workflow — rules 1–3 override whatever `attention_required` the model reported.
 KinCall's operational decision is **binary** — close, or contact the trusted
@@ -348,33 +348,43 @@ kincall/
 │   ├── PRODUCT_SPECIFICATION.md
 │   ├── TECHNICAL_ARCHITECTURE.md
 │   └── DECISION_LOG.md
-├── app/
-│   ├── page.tsx
-│   ├── people/
-│   ├── events/[id]/
-│   └── api/
-│       ├── events/start/route.ts
-│       ├── webhooks/calle/route.ts
-│       ├── people/route.ts
-│       └── events/[id]/route.ts
-├── lib/
-│   ├── calle/
-│   │   ├── adapter.ts
-│   │   ├── fake-adapter.ts
-│   │   ├── live-adapter.ts
-│   │   └── schemas.ts
-│   ├── orchestration/
-│   │   ├── states.ts
-│   │   ├── transitions.ts
-│   │   ├── decide-companion-action.ts
-│   │   └── handle-family-result.ts
-│   └── database/
-├── prompts/
-│   ├── companion-agent.ts
-│   └── family-agent.ts
+├── src/
+│   ├── app/                        Next.js routing only
+│   │   ├── (marketing)/
+│   │   ├── (app)/                  dashboard, people, events, history
+│   │   ├── api/
+│   │   │   ├── events/start/route.ts
+│   │   │   ├── events/[id]/poll/route.ts
+│   │   │   ├── webhooks/calle/route.ts
+│   │   │   └── people/**/route.ts
+│   │   └── layout.tsx
+│   ├── frontend/
+│   │   ├── design-system/          button, surfaces, form-field, tokens.css
+│   │   └── components/             product components, avatars/
+│   ├── backend/
+│   │   ├── agents/
+│   │   │   ├── companion/prompt.ts
+│   │   │   ├── family/{prompt,context-brief}.ts
+│   │   │   └── notification/{prompt,message}.ts
+│   │   ├── orchestration/
+│   │   │   ├── engine.ts
+│   │   │   ├── decision-tree.ts
+│   │   │   ├── operation-keys.ts
+│   │   │   ├── state-machine/{states,transitions}.ts
+│   │   │   └── cascade/{contact-order,handle-family-result,voicemail}.ts
+│   │   ├── integrations/calle/     adapter, fake, live, schemas, webhook
+│   │   ├── persistence/            repository, drivers, row mappers, seed
+│   │   ├── scheduling/  dashboard/  kpi/  history/
+│   │   ├── presentation/           server-rendered view models
+│   │   └── observability/
+│   └── shared/
+│       ├── domain/                 types, event vocabulary
+│       ├── presentation/           pure formatting, labels, tone
+│       ├── utilities/              phone, avatars
+│       └── validation/
 ├── tests/
-│   ├── state-machine.test.ts
-│   └── cascade.test.ts
+│   ├── orchestration/  agents/  persistence/  ui/
+│   ├── unit/  regression/  integration/  support/
 └── .env.example
 ```
 
