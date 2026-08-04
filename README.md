@@ -10,8 +10,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/CALL--E-Hackathon%202026-8b5cf6" alt="CALL-E Hackathon 2026" />
-  <img src="https://img.shields.io/badge/status-functional%20MVP-2fc6c6" alt="Functional MVP" />
-  <img src="https://img.shields.io/badge/tests-925%20passing-163f6b" alt="925 tests passing" />
   <img src="https://img.shields.io/badge/Next.js-16-000000" alt="Next.js 16" />
   <img src="https://img.shields.io/badge/TypeScript-5-3178c6" alt="TypeScript 5" />
   <img src="https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e" alt="Supabase PostgreSQL" />
