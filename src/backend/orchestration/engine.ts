@@ -769,7 +769,11 @@ async function closeAfterNotification(
     event,
     "NO_CONTACTS_REMAINING",
     operationKey(trigger, "advance", "NO_CONTACTS_REMAINING"),
-    { messages: extraMessages }
+    // A closing entry so the timeline ends on the outcome, mirroring the
+    // confirmed path's "Case closed". Only added when the callback actually
+    // ran (extraMessages carries its result), so the skip path — which reaches
+    // this same transition directly — is not given a duplicate terminal line.
+    { messages: extraMessages.length > 0 ? [...extraMessages, "No confirmed support"] : [] }
   );
   return unresolved.event;
 }
@@ -873,9 +877,7 @@ async function startPersonNotification(
     {
       messages: [
         ...extraMessages,
-        options.outcome === "confirmed"
-          ? `KinCall called ${person.firstName} to share ${options.contactName ?? "the"}'s commitment.`
-          : `KinCall called ${person.firstName} to explain that no support was confirmed.`,
+        `KinCall called ${person.firstName} to share the outcome.`,
       ],
       intent: {
         agentType: "person_notification",
@@ -955,17 +957,20 @@ export async function processPersonNotificationResult(
     const current = await reread();
     const outcome = await settledCascadeOutcome(deps, current.id);
 
+    const person = await personFor(deps, current);
+
     const delivered =
       rawResult.status === "completed" &&
       isPersonNotificationStructuredResult(rawResult.structuredResult) &&
       rawResult.structuredResult.message_delivered === "yes";
 
     // Never claims delivery that was not reported. "Could not confirm" covers
-    // a no-answer, a technical failure and an unreadable result alike —
-    // KinCall genuinely cannot tell them apart from the person's point of view.
+    // a no-answer, a voicemail, a technical failure and an unreadable result
+    // alike — CALL-E exposes no answering-machine detection, so KinCall
+    // genuinely cannot tell them apart and must not guess (DEC-023).
     const message = delivered
-      ? "The follow-up message was delivered."
-      : "KinCall could not confirm that the follow-up message was delivered.";
+      ? `The outcome was shared with ${person.firstName}.`
+      : "KinCall could not confirm that the outcome was delivered.";
 
     const persisted =
       rawResult.status === "completed" &&

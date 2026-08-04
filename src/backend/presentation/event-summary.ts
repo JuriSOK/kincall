@@ -3,6 +3,7 @@ import type { AttentionReason, Confidence, FamilyStructuredResult } from "@/back
 import type { CallEventRecord, EventRecord, TrustedContact } from "@/shared/domain/types";
 import { MAX_CONTACT_ATTEMPTS } from "@/backend/orchestration/engine";
 import type { EventStatus } from "@/backend/orchestration/state-machine/states";
+import type { Tone } from "@/shared/presentation/tone";
 import { describeVoicemailFromResult } from "@/backend/orchestration/cascade/voicemail";
 
 // Presentation helpers for an event's outcome, moved here from
@@ -275,10 +276,12 @@ export function describeOwnership(event: EventRecord): string {
     case "HUMAN_REVIEW_REQUIRED":
       return "No contact confirmed yet — flagged for human review.";
     case "NOTIFYING_PERSON":
-      // Deliberately does not assert who is helping: the confirmed path has a
-      // contact and the unresolved path has none, and this function cannot see
-      // which. The event page renders the intervention card for the former.
-      return "KinCall is calling back to share the outcome.";
+      // Only ever reached with NO confirmation: buildInterventionSummary is
+      // driven by the same persisted family results, so the confirmed path
+      // always has a summary and the page renders that instead of calling this.
+      // Saying "KinCall is calling back" here was what made the callback look
+      // like the intervention itself (DEC-023 revision).
+      return "No one — KinCall contacted the trusted circle, but nobody confirmed they could help.";
     case "NO_ACTION_REQUIRED":
     case "CASE_CLOSED":
       // In practice CASE_CLOSED with CONTACT_TRUSTED_PERSON always has a
@@ -339,23 +342,51 @@ export function describeFamilyAttempt(
 // failure and an unreadable result all read as "could not confirm", because
 // from the person's point of view KinCall genuinely cannot tell them apart.
 // Never implies the callback changed anything — it cannot.
-export function describePersonNotification(callEvent: CallEventRecord): string {
+export type NotificationDeliveryState = "in_progress" | "delivered" | "unconfirmed";
+
+export interface NotificationDeliveryView {
+  state: NotificationDeliveryState;
+  label: string;
+  // Never "calm" unless delivery was actually confirmed — a green treatment
+  // here would claim the person heard the message.
+  tone: Tone;
+}
+
+// The delivery status of the informational callback, kept STRICTLY separate
+// from the workflow outcome (DEC-023 revision).
+//
+// "Case closed" means KinCall's workflow finished; it must never imply the
+// person answered the callback. Those are two different facts and the event
+// page shows them on two different lines.
+//
+// VOICEMAIL. CALL-E exposes no reliable answering-machine detection, so an
+// unanswered callback and a voicemail are indistinguishable here. Nothing in
+// this function may label either one: a provider call that merely completed is
+// NOT delivery. Only the validated result's own `message_delivered === "yes"`
+// earns the delivered wording; everything else — no answer, voicemail, a
+// technical failure, an unreadable result — reads as "could not confirm".
+export function describeNotificationDelivery(
+  callEvent: CallEventRecord,
+  personName: string
+): NotificationDeliveryView {
   if (callEvent.resultProcessedAt === null) {
-    return "KinCall is calling back to share the outcome.";
+    return {
+      state: "in_progress",
+      label: "Calling back to share the outcome…",
+      tone: "neutral",
+    };
   }
 
   const result = callEvent.structuredResult;
-  const delivered =
-    isRecord(result) && result.message_delivered === "yes";
-  const reached = isRecord(result) && result.person_reached === "yes";
+  const delivered = isRecord(result) && result.message_delivered === "yes";
 
-  if (delivered) {
-    return "KinCall called back and passed on the outcome.";
-  }
-  if (reached) {
-    return "KinCall called back and reached them, but could not confirm the whole message was passed on.";
-  }
-  return "KinCall called back, but could not confirm that the message was delivered. The outcome above is unaffected.";
+  return delivered
+    ? { state: "delivered", label: `Outcome shared with ${personName}`, tone: "calm" }
+    : {
+        state: "unconfirmed",
+        label: "KinCall could not confirm that the outcome was delivered",
+        tone: "neutral",
+      };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

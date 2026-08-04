@@ -569,3 +569,64 @@ describe("startPolling — regression: native fetch must never be passed unbound
     controller.stop();
   });
 });
+
+// DEC-023 revision. NOTIFYING_PERSON was missing from WAITING_STATUSES, so
+// polling stopped the instant the informational callback started and the event
+// page froze on "Calling back with the outcome" until a manual reload.
+describe("startPolling — the informational callback keeps the page live", () => {
+  it("treats NOTIFYING_PERSON as a waiting status", () => {
+    expect(isWaitingStatus("NOTIFYING_PERSON")).toBe(true);
+  });
+
+  it("keeps polling while the callback is in flight", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "NOTIFYING_PERSON" }));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "NOTIFYING_PERSON",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    controller.stop();
+  });
+
+  it("stops as soon as the callback result makes the event terminal", async () => {
+    const onPollSuccess = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "CASE_CLOSED" }));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "NOTIFYING_PERSON",
+      fetchImpl,
+      onPollSuccess,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    // The status change is reported, so the page can refresh immediately.
+    expect(onPollSuccess).toHaveBeenCalledWith("CASE_CLOSED");
+
+    // ...and nothing more is polled.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    controller.stop();
+  });
+
+  it("also stops when the callback ends on the unresolved outcome", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: "ATTENTION_UNRESOLVED" }));
+    const controller = startPolling({
+      eventId: "event_001",
+      status: "NOTIFYING_PERSON",
+      fetchImpl,
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    controller.stop();
+  });
+});

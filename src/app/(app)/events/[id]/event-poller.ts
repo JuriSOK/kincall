@@ -13,6 +13,12 @@ export const WAITING_STATUSES: ReadonlySet<EventStatus> = new Set([
   "CALLING_TRUSTED_CONTACT",
   "CONTACT_DID_NOT_ANSWER",
   "CONTACT_DECLINED",
+  // DEC-023. Omitting this was why the event page froze on "Calling back with
+  // the outcome": the informational callback is a real in-flight call whose
+  // result the poll route resumes exactly like the other two, but polling
+  // stopped the moment the event reached this status, so the terminal state
+  // never arrived without a manual reload.
+  "NOTIFYING_PERSON",
 ]);
 
 export function isWaitingStatus(status: EventStatus): boolean {

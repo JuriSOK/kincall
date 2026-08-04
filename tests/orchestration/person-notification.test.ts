@@ -36,10 +36,10 @@ describe("the callback happens exactly once, on both settled outcomes", () => {
     expect(adapter.notificationMessages()[0]).toContain("will visit");
 
     const messages = await timeline(d, event.id);
-    expect(messages).toContain("KinCall called Marie to share Marc's commitment.");
-    expect(messages).toContain("The follow-up message was delivered.");
+    expect(messages).toContain("KinCall called Marie to share the outcome.");
+    expect(messages).toContain("The outcome was shared with Marie.");
     // The callback precedes the terminal entry — never after it.
-    expect(messages.indexOf("KinCall called Marie to share Marc's commitment.")).toBeLessThan(
+    expect(messages.indexOf("KinCall called Marie to share the outcome.")).toBeLessThan(
       messages.indexOf("Case closed")
     );
   });
@@ -60,7 +60,7 @@ describe("the callback happens exactly once, on both settled outcomes", () => {
 
     const messages = await timeline(d, event.id);
     expect(messages).toContain(
-      "KinCall called Marie to explain that no support was confirmed."
+      "KinCall called Marie to share the outcome."
     );
   });
 
@@ -152,9 +152,9 @@ describe("the callback never changes the trusted-circle outcome", () => {
     const messages = await timeline(d, event.id);
     // Never claims a delivery that was not reported.
     expect(messages).toContain(
-      "KinCall could not confirm that the follow-up message was delivered."
+      "KinCall could not confirm that the outcome was delivered."
     );
-    expect(messages).not.toContain("The follow-up message was delivered.");
+    expect(messages).not.toContain("The outcome was shared with Marie.");
     // And never retried.
     const calls = await repository.listCallEvents(event.id);
     expect(calls.filter((call) => call.agentType === "person_notification")).toHaveLength(1);
@@ -190,7 +190,7 @@ describe("the callback never changes the trusted-circle outcome", () => {
     expect(event.status).toBe("ATTENTION_UNRESOLVED");
     const messages = await timeline(d, event.id);
     expect(messages).toContain(
-      "KinCall could not confirm that the follow-up message was delivered."
+      "KinCall could not confirm that the outcome was delivered."
     );
     const calls = await repository.listCallEvents(event.id);
     expect(calls.filter((call) => call.agentType === "person_notification")).toHaveLength(1);
@@ -344,7 +344,7 @@ describe("idempotency and recovery", () => {
 
     // And no duplicated timeline entry.
     const messages = await timeline(d, event.id);
-    expect(messages.filter((m) => m === "The follow-up message was delivered.")).toHaveLength(1);
+    expect(messages.filter((m) => m === "The outcome was shared with Marie.")).toHaveLength(1);
     expect(messages.filter((m) => m === "Case closed")).toHaveLength(1);
   });
 
@@ -451,5 +451,91 @@ describe("the callback carries the outcome only, in the second person (DEC-023)"
     // Identical for every contact, and different from what the person hears.
     expect(new Set(familyBriefs).size).toBe(1);
     expect(familyBriefs[0]).not.toBe(adapter.notificationMessages()[0]);
+  });
+});
+
+// DEC-023 revision: the timeline must end on the OUTCOME, with the callback
+// step and its delivery recorded as separate, non-duplicated entries.
+describe("timeline completion entries (DEC-023)", () => {
+  it("confirmed + delivered ends on the outcome, with no internal names", async () => {
+    const d = deps();
+    const event = await startDemoEvent("person_marie", d);
+    const messages = await timeline(d, event.id);
+
+    expect(messages).toContain("Marc confirmed they could help.");
+    expect(messages).toContain("KinCall called Marie to share the outcome.");
+    expect(messages).toContain("The outcome was shared with Marie.");
+    expect(messages).toContain("Case closed");
+
+    // Exactly one terminal entry.
+    expect(messages.filter((m) => m === "Case closed")).toHaveLength(1);
+    // Callback entries come before the terminal one.
+    expect(messages.indexOf("KinCall called Marie to share the outcome.")).toBeLessThan(
+      messages.indexOf("Case closed")
+    );
+    for (const internal of [
+      "NOTIFYING_PERSON",
+      "PERSON_NOTIFICATION_STARTED",
+      "message_delivered",
+      "ATTENTION_UNRESOLVED",
+      "person_notification",
+    ]) {
+      expect(messages.join(" | ")).not.toContain(internal);
+    }
+  });
+
+  it("unresolved + delivered ends on a single 'No confirmed support' entry", async () => {
+    const d = deps({ scenario: "all_contacts_unavailable" });
+    const event = await startDemoEvent("person_marie", d);
+    const messages = await timeline(d, event.id);
+
+    expect(event.status).toBe("ATTENTION_UNRESOLVED");
+    expect(messages).toContain("No trusted contact confirmed they could help.");
+    expect(messages).toContain("KinCall called Marie to share the outcome.");
+    expect(messages).toContain("The outcome was shared with Marie.");
+    expect(messages).toContain("No confirmed support");
+
+    expect(messages.filter((m) => m === "No confirmed support")).toHaveLength(1);
+    expect(messages.join(" | ")).not.toContain("ATTENTION_UNRESOLVED");
+    expect(messages.at(-1)).toBe("No confirmed support");
+  });
+
+  it("records could-not-confirm rather than delivery when the callback is unanswered", async () => {
+    const repository = new InMemoryRepository();
+    seedRepository(repository);
+    const inner = new FakeCalleAdapter();
+    const d: EngineDeps = {
+      repository,
+      calleAdapter: {
+        capabilities: inner.capabilities,
+        startCompanionCall: inner.startCompanionCall.bind(inner),
+        startFamilyCall: inner.startFamilyCall.bind(inner),
+        startPersonNotificationCall: inner.startPersonNotificationCall.bind(inner),
+        async getCallResult(callId: string) {
+          const result = await inner.getCallResult(callId);
+          if (result.agentType !== "person_notification") return result;
+          return {
+            ...result,
+            structuredResult: {
+              person_reached: "no",
+              message_delivered: "no",
+              summary: "The call was not answered.",
+            },
+          };
+        },
+      },
+    };
+
+    const event = await startDemoEvent("person_marie", d);
+    const messages = await timeline(d, event.id);
+
+    // The trusted-circle outcome is untouched by a failed callback.
+    expect(event.status).toBe("CASE_CLOSED");
+    expect(messages).toContain("KinCall could not confirm that the outcome was delivered.");
+    expect(messages).not.toContain("The outcome was shared with Marie.");
+    expect(messages).toContain("Case closed");
+    // Still exactly one callback.
+    const calls = await repository.listCallEvents(event.id);
+    expect(calls.filter((c) => c.agentType === "person_notification")).toHaveLength(1);
   });
 });

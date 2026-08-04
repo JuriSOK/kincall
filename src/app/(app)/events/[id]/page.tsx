@@ -12,7 +12,7 @@ import {
   describeFamilyAttempt,
   describeFamilyCascade,
   describeOwnership,
-  describePersonNotification,
+  describeNotificationDelivery,
   describeWorkflowStep,
   findConfirmation,
 } from "@/backend/presentation/event-summary";
@@ -55,6 +55,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const notificationCall = callEvents.find(
     (call) => call.agentType === "person_notification"
   );
+  const notificationDelivery = notificationCall
+    ? describeNotificationDelivery(notificationCall, person?.firstName ?? "them")
+    : null;
 
   // The LAST companion call: after a bounded retry there are two, and the
   // decision came from the most recent one. readCompanionResult accepts the
@@ -120,7 +123,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             <dd className="text-muted">{actionDescription}</dd>
           </div>
           <div>
-            <dt className="font-medium">Who is taking care of it?</dt>
+            {/* DEC-023 revision: the question itself changes when nobody
+                confirmed. Asking "who is taking care of it?" and answering "no
+                one" reads as a system that lost track; naming the outcome is
+                honest and calmer. */}
+            <dt className="font-medium">
+              {intervention ? "Who is taking care of it?" : "No one confirmed they could help"}
+            </dt>
             {/* The intervention model's own sentence, not the raw CALL-E free
                 text — that is shown verbatim inside the card above, under
                 "What they said", where it is clearly attributed. */}
@@ -128,6 +137,17 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               {intervention ? intervention.detailed : describeOwnership(event)}
             </dd>
           </div>
+          {/* Delivery of the follow-up call, kept on its own line and never
+              merged into the outcome above: a callback that did not connect
+              changes nothing about who committed to help. */}
+          {notificationDelivery ? (
+            <div>
+              <dt className="font-medium">Did KinCall share the outcome?</dt>
+              <dd>
+                <Badge tone={notificationDelivery.tone}>{notificationDelivery.label}</Badge>
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </Card>
 
@@ -247,7 +267,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
           outcome above it. */}
       {notificationCall ? (
         <Card title={`Follow-up call to ${person?.firstName ?? "the person"}`}>
-          <p className="text-sm text-muted">{describePersonNotification(notificationCall)}</p>
+          <p className="text-sm text-muted">
+            {notificationDelivery?.state === "in_progress"
+              ? `KinCall is calling ${person?.firstName ?? "them"} back to share the outcome.`
+              : notificationDelivery?.state === "delivered"
+                ? `KinCall called back and passed on the outcome to ${person?.firstName ?? "them"}.`
+                : "KinCall called back, but could not confirm that the outcome was delivered. The outcome above is unaffected."}
+          </p>
         </Card>
       ) : null}
 

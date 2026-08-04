@@ -34,8 +34,8 @@ const EXPECTED_TIMELINE = [
   "Calling Marc",
   "Marc confirmed they could help.",
   "Visit confirmed — 17:30",
-  "KinCall called Marie to share Marc's commitment.",
-  "The follow-up message was delivered.",
+  "KinCall called Marie to share the outcome.",
+  "The outcome was shared with Marie.",
   "Case closed",
 ];
 

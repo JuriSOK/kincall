@@ -45,11 +45,12 @@ export function describePersonStatus(event: EventRecord | undefined): PersonStat
     case "CONTACT_CONFIRMED":
       return { label: "Contacting the trusted circle", tone: "attention" };
     // DEC-023. The trusted-circle outcome is settled and KinCall is calling the
-    // person back to tell them. Still "in progress" from a family member's
-    // point of view — the event has not reached its terminal status yet — so it
-    // deliberately does not borrow either terminal tone.
+    // person back to tell them. Deliberately the neutral in-progress tone, the
+    // same one every other mid-flight status uses: it is NOT green, because the
+    // callback has not finished, and NOT "attention", because nothing here is
+    // wrong — the outcome is already decided and this call only reports it.
     case "NOTIFYING_PERSON":
-      return { label: "Calling back with the outcome", tone: "attention" };
+      return { label: "Calling back with the outcome", tone: "unknown" };
     // DEC-011: no new event reaches this. Retained for the historical ones that
     // still carry it.
     case "HUMAN_REVIEW_REQUIRED":
