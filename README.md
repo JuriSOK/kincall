@@ -304,8 +304,8 @@ Where the important pieces live:
 
 - Node.js `^20.9.0 || >=22.0.0`
 - npm
-- A Supabase project
-- A CALL-E account — only needed to place real calls
+- Supabase — optional, only for data that survives a restart
+- A CALL-E account — optional, only to place real calls
 
 ### Installation
 
@@ -324,10 +324,27 @@ Open:
 http://localhost:3000
 ```
 
-### Database
+This already works. The defaults need **no Supabase project and no CALL-E key**:
 
-Set `KINCALL_PERSISTENCE=supabase`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in
-`.env.local`, then apply the schema:
+```env
+KINCALL_PERSISTENCE=memory
+CALLE_MODE=fake
+```
+
+Data lives in process memory and is lost on restart, and no phone call is ever placed.
+It is the fastest way to see the whole workflow end to end.
+
+### Persistent data with your own Supabase project
+
+Optional — use it when you want profiles and history to survive a restart.
+
+1. Create a new Supabase project.
+2. Open **Project Settings → API**.
+3. Copy the **Project URL** into `SUPABASE_URL`.
+4. Copy the **`service_role` key** into `SUPABASE_SERVICE_ROLE_KEY` (server-only — it
+   bypasses row-level security and must never reach the browser).
+5. Set `KINCALL_PERSISTENCE=supabase`.
+6. Link the CLI and apply migrations `0001` through `0014`:
 
 ```bash
 npx supabase link --project-ref <your-project-ref>
@@ -335,9 +352,23 @@ npx supabase migration list
 npx supabase db push
 ```
 
-The migrations seed one demo profile and its trusted circle. Their stored numbers are
-reserved-for-fiction numbers that KinCall refuses to dial, so the application is safe to
-explore before any real number exists anywhere.
+A freshly migrated database contains **no monitored profiles**: migration `0005` seeds an
+early demo profile and migration `0013` removes it again, so the chain ends clean and you
+start with your own data only.
+
+### Create your first profile
+
+Open `/people`, choose **Add person**, complete the profile and confirm consent. Then open
+that person's page to add trusted contacts, set their order, and mark one as primary.
+
+Everything KinCall needs is created through the interface — no SQL, no seed script.
+
+### Trying it out
+
+With `CALLE_MODE=fake`, each profile page offers a scenario selector. Scenarios run against
+**that profile and its own trusted circle** — no particular person or contact is required,
+and no phone call is placed. Outcomes are deterministic simulations, so the same scenario
+always produces the same cascade.
 
 ### Placing a real call safely
 

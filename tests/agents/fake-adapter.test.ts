@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { FakeCalleAdapter } from "@/backend/integrations/calle/fake-adapter";
+import {
+  FAKE_SCENARIOS,
+  FakeCalleAdapter,
+  type FakeScenarioId,
+} from "@/backend/integrations/calle/fake-adapter";
+import { isCompanionStructuredResult } from "@/backend/integrations/calle/schemas";
 import type { TrustedContact, VulnerablePerson } from "@/shared/domain/types";
 
 function person(overrides: Partial<VulnerablePerson> = {}): VulnerablePerson {
@@ -100,14 +105,80 @@ describe("FakeCalleAdapter", () => {
     });
   });
 
-  it("throws for a companion call to a person no scenario is written about", async () => {
+  // Reversed deliberately. This used to throw
+  // `no canned scenario for a companion call to "<id>"`, which meant a new user
+  // who created their own profile could not run a fake scenario at all — the
+  // scenarios were keyed to the seeded demo person. They are now keyed to the
+  // SCENARIO, and apply to whichever person the event belongs to.
+  it("serves a companion result for any person id, not just a seeded one", async () => {
     const adapter = new FakeCalleAdapter();
     const reference = await adapter.startCompanionCall({
       eventId: "event_001",
-      person: person({ id: "person_unknown" }),
+      person: person({ id: "person_someone_new" }),
       idempotencyKey: "key",
       attemptNumber: 1,
     });
-    await expect(adapter.getCallResult(reference.callId)).rejects.toThrow(/no canned scenario/);
+
+    const result = await adapter.getCallResult(reference.callId);
+    expect(result.agentType).toBe("companion");
+    expect(result.status).toBe("completed");
+    expect(isCompanionStructuredResult(result.structuredResult)).toBe(true);
+  });
+
+  it("names nobody in a companion result, so it fits any profile", async () => {
+    for (const scenario of Object.keys(FAKE_SCENARIOS) as FakeScenarioId[]) {
+      const adapter = new FakeCalleAdapter({ scenario });
+      const reference = await adapter.startCompanionCall({
+        eventId: "event_001",
+        person: person({ id: "person_alice" }),
+        idempotencyKey: "key",
+        attemptNumber: 1,
+      });
+      const result = await adapter.getCallResult(reference.callId);
+      const summary = (result.structuredResult as { neutral_summary: string }).neutral_summary;
+      for (const legacyName of ["Marie", "Julie", "Marc", "Nicole"]) {
+        expect(summary).not.toContain(legacyName);
+      }
+    }
+  });
+});
+
+// The scenario list is rendered on every profile page in fake mode, and a
+// scenario now runs against whichever person is selected. Naming the seeded
+// demo circle in that copy told a new user the scenario was about somebody
+// else's profile.
+describe("scenario labels and descriptions are identity-free", () => {
+  it("names no legacy demo person or contact", () => {
+    for (const [id, scenario] of Object.entries(FAKE_SCENARIOS)) {
+      for (const text of [scenario.label, scenario.description]) {
+        for (const legacyName of ["Marie", "Julie", "Marc", "Nicole"]) {
+          expect(text, `${id}: "${text}"`).not.toContain(legacyName);
+        }
+      }
+    }
+  });
+
+  it("describes the roles generically instead", () => {
+    const descriptions = Object.values(FAKE_SCENARIOS).map((s) => s.description);
+    for (const description of descriptions) {
+      expect(description.length).toBeGreaterThan(0);
+    }
+    // Every description speaks about "the monitored person"; the cascade ones
+    // speak about trusted contacts by position, never by name.
+    expect(descriptions.every((d) => d.includes("The monitored person"))).toBe(true);
+  });
+
+  // The ids are the stable key the demo selector, the start route and several
+  // tests all agree on — genericising the copy must never rename them.
+  it("keeps the stable scenario ids", () => {
+    expect(Object.keys(FAKE_SCENARIOS).sort()).toEqual(
+      [
+        "all_contacts_unavailable",
+        "explicit_help",
+        "marie_baseline",
+        "other_incident",
+        "person_unreachable",
+      ].sort()
+    );
   });
 });

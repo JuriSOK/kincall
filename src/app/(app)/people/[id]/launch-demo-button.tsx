@@ -92,6 +92,15 @@ export function LaunchDemoButton({
               {selected.description}
             </p>
           ) : null}
+          {/* Scenarios are keyed to the scenario, never to a seeded profile, so
+              they run against whichever person this page is for and that
+              person's own trusted circle. Saying so removes the main doubt a
+              new user has when they see a scenario list on a profile they
+              created themselves. */}
+          <p className="text-xs text-subtle">
+            Fake mode simulates calls and uses this profile&rsquo;s own trusted-circle
+            configuration. No phone call is placed.
+          </p>
         </div>
       ) : null}
 

@@ -19,13 +19,13 @@ import type {
 // nothing here is ever used in live mode, and CALLE_MODE=fake is what selects
 // this adapter at all.
 //
-// Results are functions of (subject, attempt) because DEC-011 introduced bounded
-// retries: "Julie did not answer" and "Julie did not answer again, and this time
-// a voicemail was left" are different results for the same contact.
+// Results are functions of (subject, attempt, priority) because DEC-011
+// introduced bounded retries: "did not answer" and "did not answer again, and
+// this time a voicemail was left" are different results for the same contact.
 
 const FALL_AND_MOBILITY: CompanionStructuredResult = {
   neutral_summary:
-    "Marie said she fell yesterday and is finding it difficult to walk today.",
+    "they fell yesterday and are finding it difficult to walk today",
   person_reached: "yes",
   explicit_help_requested: "no",
   fall_mentioned: "yes",
@@ -42,7 +42,7 @@ const FALL_AND_MOBILITY: CompanionStructuredResult = {
 };
 
 const EXPLICIT_HELP: CompanionStructuredResult = {
-  neutral_summary: "Marie asked KinCall to let someone in her family know she needs help.",
+  neutral_summary: "they would like someone in their family to be told they need help",
   person_reached: "yes",
   explicit_help_requested: "yes",
   fall_mentioned: "no",
@@ -62,7 +62,7 @@ const EXPLICIT_HELP: CompanionStructuredResult = {
 
 const OTHER_INCIDENT: CompanionStructuredResult = {
   neutral_summary:
-    "Marie said her shoulder is hurting since she knocked it, and that she has been feeling low about it.",
+    "their shoulder has been hurting since they knocked it, and they have been feeling low about it",
   person_reached: "yes",
   explicit_help_requested: "no",
   fall_mentioned: "no",
@@ -81,7 +81,7 @@ const OTHER_INCIDENT: CompanionStructuredResult = {
 // A voicemail: the call completed, but no conversation happened, so every signal
 // is genuinely unknown rather than "no" (DEC-003's whole point).
 const NOT_REACHED: CompanionStructuredResult = {
-  neutral_summary: "The call reached voicemail rather than a conversation with Marie.",
+  neutral_summary: "the call reached voicemail rather than a conversation",
   person_reached: "no",
   explicit_help_requested: "unknown",
   fall_mentioned: "unknown",
@@ -113,11 +113,7 @@ function noAnswer(contactId: string, voicemailLeft: "yes" | "no"): FamilyStructu
   };
 }
 
-function confirms(
-  contactId: string,
-  firstName: string,
-  time: string
-): FamilyStructuredResult {
+function confirms(contactId: string, time: string): FamilyStructuredResult {
   return {
     contact_id: contactId,
     answered: "yes",
@@ -126,12 +122,12 @@ function confirms(
     intervention_type: "visit",
     estimated_time: time,
     contact_next_person: "no",
-    summary: `${firstName} confirmed a visit to Marie at ${time}.`,
+    summary: `Confirmed a visit at ${time}.`,
     voicemail_left: "no",
   };
 }
 
-function declines(contactId: string, firstName: string): FamilyStructuredResult {
+function declines(contactId: string): FamilyStructuredResult {
   return {
     contact_id: contactId,
     answered: "yes",
@@ -140,7 +136,7 @@ function declines(contactId: string, firstName: string): FamilyStructuredResult 
     intervention_type: "other",
     estimated_time: "",
     contact_next_person: "yes",
-    summary: `${firstName} cannot check in today.`,
+    summary: "Cannot check in today.",
     voicemail_left: "no",
   };
 }
@@ -169,7 +165,12 @@ export interface FakeScenario {
   // path is demonstrable without editing code.
   voicemail: boolean;
   companion(attemptNumber: number): CompanionStructuredResult;
-  family(contactId: string, attemptNumber: number): FamilyStructuredResult;
+  // Keyed by the contact's stored PRIORITY, never by their id: a scenario has
+  // to mean the same thing for a circle somebody just created (Bob 1, Chloé 2)
+  // as it did for the seeded demo circle. Priority is the cascade's own
+  // ordering key, so "the first contact declines, the second confirms" stays
+  // deterministic for any set of identities.
+  family(contactId: string, attemptNumber: number, priority: number): FamilyStructuredResult;
   // DEC-023. The single informational callback to the monitored person. Every
   // scenario delivers it by default (`NOTIFICATION_DELIVERED`), because the
   // interesting demo outcome is the cascade, not this call. The unanswered and
@@ -190,17 +191,18 @@ export type FakeScenarioId =
   | "all_contacts_unavailable";
 
 export const FAKE_SCENARIOS: Record<FakeScenarioId, FakeScenario> = {
-  // 1. The frozen §12 demo, updated for the bounded per-contact retry: Julie is
-  //    now called twice before Marc, and the second call leaves a voicemail.
+  // 1. The frozen §12 demo, updated for the bounded per-contact retry: the
+  //    priority-1 contact is now called twice before the priority-2 contact,
+  //    and the second call leaves a voicemail.
   marie_baseline: {
-    label: "Marie baseline — fall and mobility difficulty",
+    label: "Baseline — fall and mobility difficulty",
     description:
-      "Marie mentions a fall and difficulty walking. Julie does not answer twice (voicemail left on the second call), then Marc confirms a visit and the case closes.",
+      "The monitored person mentions a fall and difficulty walking. The first trusted contact does not answer twice (voicemail left on the second call), then the second contact confirms a visit and the case closes.",
     voicemail: true,
     companion: () => FALL_AND_MOBILITY,
-    family: (contactId, attempt) => {
-      if (contactId === "contact_julie") return noAnswer(contactId, attempt >= 2 ? "yes" : "no");
-      if (contactId === "contact_marc") return confirms(contactId, "Marc", "17:30");
+    family: (contactId, attempt, priority) => {
+      if (priority === 1) return noAnswer(contactId, attempt >= 2 ? "yes" : "no");
+      if (priority === 2) return confirms(contactId, "17:30");
       return noAnswer(contactId, "no");
     },
   },
@@ -209,39 +211,33 @@ export const FAKE_SCENARIOS: Record<FakeScenarioId, FakeScenario> = {
   explicit_help: {
     label: "Explicit help request — no fall",
     description:
-      "Marie explicitly asks KinCall to contact someone, with no fall and no mobility difficulty. The cascade starts anyway and Julie confirms.",
+      "The monitored person explicitly asks KinCall to contact someone, with no fall and no mobility difficulty. The cascade starts anyway and the first trusted contact confirms.",
     voicemail: true,
     companion: () => EXPLICIT_HELP,
-    family: (contactId) =>
-      contactId === "contact_julie"
-        ? confirms(contactId, "Julie", "this afternoon")
-        : noAnswer(contactId, "no"),
+    family: (contactId, _attempt, priority) =>
+      priority === 1 ? confirms(contactId, "this afternoon") : noAnswer(contactId, "no"),
   },
 
   // 3. Something that is not a fall and not an explicit request.
   other_incident: {
     label: "Other incident — pain and distress",
     description:
-      "Marie describes pain and feeling low, with no fall. The cascade starts because attention is needed, and Julie confirms.",
+      "The monitored person describes pain and feeling low, with no fall. The cascade starts because attention is needed, and the first trusted contact confirms.",
     voicemail: true,
     companion: () => OTHER_INCIDENT,
-    family: (contactId) =>
-      contactId === "contact_julie"
-        ? confirms(contactId, "Julie", "this evening")
-        : noAnswer(contactId, "no"),
+    family: (contactId, _attempt, priority) =>
+      priority === 1 ? confirms(contactId, "this evening") : noAnswer(contactId, "no"),
   },
 
   // 4. The person cannot be reached at all: one retry, then the circle.
   person_unreachable: {
     label: "Person unreachable — two attempts",
     description:
-      "Marie does not answer either check-in attempt. KinCall stops calling her and contacts the trusted circle instead.",
+      "The monitored person does not answer either check-in attempt. KinCall stops calling them and contacts the trusted circle instead.",
     voicemail: true,
     companion: () => NOT_REACHED,
-    family: (contactId) =>
-      contactId === "contact_julie"
-        ? confirms(contactId, "Julie", "within the hour")
-        : noAnswer(contactId, "no"),
+    family: (contactId, _attempt, priority) =>
+      priority === 1 ? confirms(contactId, "within the hour") : noAnswer(contactId, "no"),
   },
 
   // 5. The autonomous dead end: everybody is tried twice and nobody helps.
@@ -249,21 +245,15 @@ export const FAKE_SCENARIOS: Record<FakeScenarioId, FakeScenario> = {
   all_contacts_unavailable: {
     label: "All contacts unavailable — unresolved",
     description:
-      "Marie mentions a fall. Every trusted contact is called twice and either declines or does not answer; voicemail is unsupported in this scenario. The event ends as unresolved.",
+      "The monitored person mentions a fall. Every trusted contact is called twice and either declines or does not answer; voicemail is unsupported in this scenario. The event ends as unresolved.",
     voicemail: false,
     companion: () => FALL_AND_MOBILITY,
-    family: (contactId) =>
-      contactId === "contact_marc"
-        ? declines(contactId, "Marc")
-        : noAnswer(contactId, "no"),
+    family: (contactId, _attempt, priority) =>
+      priority === 2 ? declines(contactId) : noAnswer(contactId, "no"),
   },
 };
 
 export const DEFAULT_FAKE_SCENARIO: FakeScenarioId = "marie_baseline";
-
-// The seeded demo person every scenario is written about (§12's Marie). A
-// companion call to anyone else has no canned script and is refused.
-const DEMO_PERSON_ID = "person_marie";
 
 export function isFakeScenarioId(value: unknown): value is FakeScenarioId {
   return typeof value === "string" && value in FAKE_SCENARIOS;
@@ -277,16 +267,21 @@ export function isFakeScenarioId(value: unknown): value is FakeScenarioId {
 // form (`fake_companion_person_marie_<uuid>`) parseable, which several tests and
 // any already-persisted fake call id still use — those default to attempt 1 and
 // the default scenario.
+// The optional `#<priority>` group carries the contact's cascade position for a
+// family call, so getCallResult stays stateless while scenarios key off order
+// rather than identity. Absent for companion and notification calls, and for
+// any pre-existing id, which decode to priority 0 (matching no scenario branch).
 const CALL_ID_PATTERN =
-  /^fake_(companion|family|person_notification)_(?:([a-z_]+)#(\d+)_)?(.+)_([0-9a-f-]{36})$/;
+  /^fake_(companion|family|person_notification)_(?:([a-z_]+)#(\d+)(?:#(\d+))?_)?(.+)_([0-9a-f-]{36})$/;
 
 function encodeCallId(
   agentType: AgentType,
   subjectId: string,
   scenario: FakeScenarioId,
-  attemptNumber: number
+  attemptNumber: number,
+  priority = 0
 ): string {
-  return `fake_${agentType}_${scenario}#${attemptNumber}_${subjectId}_${randomUUID()}`;
+  return `fake_${agentType}_${scenario}#${attemptNumber}#${priority}_${subjectId}_${randomUUID()}`;
 }
 
 interface DecodedCallId {
@@ -294,6 +289,7 @@ interface DecodedCallId {
   subjectId: string;
   scenario: FakeScenarioId;
   attemptNumber: number;
+  priority: number;
 }
 
 function decodeCallId(callId: string): DecodedCallId {
@@ -301,12 +297,13 @@ function decodeCallId(callId: string): DecodedCallId {
   if (!match) {
     throw new Error(`FakeCalleAdapter: cannot parse callId "${callId}".`);
   }
-  const [, agentType, scenario, attempt, subjectId] = match;
+  const [, agentType, scenario, attempt, priority, subjectId] = match;
   return {
     agentType: agentType as AgentType,
     subjectId,
     scenario: isFakeScenarioId(scenario) ? scenario : DEFAULT_FAKE_SCENARIO,
     attemptNumber: attempt ? Number(attempt) : 1,
+    priority: priority ? Number(priority) : 0,
   };
 }
 
@@ -340,7 +337,13 @@ export class FakeCalleAdapter implements CalleAdapter {
 
   async startFamilyCall(input: FamilyCallInput): Promise<CallReference> {
     return {
-      callId: encodeCallId("family", input.contact.id, this.scenario, input.attemptNumber),
+      callId: encodeCallId(
+        "family",
+        input.contact.id,
+        this.scenario,
+        input.attemptNumber,
+        input.contact.priority
+      ),
       idempotencyKey: input.idempotencyKey,
     };
   }
@@ -357,7 +360,7 @@ export class FakeCalleAdapter implements CalleAdapter {
   }
 
   async getCallResult(callId: string): Promise<CallResult> {
-    const { agentType, subjectId, scenario, attemptNumber } = decodeCallId(callId);
+    const { agentType, subjectId, scenario, attemptNumber, priority } = decodeCallId(callId);
     const definition = FAKE_SCENARIOS[scenario];
 
     // DEC-023. Handled before the companion guard below: a notification is
@@ -385,21 +388,10 @@ export class FakeCalleAdapter implements CalleAdapter {
       };
     }
 
-    // Every scenario is authored about the seeded demo person, so a companion
-    // call to anyone else must fail loudly rather than reporting Marie's fall
-    // for a profile somebody just created. (A trusted contact the scenario does
-    // not name is different: `family` is total, and an unnamed contact simply
-    // does not answer.)
-    if (agentType === "companion" && subjectId !== DEMO_PERSON_ID) {
-      throw new Error(
-        `FakeCalleAdapter: no canned scenario for a companion call to "${subjectId}".`
-      );
-    }
-
     const structuredResult =
       agentType === "companion"
         ? definition.companion(attemptNumber)
-        : definition.family(subjectId, attemptNumber);
+        : definition.family(subjectId, attemptNumber, priority);
 
     return {
       callId,
